@@ -151,16 +151,23 @@ The FPCUnit runner does both.
   runs inside a container with FPC 3.2.2; `FPC_IMAGE` selects the image).
 - **Integration (contract) tests** — `tests/Integration/PascalDb.ContractTests.pas` only uses
   `IDBFactory`/`IQuery`/`IParams`/`IQueryResult`, so the same bodies validate every adapter;
-  `tests/Integration/PascalDb.IntegrationEnv.pas` is the only compiler-specific part (which
+  `tests/Integration/PascalDb.IntegrationEnv.pas` is the only adapter-specific part (which
   factory, how to create/drop the database) and documents its `PASCALDB_IT_*` environment
-  variables. Each run creates a fresh Firebird database, migrates it with
-  `TDBMigrationEngine` (SQL from a `TMemorySqlSource`) and drops it at the end. FPC on
-  Windows (local Firebird): build `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi`
-  (SQLdb) or `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos) and run
-  it with `--all --format=plain`. The Zeos runners (FPC and Delphi) define
-  `PASCALDB_IT_ZEOS` and reuse the same fixtures; they support only a local server (the
-  database file is deleted to drop it). Linux: `sh tools/test_integration_docker.sh` (Firebird 5
-  server container + FPC container on a private network). **On Delphi:** open
+  variables. `PASCALDB_IT_ENGINE` picks the database: `firebird` (default) or `postgresql`.
+  Each run creates a fresh database, migrates it with `TDBMigrationEngine` (SQL from a
+  `TMemorySqlSource`) and drops it at the end. FPC on Windows: build
+  `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi` (SQLdb) or
+  `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos) and run it with
+  `--all --format=plain`. The Zeos runners (FPC and Delphi) define `PASCALDB_IT_ZEOS` and
+  reuse the same fixtures; with Firebird they support only a local server (the database file
+  is deleted to drop it). Linux: `sh tools/test_integration_docker.sh` (`ENGINE=firebird` or
+  `postgresql`; server container + FPC container on a private network).
+- **PostgreSQL server for Windows runs:** `docker run -d --name pascaldb-it-pg -p 55432:5432
+  -e POSTGRES_PASSWORD=postgres postgres:17`, then run with `PASCALDB_IT_ENGINE=postgresql`
+  and `PASCALDB_IT_PORT=55432` (user/password default to postgres/postgres). The client is
+  the 64-bit `libpq.dll` of a local PostgreSQL install (found under
+  `C:\Program Files\PostgreSQL`, or `PASCALDB_IT_CLIENT`); PostgreSQL ships no 32-bit Windows
+  client, so the Delphi runners must be built for **Win64** to test PostgreSQL. **On Delphi:** open
   `PascalDb.groupproj` in the IDE and run
   `tests/Unit/PascalDb.UnitTests.dproj`, `tests/Integration/PascalDb.IntegrationTests.dproj`
   (FireDAC) and `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` (Zeos; needs
@@ -193,12 +200,17 @@ adapter only wraps its driver's connection, transaction and query (~250 lines):
 
 | Adapter | Compiler | Package / unit | Status |
 |---|---|---|---|
-| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows) and Firebird 5 (Linux) |
-| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
-| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
+| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux) |
+| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32) and PostgreSQL 17 (Win64) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
+| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32), PostgreSQL 17 with FPC and Delphi (Win64) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
 
 A third-party adapter implements `IDBComponentProvider` (usually on top of the two units
 above), and `TDBFactory` does the rest: the core never has to change for a new driver.
+
+**Client library by full path (Windows):** an adapter given the full path of a client library
+calls `PdbPreloadClientLibrary` (in `PascalDb.Adapter.Base`) before the driver loads it: the
+library is loaded with `LOAD_WITH_ALTERED_SEARCH_PATH`, so its own dependencies are found in
+its folder (see gotcha 14). SQLdb and FireDAC use it; Zeos already loads that way by itself.
 
 **FireDAC specifics:** `ConnectionParams` is a FireDAC connection definition (`DriverID=FB`,
 `Database`, `User_Name`, `Password`, `CharacterSet`, ...). `VendorLib` is taken out of it and
@@ -317,3 +329,21 @@ public)" mentions there with links.
     which is why Portuguese text never showed it. Fix: `AsWideString` / `ftWideString` for
     strings on Delphi (FPC is unaffected: its `string` is UTF-8). The origin adapter used
     `AsString`.
+14. **On Windows, a client library loaded by full path doesn't find its own dependencies.**
+    Observed with SQLdb (FPC Win64) and the `libpq.dll` of a PostgreSQL 18 install: with the
+    install's `bin` folder on `PATH` the suite passed; without it, every test failed with "Can
+    not load PostgreSQL client library "C:\Program Files\PostgreSQL\18\bin\libpq.dll"" —
+    `libpq.dll` needs `libssl`, `libcrypto`, `libintl`, ... from that same folder, and the
+    default DLL search doesn't look in the folder of the DLL being loaded. Zeos passed without
+    `PATH` (its loader uses `LoadLibraryEx(..., LOAD_WITH_ALTERED_SEARCH_PATH)` when given a
+    path). Fix: `PdbPreloadClientLibrary`, which loads the library the same way first; with it
+    SQLdb passed without `PATH`, and so did FireDAC (Delphi Win64) — whether FireDAC alone
+    would fail was not measured. A developer machine with the database installed usually has
+    that folder on `PATH`, which hides the problem until deployment.
+15. **When the client library fails to load, cleanup code fails the same way.** The first
+    run with a missing library ended in runtime error 217 and 67 leaked blocks instead of 14
+    clean test errors: the integration environment's finalization tried to drop the database,
+    which loads the library again and raised — an exception in a finalization section aborts
+    the remaining ones. Separately, `PdbSQLdbUseClientLibrary` leaked its
+    `TSQLDBLibraryLoader` when `Enabled := True` raised. Fix: never raise from finalization;
+    free the loader on failure. Checked with a nonexistent library path: 14 errors, 0 leaks.

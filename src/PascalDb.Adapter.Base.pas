@@ -23,6 +23,9 @@
     config, and delegates connections/transactions/queries to the adapter's
     IDBComponentProvider. TestConnection runs the dialect's ping SQL, so it
     works on any driver.
+  - PdbPreloadClientLibrary — makes a client library given by full path
+    loadable on Windows even when its own dependencies aren't on the search
+    path.
 
   Nothing here references a database driver or Data.DB/db; the TDataSet-based
   pieces live in PascalDb.Adapter.DataSet. }
@@ -259,7 +262,38 @@ type
     property Config: IDatabaseConfig read FConfig;
   end;
 
+/// Windows: loads the client library ALibrary (a full path) with its own
+/// folder searched for its dependencies, and keeps it loaded. A driver that
+/// then loads the same path gets this module. Without it, a library such as
+/// libpq.dll — which needs libssl, libcrypto, libintl, ... from its own
+/// folder — fails to load unless that folder is on PATH (observed: "Can not
+/// load PostgreSQL client library" with the full path of an installed
+/// libpq.dll). Adapters call this for the client library path they are
+/// given; no-op for '' or a bare file name, when the library is already
+/// loaded, and outside Windows. A failure is left for the driver to report.
+procedure PdbPreloadClientLibrary(const ALibrary: string);
+
 implementation
+
+{$IFDEF MSWINDOWS}
+uses
+  Windows;
+{$ENDIF}
+
+procedure PdbPreloadClientLibrary(const ALibrary: string);
+{$IFDEF MSWINDOWS}
+var
+  LPath: UnicodeString;
+{$ENDIF}
+begin
+  {$IFDEF MSWINDOWS}
+  if ExtractFilePath(ALibrary) = '' then
+    Exit;
+  LPath := UnicodeString(ALibrary);
+  if GetModuleHandleW(PWideChar(LPath)) = 0 then
+    LoadLibraryExW(PWideChar(LPath), 0, LOAD_WITH_ALTERED_SEARCH_PATH);
+  {$ENDIF}
+end;
 
 { TDatabaseConfig }
 

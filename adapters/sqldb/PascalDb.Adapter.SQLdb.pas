@@ -143,6 +143,7 @@ var
 begin
   if ALibrary = '' then
     Exit;
+  PdbPreloadClientLibrary(ALibrary);
   for I := 0 to GLibraryLoaders.Count - 1 do
   begin
     LLoader := TSQLDBLibraryLoader(GLibraryLoaders[I]);
@@ -150,9 +151,14 @@ begin
       Exit;
   end;
   LLoader := TSQLDBLibraryLoader.Create(nil);
-  LLoader.ConnectionType := AConnectorType;
-  LLoader.LibraryName := ALibrary;
-  LLoader.Enabled := True;
+  try
+    LLoader.ConnectionType := AConnectorType;
+    LLoader.LibraryName := ALibrary;
+    LLoader.Enabled := True;
+  except
+    LLoader.Free;
+    raise;
+  end;
   GLibraryLoaders.Add(LLoader);
 end;
 

@@ -1,6 +1,7 @@
 ﻿unit PascalDb.ContractTests;
 
-{ Contract tests for an adapter, against a real Firebird database: only
+{ Contract tests for an adapter, against a real Firebird or PostgreSQL
+  database (PascalDb.IntegrationEnv, PASCALDB_IT_ENGINE): only
   IDBFactory, IQuery, IParams, IQueryResult and the scope transactions are
   used, so the same bodies validate every adapter (the factory comes from
   PascalDb.IntegrationEnv). Covered: connection ping, migrations (through the

@@ -26,8 +26,9 @@ Any other driver plugs in by implementing `IDBComponentProvider`.
 Extracted from the database core of `delphi-api-infra-faa` (commit `aa49f2b`). The core
 is tested on Delphi 12 CE (Windows) and FPC 3.2.2 (Windows and Linux), 0 leaks on all
 of them (FastMM / heaptrc). The same integration contract suite passes on the SQLdb adapter
-(Firebird 2.5 on Windows, Firebird 5 on Linux), on the FireDAC adapter (Firebird 2.5,
-Delphi Win32) and on the Zeos adapter (Firebird 2.5, FPC Win64 and Delphi Win32).
+(Firebird 2.5 on Windows, Firebird 5 on Linux, PostgreSQL 17 on Windows and Linux), on the
+FireDAC adapter (Firebird 2.5, Delphi Win32; PostgreSQL 17, Delphi Win64) and on the Zeos
+adapter (Firebird 2.5, FPC Win64 and Delphi Win32; PostgreSQL 17, FPC and Delphi Win64).
 
 FPC programs must run with a UTF-8 default code page and, on Unix, include `cwstring`
 — see "Runtime requirements for FPC applications" in `CLAUDE.md`.
@@ -55,8 +56,10 @@ PascalDb.lpg            Lazarus project group
 
 - FPC (Windows): `sh tools/test_fpc.sh`
 - FPC (Linux, via Docker): `sh tools/test_fpc_docker.sh`
-- Integration, Linux + Firebird 5 (Docker): `sh tools/test_integration_docker.sh`
-- Integration, Windows + local Firebird: `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi`
+- Integration, Linux (Docker): `sh tools/test_integration_docker.sh` (Firebird 5) or
+  `ENGINE=postgresql sh tools/test_integration_docker.sh` (PostgreSQL 17)
+- Integration, Windows (local Firebird, or PostgreSQL with `PASCALDB_IT_ENGINE=postgresql` — see
+  `CLAUDE.md`): `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi`
   (SQLdb), `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos),
   `tests/Integration/PascalDb.IntegrationTests.dproj` (FireDAC) and
   `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` (Zeos; set `ZEOSDBO` to the

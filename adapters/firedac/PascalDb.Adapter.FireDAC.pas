@@ -186,6 +186,7 @@ begin
     LLink := TFDPhysPgDriverLink.Create(nil)
   else
     raise EDatabaseError.CreateFmt('PascalDb.Adapter.FireDAC: VendorLib is only supported for FB and PG, not %s', [ADriverID]);
+  PdbPreloadClientLibrary(AVendorLib);
   LLink.VendorLib := AVendorLib;
   GDriverLinks.Add(LLink);
 end;
