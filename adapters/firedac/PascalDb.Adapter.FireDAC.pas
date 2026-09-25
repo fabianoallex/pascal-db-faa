@@ -26,7 +26,7 @@
 interface
 
 {$IFDEF FPC}
-  {$MESSAGE ERROR 'PascalDb.Adapter.FireDAC is for Delphi only; use PascalDb.Adapter.SQLdb or the Zeos adapter on Free Pascal'}
+  {$MESSAGE ERROR 'PascalDb.Adapter.FireDAC is for Delphi only; use PascalDb.Adapter.SQLdb or PascalDb.Adapter.Zeos on Free Pascal'}
 {$ENDIF}
 
 uses

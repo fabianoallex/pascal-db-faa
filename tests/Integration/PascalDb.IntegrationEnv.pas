@@ -4,7 +4,8 @@
   migrated with the library's own migration engine, and the IDBFactory the
   contract tests run against. This is the only compiler-specific part of the
   integration suite: on FPC the factory is the SQLdb adapter's; on Delphi it
-  is the FireDAC adapter's. The tests themselves
+  is the FireDAC adapter's; with PASCALDB_IT_ZEOS defined (the *Zeos*
+  runners), it is the Zeos adapter's on both. The tests themselves
   (PascalDb.ContractTests) only see IDBFactory, so the same test bodies
   validate every adapter.
 
@@ -20,7 +21,9 @@
                           exists, else the driver's default search.
 
   The database is dropped (if it exists) and created on first use, and
-  dropped again at the end of the run. }
+  dropped again at the end of the run. Zeos has no drop-database call, so
+  the Zeos branch deletes the database file instead: it supports only a
+  local server (PASCALDB_IT_HOST empty). }
 
 interface
 
@@ -42,13 +45,16 @@ uses
   PascalDb.SqlSources,
   PascalDb.Migrations,
   PascalDb.Adapter.Base
-  {$IFDEF FPC}
+  {$IF DEFINED(PASCALDB_IT_ZEOS)}
+  , ZConnection
+  , PascalDb.Adapter.Zeos
+  {$ELSEIF DEFINED(FPC)}
   , ibconnection
   , PascalDb.Adapter.SQLdb
   {$ELSE}
   , FireDAC.Comp.Client
   , PascalDb.Adapter.FireDAC
-  {$ENDIF};
+  {$IFEND};
 
 const
   SQL_DIRECTORY = 'IT';
@@ -124,7 +130,17 @@ var
 begin
   Result := TDatabaseConfig.Create;
   LDatabase := DatabasePath;
-  {$IFDEF FPC}
+  {$IF DEFINED(PASCALDB_IT_ZEOS)}
+  // Zeos connection settings (see PascalDb.Adapter.Zeos)
+  if Env('PASCALDB_IT_HOST', '') <> '' then
+    raise Exception.Create('The Zeos integration runners support only a local Firebird server (PASCALDB_IT_HOST empty)');
+  Result.ConnectionParams.Values['Protocol'] := 'firebird';
+  Result.ConnectionParams.Values['Database'] := LDatabase;
+  Result.ConnectionParams.Values['User'] := Env('PASCALDB_IT_USER', 'SYSDBA');
+  Result.ConnectionParams.Values['Password'] := Env('PASCALDB_IT_PASSWORD', 'masterkey');
+  Result.ConnectionParams.Values['ClientCodepage'] := 'UTF8';
+  Result.ConnectionParams.Values['LibraryLocation'] := ClientLibrary;
+  {$ELSEIF DEFINED(FPC)}
   // SQLdb connection settings (see PascalDb.Adapter.SQLdb)
   Result.ConnectionParams.Values['ConnectorType'] := 'Firebird';
   Result.ConnectionParams.Values['HostName'] := Env('PASCALDB_IT_HOST', '');
@@ -146,7 +162,7 @@ begin
   Result.ConnectionParams.Values['Password'] := Env('PASCALDB_IT_PASSWORD', 'masterkey');
   Result.ConnectionParams.Values['CharacterSet'] := 'UTF8';
   Result.ConnectionParams.Values['VendorLib'] := ClientLibrary;
-  {$ENDIF}
+  {$IFEND}
   Result.SQLDialect := 'Firebird';
   Result.SQLDirectory := SQL_DIRECTORY;
   Result.SqlSource := BuildSqlSource;
@@ -159,7 +175,37 @@ begin
   Result.PoolWaitMilliseconds := 10;
 end;
 
-{$IFDEF FPC}
+{$IF DEFINED(PASCALDB_IT_ZEOS)}
+procedure DropDatabase(const AConfig: IDatabaseConfig);
+begin
+  // Zeos can create a database (CreateNewDatabase) but not drop one; the
+  // database is local (see BuildConfig), so delete the file.
+  if FileExists(DatabasePath) then
+    DeleteFile(DatabasePath);
+end;
+
+procedure CreateDatabase(const AConfig: IDatabaseConfig);
+var
+  LConn: TZConnection;
+begin
+  DropDatabase(AConfig);
+  if FileExists(DatabasePath) then
+    raise Exception.CreateFmt('Could not delete the test database left by a previous run: %s (still in use?)', [DatabasePath]);
+  LConn := PdbZeosNewConnection(AConfig.ConnectionParams);
+  try
+    LConn.Properties.Values['CreateNewDatabase'] := 'true';
+    LConn.Connect;
+    LConn.Disconnect;
+  finally
+    LConn.Free;
+  end;
+end;
+
+function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
+begin
+  Result := TZeosFactory.Create(AConfig);
+end;
+{$ELSEIF DEFINED(FPC)}
 function NewIBConnection(const AConfig: IDatabaseConfig): TIBConnection;
 begin
   // Before any direct SQLdb connection: the first client library loaded wins.
@@ -261,7 +307,7 @@ function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
 begin
   Result := TFDFactory.Create(AConfig);
 end;
-{$ENDIF}
+{$IFEND}
 
 var
   GConfig: IDatabaseConfig = nil;

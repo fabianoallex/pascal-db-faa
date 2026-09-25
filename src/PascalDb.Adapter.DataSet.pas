@@ -7,9 +7,11 @@
   (TSQLQuery) all do. Uses only Data.DB (Delphi) / db (FPC), which have the
   same TDataSet/TField/TParams API for what is used here.
 
-  - TDBParams — TParamsBase (PascalDb.Adapter.Base) over a TParams
-    collection, the parameter type used by Zeos and SQLdb. A NULL parameter
-    gets the DataType of the value it stands for.
+  - TDBParams — TParamsBase (PascalDb.Adapter.Base) over a Data.DB/db
+    TParams collection, the parameter type of SQLdb (and of any driver built
+    on TParams). A NULL parameter gets the DataType of the value it stands
+    for. Zeos 8 has its own TZParams: its adapter implements TParamsBase
+    directly.
   - TDataSetQueryBase — IQuery + IQueryResult over the driver's query
     dataset. A driver subclass only says which dataset it is, where its SQL
     text lives, how to execute a statement and which IParams to use.

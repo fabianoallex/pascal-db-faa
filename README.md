@@ -17,7 +17,8 @@ A database access layer for **Delphi and Lazarus/FPC from the same source code**
 
 Drivers live in thin adapters on top of a shared, driver-agnostic base (configuration,
 transactions and savepoints, scripts, parameter semantics, TDataSet-based queries). Available:
-**SQLdb** (Lazarus/FPC; Firebird and PostgreSQL) and **FireDAC** (Delphi). Next: Zeos (dual).
+**SQLdb** (Lazarus/FPC), **FireDAC** (Delphi) and **Zeos** (ZeosLib 8, both compilers), each
+for Firebird and PostgreSQL.
 Any other driver plugs in by implementing `IDBComponentProvider`.
 
 ## Status
@@ -25,8 +26,8 @@ Any other driver plugs in by implementing `IDBComponentProvider`.
 Extracted from the database core of `delphi-api-infra-faa` (commit `aa49f2b`). The core
 is tested on Delphi 12 CE (Windows) and FPC 3.2.2 (Windows and Linux), 0 leaks on all
 of them (FastMM / heaptrc). The same integration contract suite passes on the SQLdb adapter
-(Firebird 2.5 on Windows, Firebird 5 on Linux) and on the FireDAC adapter (Firebird 2.5,
-Delphi Win32).
+(Firebird 2.5 on Windows, Firebird 5 on Linux), on the FireDAC adapter (Firebird 2.5,
+Delphi Win32) and on the Zeos adapter (Firebird 2.5, FPC Win64 and Delphi Win32).
 
 FPC programs must run with a UTF-8 default code page and, on Unix, include `cwstring`
 — see "Runtime requirements for FPC applications" in `CLAUDE.md`.
@@ -41,8 +42,10 @@ tests/Unit/fpc/         GENERATED FPCUnit mirror + PascalDbUnitTestsFpc.lpi
 tests/Unit/sql/         SQL fixtures + the generated PascalDbTestSql.res
 tests/Integration/       contract tests (DUnitX masters) + IntegrationEnv
 tests/Integration/fpc/   GENERATED FPCUnit mirror + PascalDbIntegrationTestsFpc.lpi
+tests/Integration/fpc-zeos/  FPCUnit runner on Zeos (same mirror)
 adapters/sqldb/         SQLdb adapter (package pascal_db_faa_sqldb.lpk)
 adapters/firedac/       FireDAC adapter (Delphi)
+adapters/zeos/          Zeos adapter (both; package pascal_db_faa_zeos.lpk)
 tools/                  gen_fpc_mirror.py, build_sql_res.py, test_*.sh
 PascalDb.groupproj      Delphi project group
 PascalDb.lpg            Lazarus project group
@@ -54,7 +57,10 @@ PascalDb.lpg            Lazarus project group
 - FPC (Linux, via Docker): `sh tools/test_fpc_docker.sh`
 - Integration, Linux + Firebird 5 (Docker): `sh tools/test_integration_docker.sh`
 - Integration, Windows + local Firebird: `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi`
-  (SQLdb) and `tests/Integration/PascalDb.IntegrationTests.dproj` (FireDAC)
+  (SQLdb), `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos),
+  `tests/Integration/PascalDb.IntegrationTests.dproj` (FireDAC) and
+  `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` (Zeos; set `ZEOSDBO` to the
+  ZeosLib folder)
 - Delphi: open `PascalDb.groupproj` and run `PascalDb.UnitTests` (Community Edition can't
   compile from the command line).
 

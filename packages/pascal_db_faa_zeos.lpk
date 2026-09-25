@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <PathDelim Value="\"/>
+    <Name Value="pascal_db_faa_zeos"/>
+    <Author Value="Fabiano Arndt"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <PathDelim Value="\"/>
+      <SearchPaths>
+        <IncludeFiles Value="..\src"/>
+        <OtherUnitFiles Value="..\adapters\zeos"/>
+        <UnitOutputDirectory Value="lib\zeos\$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Description Value="ZeosLib 8 adapter for pascal-db-faa (Delphi and Free Pascal/Lazarus): IDBFactory over TZConnection (Firebird, PostgreSQL). Requires the zcomponent package."/>
+    <License Value="MIT"/>
+    <Version Minor="1"/>
+    <Files>
+      <Item>
+        <Filename Value="..\adapters\zeos\PascalDb.Adapter.Zeos.pas"/>
+        <UnitName Value="PascalDb.Adapter.Zeos"/>
+      </Item>
+    </Files>
+    <RequiredPkgs>
+      <Item>
+        <PackageName Value="pascal_db_faa"/>
+        <DefaultFilename Value="pascal_db_faa.lpk"/>
+      </Item>
+      <Item>
+        <PackageName Value="zcomponent"/>
+      </Item>
+      <Item>
+        <PackageName Value="FCL"/>
+      </Item>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+      <UseFileFilters Value="True"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>

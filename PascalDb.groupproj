@@ -9,6 +9,9 @@
         <Projects Include="tests\Integration\PascalDb.IntegrationTests.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="tests\Integration\PascalDb.IntegrationTestsZeos.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -35,14 +38,23 @@
     <Target Name="PascalDb_IntegrationTests:Make">
         <MSBuild Projects="tests\Integration\PascalDb.IntegrationTests.dproj" Targets="Make"/>
     </Target>
+    <Target Name="PascalDb_IntegrationTestsZeos">
+        <MSBuild Projects="tests\Integration\PascalDb.IntegrationTestsZeos.dproj"/>
+    </Target>
+    <Target Name="PascalDb_IntegrationTestsZeos:Clean">
+        <MSBuild Projects="tests\Integration\PascalDb.IntegrationTestsZeos.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="PascalDb_IntegrationTestsZeos:Make">
+        <MSBuild Projects="tests\Integration\PascalDb.IntegrationTestsZeos.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests"/>
+        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests;PascalDb_IntegrationTestsZeos"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean"/>
+        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean;PascalDb_IntegrationTestsZeos:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make"/>
+        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make;PascalDb_IntegrationTestsZeos:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

@@ -155,11 +155,16 @@ The FPCUnit runner does both.
   factory, how to create/drop the database) and documents its `PASCALDB_IT_*` environment
   variables. Each run creates a fresh Firebird database, migrates it with
   `TDBMigrationEngine` (SQL from a `TMemorySqlSource`) and drops it at the end. FPC on
-  Windows (local Firebird): build `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi` and
-  run it with `--all --format=plain`. Linux: `sh tools/test_integration_docker.sh` (Firebird 5
+  Windows (local Firebird): build `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi`
+  (SQLdb) or `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos) and run
+  it with `--all --format=plain`. The Zeos runners (FPC and Delphi) define
+  `PASCALDB_IT_ZEOS` and reuse the same fixtures; they support only a local server (the
+  database file is deleted to drop it). Linux: `sh tools/test_integration_docker.sh` (Firebird 5
   server container + FPC container on a private network). **On Delphi:** open
   `PascalDb.groupproj` in the IDE and run
-  `tests/Unit/PascalDb.UnitTests.dproj`. Delphi Community Edition doesn't compile from the
+  `tests/Unit/PascalDb.UnitTests.dproj`, `tests/Integration/PascalDb.IntegrationTests.dproj`
+  (FireDAC) and `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` (Zeos; needs
+  `ZEOSDBO`). Delphi Community Edition doesn't compile from the
   command line: `dcc32` prints "This version of the product does not support command line
   compiling." and **exits with code 0**. Don't read that as success.
 - **Acceptance criterion:** every test green **and 0 leaks on both sides** (heaptrc on FPC,
@@ -181,7 +186,7 @@ adapter only wraps its driver's connection, transaction and query (~250 lines):
   scopes), `TSqlScript`, `TParamsBase` (the whole `IOptXxx`/`INullXxx`/`IOptNullXxx` semantics
   over a few primitives; a NULL gets the value's type) and `TDBFactory` (pool + SQL loader +
   provider; `TestConnection` runs the dialect's `GetPingSQL`, so it works on any driver).
-- `PascalDb.Adapter.DataSet` (Data.DB / db): `TDBParams` over a `TParams` (Zeos, SQLdb) and
+- `PascalDb.Adapter.DataSet` (Data.DB / db): `TDBParams` over a Data.DB `TParams` (SQLdb) and
   `TDataSetQueryBase` over the driver's query dataset. Non-nullable getters use `TField`
   semantics (NULL reads as `''`/`0`/`False`); booleans convert through Variant, so a Firebird
   2.5 SMALLINT flag reads as a Boolean.
@@ -190,7 +195,7 @@ adapter only wraps its driver's connection, transaction and query (~250 lines):
 |---|---|---|---|
 | SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows) and Firebird 5 (Linux) |
 | FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
-| Zeos | dual | `adapters/zeos` | after FireDAC (Zeos not installed in the dev environment yet) |
+| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
 
 A third-party adapter implements `IDBComponentProvider` (usually on top of the two units
 above), and `TDBFactory` does the rest: the core never has to change for a new driver.
@@ -216,13 +221,23 @@ direct SQLdb connection (the integration environment does). `TSQLTransaction.Com
 read results before committing. Results are fetched completely on `Open`
 (`PacketRecords = -1`), so `RecordCount` is exact.
 
----|---|---|
-| FireDAC | Delphi only | to be ported from the original `Db.Adapters.FireDAC` |
-| Zeos | dual | to be written (Zeos not installed in the dev environment yet) |
-| SQLdb | Lazarus only | to be written |
+**Zeos specifics** (ZeosLib 8): `ConnectionParams` takes `Protocol` (`firebird`/`postgresql`;
+`firebird` falls back to the legacy API with a 2.5 client), `HostName`, `Port`, `Database`,
+`User`, `Password`, `ClientCodepage`, `LibraryLocation`; any other line goes to
+`TZConnection.Properties`. Zeos 8 queries use its own `TZParams` (not Data.DB's `TParams`),
+so the adapter has its own `TParamsBase` over them; `TZParam.AsString` is Unicode on Delphi,
+so the FireDAC ANSI problem doesn't apply. `TZTransaction.StartTransaction` on a transaction
+whose native handle is already open (Zeos opens it with the first statement) creates a
+**savepoint** instead, and the matching `Commit` only releases it — so every statement the
+adapter runs starts the `ITransaction` first. Queries call `FetchAll` after opening, so
+`RecordCount` is exact and commits are hard commits (with rows pending, Zeos uses commit
+retaining). Zeos can create a Firebird database (`CreateNewDatabase=true`) but not drop one.
 
-A third-party adapter implements `IDBComponentProvider`/`IDBFactory` and registers itself in
-`TDBRegistry`: the core never has to change to accept a new driver.
+**Zeos on Delphi is compiled from source:** the Delphi Zeos runner finds ZeosLib through the
+`ZEOSDBO` environment variable (the folder containing `src\core`, `src\dbc`, ...), set in
+the IDE (Tools > Options > IDE > Environment Variables) or in the OS. On Lazarus, install
+`packages/lazarus/zcomponent.lpk` from the ZeosLib sources (it isn't found in the Online
+Package Manager under "zeos").
 
 ---
 
