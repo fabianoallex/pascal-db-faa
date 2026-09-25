@@ -235,10 +235,12 @@ A third-party adapter implements `IDBComponentProvider`/`IDBFactory` and registe
 
 ## Gotchas found (Delphi × FPC 3.2.2)
 
-Format: symptom → cause → fix. Also recorded in the skill: 1–4 in
-`references/rtl-gotchas.md` (sections "Generics / RTL collections", "Types" and "Resource
-files"); 5–6 in the compat adapter bullet of `SKILL.md` ("Mirrored tests"). Once this repo is
-published, replace the "`pascal-db-faa` (not yet public)" mentions there with links.
+Format: symptom → cause → fix. Also recorded in the skill: 1–4, 7 in
+`references/rtl-gotchas.md` ("Generics / RTL collections", "Types", "Resource files"); 5–6 in
+the compat adapter bullet of `SKILL.md` ("Mirrored tests"); 8 in "Encoding"; 9 in the
+`lazbuild` bullets; 10 in the tests/CI sections; 11 and 13 in "Database access"; 12 in the
+tests section (`TearDown`). Once this repo is published, replace the "`pascal-db-faa` (not yet
+public)" mentions there with links.
 
 1. **`TDictionary.Create(nil)` raises an Access Violation on FPC.** Symptom: AV in
    `FindBucketIndex` (`generics.dictionaries.inc`) on the first `Add`/`TryGetValue`: 30 of 158
