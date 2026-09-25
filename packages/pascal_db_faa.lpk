@@ -38,6 +38,10 @@
         <UnitName Value="PascalDb.Optionals"/>
       </Item>
       <Item>
+        <Filename Value="..\src\PascalDb.SqlSources.pas"/>
+        <UnitName Value="PascalDb.SqlSources"/>
+      </Item>
+      <Item>
         <Filename Value="..\src\PascalDb.SqlLoader.pas"/>
         <UnitName Value="PascalDb.SqlLoader"/>
       </Item>

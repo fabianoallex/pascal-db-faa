@@ -84,6 +84,59 @@ path.
 
 ---
 
+## SQL sources
+
+`TSQLLoader` (`PascalDb.SqlLoader`) asks an `ISqlSource` (`PascalDb.SqlSources`) for the
+text of `<DIRECTORY>/<NAME>`, caches it per loader and hands it to `TSQLResult` for tag
+processing. `TSQLLoader.Create(Dir)` without a source uses `TResourceSqlSource`.
+
+| Source | Reads | Use |
+|---|---|---|
+| `TResourceSqlSource` | RCDATA resource `SQL_<DIR>_<NAME>` (dots → `_`, upper case) | default: one executable, SQL can't drift or be edited in production |
+| `TDirectorySqlSource` | `<Root>/<Dir>/<Name>.sql` (also a lower-case `<dir>` folder); relative root = executable's folder | development, local overrides |
+| `TMemorySqlSource` | SQL registered in code | tests |
+| `TCompositeSqlSource` | several sources, first hit wins | e.g. directory, then resources |
+
+**Building the `.res`: `python tools/build_sql_res.py sql/ sql/app.res`**, then
+`{$R 'sql\app.res'}` in the program (both compilers). It walks `sql/<DIR>/*.sql`, uses the
+same naming rule as `TResourceSqlSource.ResourceName`, refuses name collisions
+(`X.Y.sql` vs `X_Y.sql`) and has `--check` for CI. Its output is byte-for-byte what `windres`
+produces for the equivalent `.rc`. Why not a `.rc`: FPC on Windows compiles one fine (it
+calls the `windres` shipped with Lazarus), but **FPC on Linux needs a MinGW C toolchain**
+just to preprocess it (tested: "resource compiler "windres" not found"; installing
+`binutils-mingw-w64` isn't enough, it wants `x86_64-w64-mingw32-gcc`). A prebuilt `.res`
+links fine on Linux. The test suite follows the pattern it recommends: the `.res` is
+versioned (`.gitignore` exception) and regenerated/checked by the test scripts.
+
+The text is returned as stored (original line endings, no trailing line break added); a
+leading UTF-8 BOM is dropped.
+
+---
+
+## Runtime requirements for FPC applications
+
+Two things an FPC program using this library must do, or non-ASCII text silently becomes
+`?` (confirmed on FPC 3.2.2; Delphi needs neither — its `string` is UTF-16):
+
+- **Run with a UTF-8 default code page.** In `{$MODE DELPHI}`, `string` is an AnsiString in
+  the process's default code page (measured: 1252 in a plain FPC console program on
+  Windows). LCL applications already run in UTF-8 (measured: `DefaultSystemCodePage` = 65001
+  even before `Application.Initialize`); console/service programs call
+  `SetMultiByteConversionCodePage(CP_UTF8)` at startup. `PdbUtf8BytesToString` (used by the
+  file and resource sources) raises `ESqlSourceException` instead of corrupting a non-ASCII
+  SQL when the code page isn't UTF-8.
+- **On Unix, include `cwstring` (with `cthreads`) in the program's `uses`.** Without it, a
+  `Variant` holding a WideString (`varOleStr` — e.g. a non-ASCII literal passed in an
+  `array of Variant`) converts back to `string` one byte per character (Latin-1), ignoring
+  the UTF-8 code page: `'São'` (`53 C3 A3 6F`) comes back as `53 E3 6F`, invalid UTF-8.
+  Measured in isolation on FPC 3.2.2/Linux: a `string` variable stored in a `Variant`
+  (`varString`) and a direct `string` ↔ `WideString` assignment were **not** affected.
+  Found through the `TMockQueryResult` tests.
+
+The FPCUnit runner does both.
+
+---
+
 ## Tests
 
 - The masters are the **DUnitX** files in `tests/Unit/*Tests.pas`, written in **FPCUnit's
@@ -93,8 +146,10 @@ path.
   those files by hand. The generator swaps only the fixture declarations and the
   registration; the body comes out byte-for-byte identical. `--check` fails if any mirror is
   out of date.
-- **Run on FPC:** `sh tools/test_fpc.sh` (regenerates the mirrors, builds with `lazbuild` and
-  runs). **On Delphi:** open `PascalDb.groupproj` in the IDE and run
+- **Run on FPC:** `sh tools/test_fpc.sh` (regenerates the mirrors and the test `.res`,
+  builds with `lazbuild` and runs). **On Linux:** `sh tools/test_fpc_docker.sh` (builds and
+  runs inside a container with FPC 3.2.2; `FPC_IMAGE` selects the image). **On Delphi:** open
+  `PascalDb.groupproj` in the IDE and run
   `tests/Unit/PascalDb.UnitTests.dproj`. Delphi Community Edition doesn't compile from the
   command line: `dcc32` prints "This version of the product does not support command line
   compiling." and **exits with code 0**. Don't read that as success.
@@ -124,10 +179,6 @@ A third-party adapter implements `IDBComponentProvider`/`IDBFactory` and registe
 
 ## Known open items
 
-- **`TSQLLoader` is tied to resources** (`FindResource`/`RT_RCDATA`, `.rc` compiled with
-  `brcc32`). It compiles and works on both compilers, but the `.rc` build pipeline differs on
-  FPC (`fpcres`/`windres`). Evaluate a pluggable SQL source (resource or a directory of
-  `.sql` files) before the adapters, which are the first to need real SQL.
 - FPC warns "Function result does not seem to be set" on `TMockDBFactory.CreateSqlScript`.
   False positive: the method always raises (`ISqlScript` isn't supported by the mock).
 
@@ -166,3 +217,19 @@ published, replace the "`pascal-db-faa` (not yet public)" mentions there with li
    (`source\DUnitX\DUnitX.Assert.pas`, line 1355, in Delphi 12; configurable through
    `Assert.IgnoreCaseDefault`). Already documented in `Redis.DUnitXCompat`; confirmed in the
    source here. The compat adapter passes `False` explicitly.
+7. **Compiling a `.rc` on Linux FPC needs a MinGW C toolchain** (see "SQL sources"). Fix:
+   generate the `.res` directly (`tools/build_sql_res.py`) and link it with `{$R x.res}`.
+8. **FPC console/service apps lose non-ASCII text outside the default code page**, and
+   **FPC on Unix mangles non-ASCII text in WideString Variants without `cwstring`** (see
+   "Runtime requirements for FPC applications" for the exact, measured scope). Neither
+   shows up in an LCL app on Windows.
+9. **Stale `.ppu` after switching a project from a source search path to a package.** The
+   test runner's own output folder kept a `PascalDb.SqlLoader.ppu` from when its `.lpi`
+   compiled `src/` directly; with the source no longer on its search path, FPC used that old
+   `.ppu` even with `lazbuild -B` ("Wrong number of parameters specified for call to
+   Create"). Fix: delete the project's `lib/` folder after such a switch.
+10. **Linux runs exposed two test bugs that Windows (pt-BR) hid**: `StrToDateTime('28/12/2025
+    ...')` depends on the locale's date format (use `EncodeDate`/`EncodeTime`), and a
+    concurrency test whose fake `Sleep` returned instantly let a waiting thread burn all its
+    retries before the connection holders were scheduled — flaky in a Linux container (use
+    real short waits when the test is about contention).

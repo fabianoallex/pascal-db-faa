@@ -117,6 +117,7 @@
         <DCCReference Include="..\..\src\PascalDb.SystemContext.pas"/>
         <DCCReference Include="..\..\src\PascalDb.ClockCache.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Optionals.pas"/>
+        <DCCReference Include="..\..\src\PascalDb.SqlSources.pas"/>
         <DCCReference Include="..\..\src\PascalDb.SqlLoader.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Interfaces.pas"/>
         <DCCReference Include="..\..\src\PascalDb.SqlDialect.pas"/>
@@ -131,6 +132,7 @@
         <DCCReference Include="PascalDb.SqlLoaderTests.pas"/>
         <DCCReference Include="PascalDb.MockTests.pas"/>
         <DCCReference Include="PascalDb.PoolTests.pas"/>
+        <DCCReference Include="PascalDb.SqlSourcesTests.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

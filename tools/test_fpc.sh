@@ -14,6 +14,7 @@ command -v "$LAZBUILD" >/dev/null 2>&1 || LAZBUILD=/c/lazarus4.0/lazbuild.exe
 
 cd "$ROOT"
 python tools/gen_fpc_mirror.py
+python tools/build_sql_res.py tests/Unit/sql tests/Unit/sql/PascalDbTestSql.res
 cd tests/Unit/fpc
 if ! "$LAZBUILD" -B PascalDbUnitTestsFpc.lpi > build.log 2>&1; then
   grep -E "Error|Fatal" build.log | grep -v "generics\." | head -30

@@ -15,6 +15,11 @@
 uses
   {$IFDEF UNIX}
   cthreads,
+  // Without cwstring, FPC on Unix converts a WideString Variant (varOleStr —
+  // what a non-ASCII literal in an "array of Variant" becomes, as in the
+  // TMockQueryResult tests) back to string one byte per character (Latin-1),
+  // ignoring the UTF-8 code page: 'São' comes back as invalid UTF-8.
+  cwstring,
   {$ENDIF}
   {$IFDEF MSWINDOWS}
   Interfaces, Forms, GuiTestRunner,
@@ -24,7 +29,11 @@ uses
   PascalDb.ClockCacheTests,
   PascalDb.SqlLoaderTests,
   PascalDb.MockTests,
-  PascalDb.PoolTests;
+  PascalDb.PoolTests,
+  PascalDb.SqlSourcesTests;
+
+// SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
+{$R ../sql/PascalDbTestSql.res}
 
 var
   ConsoleApp: TTestRunner;

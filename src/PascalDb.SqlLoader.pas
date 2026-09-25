@@ -2,9 +2,11 @@
 
 {$I pascaldb.inc}
 
-(* SQL lives in files, not in code: TSQLLoader loads the text of a resource
-  embedded in the executable (named SQL_<DIRECTORY>_<NAME>, with a global
-  thread-safe cache), and TSQLResult processes the template before execution:
+(* SQL lives in files, not in code: TSQLLoader asks an ISqlSource for the text
+  of <DIRECTORY>/<NAME> (see PascalDb.SqlSources — embedded resources by
+  default, or a directory, memory, or a composite of those), caches it per
+  loader (thread-safe), and TSQLResult processes the template before
+  execution:
 
   - [TAG {] ... [} TAG] — block kept or removed by ProcessTag(TAG, Keep); the
     same tag may appear in several places and one call decides all of them;
@@ -13,12 +15,8 @@
   - [COMMENTS {] ... [} COMMENTS] and unprocessed tags are removed when .SQL
     is read.
 
-  Dual-compiler: FindResource/TResourceStream are portable, but RT_RCDATA
-  doesn't live in the same place in both RTLs (Winapi.Windows in Delphi; in
-  FPC 3.2.2 only in the system unit of non-Windows targets) — hence the local
-  constant SQL_RESOURCE_TYPE. Producing the .res differs too (brcc32 in
-  Delphi, fpcres/windres in FPC); that is an open design item recorded in
-  CLAUDE.md.
+  The text is returned exactly as stored (original line endings, no trailing
+  line break added); a leading UTF-8 BOM is dropped.
 
   This comment uses parenthesis-asterisk instead of braces because it quotes
   the tag syntax, which contains "}" and would close a brace comment. *)
@@ -30,8 +28,8 @@ uses
   SysUtils,
   StrUtils,
   SyncObjs,
-  Generics.Collections
-  {$IFNDEF FPC}, Winapi.Windows{$ENDIF};
+  Generics.Collections,
+  PascalDb.SqlSources;
 
 type
   ESQLLoaderException = class(Exception);
@@ -74,32 +72,27 @@ type
 
   TSQLLoader = class
   private
-    class var FCache: TSQLCache;
-    class var FLock: TCriticalSection;
-    class function GetInternal(ASQLDirectory, AResourceName: string): string;
-    class function GetFromCacheOrResource(ASQLDirectory, AResourceName: string): string;
-  public
-    class constructor Create;
-    class destructor Destroy;
-    class procedure ClearCache;
-    class function Load(ASQLDirectory, AResourceName: string): TSQLResult;
-  private
     FSQLDirectory: string;
+    FSource: ISqlSource;
+    FCache: TSQLCache;
+    FLock: TCriticalSection;
+    function LoadText(const AResourceName: string): string;
   protected
     function GetSql(const AResourceName: string): TSQLResult; virtual;
   public
-    constructor Create(ASQLDirectory: string);
+    /// ASQLDirectory: the logical SQL directory (e.g. 'FB', 'PG') — the
+    /// first part of the resource name / the sub-folder on disk.
+    /// ASource: where the text comes from; nil = TResourceSqlSource.
+    constructor Create(const ASQLDirectory: string; const ASource: ISqlSource = nil);
+    destructor Destroy; override;
+    /// Drops the cached texts (each loader caches what it has loaded).
+    procedure ClearCache;
     property SQLDirectory: string read FSQLDirectory;
+    property Source: ISqlSource read FSource;
     property Sql[const AResourceName: string]: TSQLResult read GetSql; default;
   end;
 
 implementation
-
-const
-  // RT_RCDATA comes from Winapi.Windows in Delphi; in FPC 3.2.2 it is only in
-  // the system unit on non-Windows targets (on Windows it lives in the
-  // Windows unit). MAKEINTRESOURCE(10) is the same value on every platform.
-  SQL_RESOURCE_TYPE = {$IFDEF FPC}PChar(10){$ELSE}RT_RCDATA{$ENDIF};
 
 { TSQLResult }
 
@@ -217,19 +210,26 @@ end;
 
 { TSQLLoader }
 
-class constructor TSQLLoader.Create;
+constructor TSQLLoader.Create(const ASQLDirectory: string; const ASource: ISqlSource);
 begin
+  inherited Create;
+  FSQLDirectory := ASQLDirectory;
+  if Assigned(ASource) then
+    FSource := ASource
+  else
+    FSource := TResourceSqlSource.Create;
   FCache := TSQLCache.Create;
-  FLock  := TCriticalSection.Create;
+  FLock := TCriticalSection.Create;
 end;
 
-class destructor TSQLLoader.Destroy;
+destructor TSQLLoader.Destroy;
 begin
   FCache.Free;
   FLock.Free;
+  inherited;
 end;
 
-class procedure TSQLLoader.ClearCache;
+procedure TSQLLoader.ClearCache;
 begin
   FLock.Enter;
   try
@@ -239,32 +239,15 @@ begin
   end;
 end;
 
-class function TSQLLoader.Load(ASQLDirectory, AResourceName: string): TSQLResult;
-begin
-  if ASQLDirectory.IsEmpty or AResourceName.IsEmpty then
-    raise ESQLLoaderException.Create(
-      'ASQLDirectory and AResourceName are required'
-    );
-
-  Result.FSQL := GetFromCacheOrResource(ASQLDirectory, AResourceName);
-end;
-
-function TSQLLoader.GetSql(const AResourceName: string): TSQLResult;
-begin
-  Result := TSQLLoader.Load(FSQLDirectory, AResourceName);
-end;
-
-constructor TSQLLoader.Create(ASQLDirectory: string);
-begin
-  FSQLDirectory := ASQLDirectory;
-end;
-
-class function TSQLLoader.GetFromCacheOrResource(ASQLDirectory, AResourceName: string): string;
+function TSQLLoader.LoadText(const AResourceName: string): string;
 var
   LKey: string;
   LValue: string;
 begin
-  LKey := ASQLDirectory + AResourceName;
+  if (FSQLDirectory = '') or (AResourceName = '') then
+    raise ESQLLoaderException.Create('The SQL directory and the SQL name are required');
+
+  LKey := UpperCase(AResourceName);
 
   FLock.Enter;
   try
@@ -274,47 +257,24 @@ begin
     FLock.Leave;
   end;
 
-  Result := GetInternal(ASQLDirectory, AResourceName);
+  if not FSource.TryGetSql(FSQLDirectory, AResourceName, Result) then
+    raise ESQLLoaderException.CreateFmt('SQL not found: %s/%s. Looked in: %s',
+      [FSQLDirectory, AResourceName, FSource.Describe(FSQLDirectory, AResourceName)]);
 
-  // Double-checked locking: another thread may have loaded it while we were in GetInternal
+  // Double-checked locking: another thread may have loaded it meanwhile
   FLock.Enter;
   try
     if FCache.TryGetValue(LKey, LValue) then
       Exit(LValue);
-
     FCache.Add(LKey, Result);
   finally
     FLock.Leave;
   end;
 end;
 
-class function TSQLLoader.GetInternal(ASQLDirectory, AResourceName: string): string;
-var
-  RS: TResourceStream;
-  SL: TStringList;
-  RSName: string;
+function TSQLLoader.GetSql(const AResourceName: string): TSQLResult;
 begin
-  Result := '';
-
-  RSName := 'SQL_'
-    + ASQLDirectory + '_'
-    + StringReplace(AResourceName, '.', '_', [rfReplaceAll]);
-
-  if FindResource(HInstance, PChar(RSName), SQL_RESOURCE_TYPE) = 0 then
-    raise ESQLLoaderException.CreateFmt(
-      'SQL resource not found: %s. Looked for: %s',
-      [AResourceName, RSName]
-    );
-
-  RS := TResourceStream.Create(HInstance, RSName, SQL_RESOURCE_TYPE);
-  SL := TStringList.Create;
-  try
-    SL.LoadFromStream(RS, TEncoding.UTF8);
-    Result := SL.Text;
-  finally
-    SL.Free;
-    RS.Free;
-  end;
+  Result := TSQLResult.From(LoadText(AResourceName));
 end;
 
 end.

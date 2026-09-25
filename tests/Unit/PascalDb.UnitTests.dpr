@@ -20,6 +20,7 @@ uses
   PascalDb.SystemContext in '..\..\src\PascalDb.SystemContext.pas',
   PascalDb.ClockCache in '..\..\src\PascalDb.ClockCache.pas',
   PascalDb.Optionals in '..\..\src\PascalDb.Optionals.pas',
+  PascalDb.SqlSources in '..\..\src\PascalDb.SqlSources.pas',
   PascalDb.SqlLoader in '..\..\src\PascalDb.SqlLoader.pas',
   PascalDb.Interfaces in '..\..\src\PascalDb.Interfaces.pas',
   PascalDb.SqlDialect in '..\..\src\PascalDb.SqlDialect.pas',
@@ -33,7 +34,11 @@ uses
   PascalDb.ClockCacheTests in 'PascalDb.ClockCacheTests.pas',
   PascalDb.SqlLoaderTests in 'PascalDb.SqlLoaderTests.pas',
   PascalDb.MockTests in 'PascalDb.MockTests.pas',
-  PascalDb.PoolTests in 'PascalDb.PoolTests.pas';
+  PascalDb.PoolTests in 'PascalDb.PoolTests.pas',
+  PascalDb.SqlSourcesTests in 'PascalDb.SqlSourcesTests.pas';
+
+// SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
+{$R 'sql\PascalDbTestSql.res'}
 
 var
   runner: ITestRunner;

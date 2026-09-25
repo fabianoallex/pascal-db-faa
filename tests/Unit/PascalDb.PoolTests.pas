@@ -325,6 +325,10 @@ end;
 
 procedure TFakeSleep.Sleep(milliseconds: Cardinal);
 begin
+  // No real waiting, but yield the CPU: a waiting thread that retried in a
+  // tight loop could burn all its WaitMaxAttemps before the threads holding
+  // the connections got scheduled — flaky on Linux containers with few cores.
+  TThread.Yield;
 end;
 
 { TFakeClock }
@@ -1106,7 +1110,7 @@ procedure TPoolTests.Test_Pool_IdleConnection120s;
     LClock: TFakeClock;
     BaseTime: TDateTime;
   begin
-    BaseTime := StrToDateTime('28/12/2025 11:44:18');
+    BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
 
     LClock := TFakeClock.Create;
     LClock.SetDefaultTime(BaseTime);
@@ -1150,7 +1154,7 @@ var
   LClock: TFakeClock;
   BaseTime: TDateTime;
 begin
-  BaseTime := StrToDateTime('28/12/2025 11:44:18');
+  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
 
   LClock := TFakeClock.Create;
   LClock.SetDefaultTime(BaseTime);
@@ -1228,14 +1232,17 @@ var
   LThreads: array[1..NUM_THREADS] of TPoolStressThread;
   I: Integer;
 begin
-  // TFakeSleep avoids real waiting: contending threads retry immediately
-  TSleep.SetSleep(TFakeSleep.Create);
+  // Real (1 ms) waits on purpose, not TFakeSleep: with instant retries a
+  // waiting thread could burn all its attempts before the threads holding
+  // the connections got scheduled — the test then depended on the OS
+  // scheduler and was flaky on Linux. 2000 × 1 ms is a generous budget.
+  TSleep.Reset;
   try
     LConfig := TConnectionPoolConfig.Create;
     LConfig.IniConnections  := 0;
     LConfig.MaxConnections  := MAX_CONNS;
-    LConfig.WaitMaxAttemps  := 2000; // enough for 20 threads × 50 iterations
-    LConfig.WaitMilliseconds := 0;
+    LConfig.WaitMaxAttemps  := 2000;
+    LConfig.WaitMilliseconds := 1;
 
     LFactory := TDBFactoryMock.Create;
     LPool := TConnectionPool.Create(LFactory, LConfig);
@@ -1286,7 +1293,7 @@ var
   LConn1, LConn2: IDBConnection;
   BaseTime: TDateTime;
 begin
-  BaseTime := StrToDateTime('28/12/2025 11:44:18');
+  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
   LClock := TFakeClock.Create;
   LClock.SetDefaultTime(BaseTime);
   TClock.SetClock(LClock);
@@ -1327,7 +1334,7 @@ var
   LConn1, LConn2, LConn3: IDBConnection;
   BaseTime: TDateTime;
 begin
-  BaseTime := StrToDateTime('28/12/2025 11:44:18');
+  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
   LClock := TFakeClock.Create;
   LClock.SetDefaultTime(BaseTime);
   TClock.SetClock(LClock);
@@ -1378,7 +1385,7 @@ var
   LConn1, LConn2, LConn3: IDBConnection;
   BaseTime: TDateTime;
 begin
-  BaseTime := StrToDateTime('28/12/2025 11:44:18');
+  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
   LClock := TFakeClock.Create;
   LClock.SetDefaultTime(BaseTime);
   TClock.SetClock(LClock);
@@ -1481,13 +1488,14 @@ begin
   // Same as Test_Pool_Concurrency, but with the REAL sweep thread active and
   // running in parallel (short interval) — covers the lock between
   // concurrent Acquire/Release and SweepIdleConnections at the same time.
-  TSleep.SetSleep(TFakeSleep.Create);
+  // Real 1 ms waits for the same reason as in Test_Pool_Concurrency.
+  TSleep.Reset;
   try
     LConfig := TConnectionPoolConfig.Create;
     LConfig.IniConnections  := 0;
     LConfig.MaxConnections  := MAX_CONNS;
     LConfig.WaitMaxAttemps  := 2000;
-    LConfig.WaitMilliseconds := 0;
+    LConfig.WaitMilliseconds := 1;
     LConfig.IdleTimeoutSeconds := 1;
     LConfig.IdleCheckIntervalMs := 5;
 
@@ -1566,7 +1574,7 @@ begin
   // Same scenario as Test_Pool_IdleConnectionFails: 2 connections in the
   // ramp-up, the 1st fails the liveness check (>=120s idle) and is discarded,
   // the 2nd is reused.
-  BaseTime := StrToDateTime('28/12/2025 11:44:18');
+  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
 
   LClock := TFakeClock.Create;
   LClock.SetDefaultTime(BaseTime);
@@ -1664,7 +1672,7 @@ var
 begin
   // Same scenario as Test_Pool_IdleTimeout_EvictsOnlyTheOldest: only the
   // connection released the longest ago must be closed by the sweep.
-  BaseTime := StrToDateTime('28/12/2025 11:44:18');
+  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
   LClock := TFakeClock.Create;
   LClock.SetDefaultTime(BaseTime);
   TClock.SetClock(LClock);

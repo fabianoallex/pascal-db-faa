@@ -1,0 +1,1 @@
+SELECT 'ã→' AS X
