@@ -1,0 +1,34 @@
+# saidas de compilacao
+lib/
+backup/
+*.exe
+*.o
+*.a
+*.ppu
+*.rsj
+*.compiled
+*.dcu
+Win32/
+Win64/
+linux/
+
+# recurso .res gerado pelo IDE (icone padrao) - regeneravel
+*.res
+
+# binario ELF (sem extensao) gerado por lazbuild em Linux no proprio diretorio
+tests/Unit/fpc/PascalDbUnitTestsFpc
+
+# logs dos scripts de teste
+tests/Unit/fpc/build.log
+tests/Unit/fpc/run.log
+
+# relatorio NUnit gerado pelo runner DUnitX
+dunitx-results.xml
+
+# arquivos de sessao/IDE
+*.lps
+*.local
+*.identcache
+*.stat
+__history/
+__recovery/

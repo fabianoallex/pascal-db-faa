@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <PathDelim Value="\"/>
+    <Name Value="pascal_db_faa"/>
+    <Author Value="Fabiano Arndt"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <PathDelim Value="\"/>
+      <SearchPaths>
+        <IncludeFiles Value="..\src"/>
+        <OtherUnitFiles Value="..\src"/>
+        <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Description Value="Camada de acesso a banco de dados para Delphi e Lazarus/FPC (dual-compiler): contratos agnosticos (IDBFactory/IQuery/IParams), pool de conexoes, migrations, SQL em templates com tags, tipos opcionais/nulaveis e um mock completo para testes. Adapters de conexao sao pacotes separados."/>
+    <License Value="MIT"/>
+    <Version Minor="1"/>
+    <Files>
+      <Item>
+        <Filename Value="..\src\pascaldb.inc"/>
+        <Type Value="Include"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.Threading.pas"/>
+        <UnitName Value="PascalDb.Threading"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.SystemContext.pas"/>
+        <UnitName Value="PascalDb.SystemContext"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.ClockCache.pas"/>
+        <UnitName Value="PascalDb.ClockCache"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.Optionals.pas"/>
+        <UnitName Value="PascalDb.Optionals"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.SqlLoader.pas"/>
+        <UnitName Value="PascalDb.SqlLoader"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.Interfaces.pas"/>
+        <UnitName Value="PascalDb.Interfaces"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.SqlDialect.pas"/>
+        <UnitName Value="PascalDb.SqlDialect"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.Registry.pas"/>
+        <UnitName Value="PascalDb.Registry"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.SafeLog.pas"/>
+        <UnitName Value="PascalDb.SafeLog"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.Mock.pas"/>
+        <UnitName Value="PascalDb.Mock"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.Pool.pas"/>
+        <UnitName Value="PascalDb.Pool"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.Migrations.pas"/>
+        <UnitName Value="PascalDb.Migrations"/>
+      </Item>
+    </Files>
+    <RequiredPkgs>
+      <Item>
+        <PackageName Value="FCL"/>
+      </Item>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+      <UseFileFilters Value="True"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>
