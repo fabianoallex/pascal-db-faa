@@ -1,0 +1,21 @@
+# FPC/Linux side only: Delphi Community Edition can't build headless. All the
+# work is in tools/ci-test.sh, which also runs locally.
+name: FPC Linux tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-fpc-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Unit and integration suites (FPC 3.2.2, Firebird 5, PostgreSQL 17)
+        run: sh tools/ci-test.sh

@@ -76,8 +76,11 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   -e RUNNER_DIR="$RUNNER_DIR" -e RUNNER="$RUNNER" -e ADAPTER_OPTS="$ADAPTER_OPTS" \
   "$FPC_IMAGE" bash -c '
   set -e
-  apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq "$CLIENT_PKG" >/dev/null 2>&1
-  export PASCALDB_IT_CLIENT="$(ls $CLIENT_GLOB | head -1)"
+  apt-get update -qq > /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
+  apt-get install -y -qq "$CLIENT_PKG" >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
+  export PASCALDB_IT_CLIENT="$(ls $CLIENT_GLOB 2>/dev/null | head -1)"
+  [ -n "$PASCALDB_IT_CLIENT" ] || { echo "client library not installed: $CLIENT_GLOB"; tail -20 /t-apt.log; exit 1; }
+  echo "client: $PASCALDB_IT_CLIENT"
   mkdir -p /t/u && cp -r /src/src /src/adapters /src/tests /t/
   cd /t/tests/Integration/$RUNNER_DIR
   fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src $ADAPTER_OPTS -Fu.. -FU/t/u -gh -gl -o/t/runner \

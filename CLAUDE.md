@@ -162,7 +162,11 @@ The FPCUnit runner does both.
   reuse the same fixtures. Linux: `sh tools/test_integration_docker.sh` (`ENGINE=firebird` or
   `postgresql`; `ADAPTER=sqldb` (default) or `zeos`, the latter with `ZEOSDBO` pointing at the
   ZeosLib folder, mounted into the container; server container + FPC container on a private
-  network).
+  network). **CI:** `.github/workflows/ci.yml` only calls `sh tools/ci-test.sh`, which runs the
+  unit suite and all four Linux integration combinations (SQLdb/Zeos × Firebird/PostgreSQL);
+  it builds its FPC image (`pascaldb-fpc322`, Debian bookworm's fpc) and, without `ZEOSDBO`,
+  downloads ZeosLib 8.0.0 into `.ci/` and checks its pinned SHA-256. Run it locally before
+  pushing a change to the scripts.
 - **PostgreSQL server for Windows runs:** `docker run -d --name pascaldb-it-pg -p 55432:5432
   -e POSTGRES_PASSWORD=postgres postgres:17`, then run with `PASCALDB_IT_ENGINE=postgresql`
   and `PASCALDB_IT_PORT=55432` (user/password default to postgres/postgres). The client is
