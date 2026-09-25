@@ -39,6 +39,7 @@ type
     procedure InsertItem(AId: Integer; const AName: string);
   protected
     procedure SetUp; override;
+    procedure TearDown; override;
   published
 
     procedure Ping_ReturnsTrue;
@@ -66,6 +67,14 @@ begin
   FFactory := IntegrationFactory;
   ExecCommitted('DELETE FROM ITEMS');
   ExecCommitted('DELETE FROM LOG_LINES');
+end;
+
+procedure TContractTests.TearDown;
+begin
+  // Release the factory: the test framework keeps fixture objects alive
+  // until after PascalDb.IntegrationEnv is finalized, and a factory held
+  // here would keep pooled connections open and make the final DROP fail.
+  FFactory := nil;
 end;
 
 procedure TContractTests.ExecCommitted(const ASql: string);

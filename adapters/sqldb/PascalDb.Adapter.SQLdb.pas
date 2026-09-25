@@ -120,14 +120,23 @@ type
       AOnPoolEvent: TPoolEventProc = nil);
   end;
 
+/// Loads the client library of AConnectorType ('Firebird', 'PostgreSQL')
+/// from ALibrary, once per process. SQLdb loads a client library globally and
+/// the first load wins: any SQLdb connection opened before this (e.g. a
+/// TIBConnection used directly to create a database) loads the default
+/// library instead, and a later request for another path fails with
+/// "interface already initialized from library ...". The provider calls this
+/// from BuildConnection; call it yourself before using SQLdb connections
+/// directly.
+procedure PdbSQLdbUseClientLibrary(const AConnectorType, ALibrary: string);
+
 implementation
 
 var
   GLibraryLoaders: TList = nil;
 
-// SQLdb loads the client library globally, once per connector type: keep one
-// TSQLDBLibraryLoader per (type, path) alive for the whole process.
-procedure EnsureClientLibrary(const AConnectorType, ALibrary: string);
+// One TSQLDBLibraryLoader per (type, path), alive for the whole process.
+procedure PdbSQLdbUseClientLibrary(const AConnectorType, ALibrary: string);
 var
   I: Integer;
   LLoader: TSQLDBLibraryLoader;
@@ -306,7 +315,7 @@ begin
   LParams := AConfig.ConnectionParams;
   if LParams.Values['ConnectorType'] = '' then
     raise EDatabaseError.Create('PascalDb.Adapter.SQLdb: ConnectionParams must set ConnectorType (Firebird or PostgreSQL)');
-  EnsureClientLibrary(LParams.Values['ConnectorType'], LParams.Values['ClientLibrary']);
+  PdbSQLdbUseClientLibrary(LParams.Values['ConnectorType'], LParams.Values['ClientLibrary']);
 
   LConn := TSQLConnector.Create(nil);
   try
@@ -330,7 +339,7 @@ begin
       else if SameText(LName, 'Port') then
         LConn.Params.Values['port'] := LValue
       else if SameText(LName, 'ClientLibrary') then
-        // handled by EnsureClientLibrary
+        // handled by PdbSQLdbUseClientLibrary
       else if LName <> '' then
         LConn.Params.Values[LName] := LValue;
     end;

@@ -6,6 +6,9 @@
         <Projects Include="tests\Unit\PascalDb.UnitTests.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="tests\Integration\PascalDb.IntegrationTests.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -23,14 +26,23 @@
     <Target Name="PascalDb_UnitTests:Make">
         <MSBuild Projects="tests\Unit\PascalDb.UnitTests.dproj" Targets="Make"/>
     </Target>
+    <Target Name="PascalDb_IntegrationTests">
+        <MSBuild Projects="tests\Integration\PascalDb.IntegrationTests.dproj"/>
+    </Target>
+    <Target Name="PascalDb_IntegrationTests:Clean">
+        <MSBuild Projects="tests\Integration\PascalDb.IntegrationTests.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="PascalDb_IntegrationTests:Make">
+        <MSBuild Projects="tests\Integration\PascalDb.IntegrationTests.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="PascalDb_UnitTests"/>
+        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="PascalDb_UnitTests:Clean"/>
+        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="PascalDb_UnitTests:Make"/>
+        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

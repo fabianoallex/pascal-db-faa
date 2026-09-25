@@ -4,7 +4,7 @@
   migrated with the library's own migration engine, and the IDBFactory the
   contract tests run against. This is the only compiler-specific part of the
   integration suite: on FPC the factory is the SQLdb adapter's; on Delphi it
-  will be the FireDAC adapter's. The tests themselves
+  is the FireDAC adapter's. The tests themselves
   (PascalDb.ContractTests) only see IDBFactory, so the same test bodies
   validate every adapter.
 
@@ -14,9 +14,10 @@
                           (default: pascaldb_it.fdb next to the executable)
     PASCALDB_IT_USER      default SYSDBA
     PASCALDB_IT_PASSWORD  default masterkey
-    PASCALDB_IT_CLIENT    full path of fbclient; when empty, the Firebird 2.5
-                          64-bit default install path is used if it exists,
-                          else the library's default search.
+    PASCALDB_IT_CLIENT    full path of fbclient; when empty, the client of a
+                          default Firebird 2.5 64-bit install that matches the
+                          executable's bitness (bin or WOW64) is used if it
+                          exists, else the driver's default search.
 
   The database is dropped (if it exists) and created on first use, and
   dropped again at the end of the run. }
@@ -44,15 +45,18 @@ uses
   {$IFDEF FPC}
   , ibconnection
   , PascalDb.Adapter.SQLdb
+  {$ELSE}
+  , FireDAC.Comp.Client
+  , PascalDb.Adapter.FireDAC
   {$ENDIF};
-
-{$IFNDEF FPC}
-  {$MESSAGE ERROR 'The Delphi integration factory comes with the FireDAC adapter'}
-{$ENDIF}
 
 const
   SQL_DIRECTORY = 'IT';
-  DEFAULT_FB25_CLIENT = 'C:\Program Files\Firebird\Firebird_2_5\bin\fbclient.dll';
+  // Firebird 2.5 64-bit default install: the 64-bit client in bin, the 32-bit
+  // one in WOW64 — the client must match the test executable's bitness.
+  // (Delphi defines CPU64BITS, FPC defines CPU64.)
+  DEFAULT_FB25_CLIENT = {$IF DEFINED(CPU64) or DEFINED(CPU64BITS)}'C:\Program Files\Firebird\Firebird_2_5\bin\fbclient.dll'
+    {$ELSE}'C:\Program Files\Firebird\Firebird_2_5\WOW64\fbclient.dll'{$IFEND};
 
 var
   GFactory: IDBFactory = nil;
@@ -120,6 +124,8 @@ var
 begin
   Result := TDatabaseConfig.Create;
   LDatabase := DatabasePath;
+  {$IFDEF FPC}
+  // SQLdb connection settings (see PascalDb.Adapter.SQLdb)
   Result.ConnectionParams.Values['ConnectorType'] := 'Firebird';
   Result.ConnectionParams.Values['HostName'] := Env('PASCALDB_IT_HOST', '');
   Result.ConnectionParams.Values['DatabaseName'] := LDatabase;
@@ -127,10 +133,27 @@ begin
   Result.ConnectionParams.Values['Password'] := Env('PASCALDB_IT_PASSWORD', 'masterkey');
   Result.ConnectionParams.Values['CharSet'] := 'UTF8';
   Result.ConnectionParams.Values['ClientLibrary'] := ClientLibrary;
+  {$ELSE}
+  // FireDAC connection definition (see PascalDb.Adapter.FireDAC)
+  Result.ConnectionParams.Values['DriverID'] := 'FB';
+  if Env('PASCALDB_IT_HOST', '') <> '' then
+  begin
+    Result.ConnectionParams.Values['Server'] := Env('PASCALDB_IT_HOST', '');
+    Result.ConnectionParams.Values['Protocol'] := 'TCPIP';
+  end;
+  Result.ConnectionParams.Values['Database'] := LDatabase;
+  Result.ConnectionParams.Values['User_Name'] := Env('PASCALDB_IT_USER', 'SYSDBA');
+  Result.ConnectionParams.Values['Password'] := Env('PASCALDB_IT_PASSWORD', 'masterkey');
+  Result.ConnectionParams.Values['CharacterSet'] := 'UTF8';
+  Result.ConnectionParams.Values['VendorLib'] := ClientLibrary;
+  {$ENDIF}
   Result.SQLDialect := 'Firebird';
   Result.SQLDirectory := SQL_DIRECTORY;
   Result.SqlSource := BuildSqlSource;
-  Result.PoolIniConnections := 1;
+  // 0 on purpose: the factory is created before the database is recreated,
+  // and a ramp-up connection to a database left over by an interrupted run
+  // would make the DROP fail ("object in use").
+  Result.PoolIniConnections := 0;
   Result.PoolMaxConnections := 5;
   Result.PoolWaitMaxAttemps := 200;
   Result.PoolWaitMilliseconds := 10;
@@ -139,6 +162,8 @@ end;
 {$IFDEF FPC}
 function NewIBConnection(const AConfig: IDatabaseConfig): TIBConnection;
 begin
+  // Before any direct SQLdb connection: the first client library loaded wins.
+  PdbSQLdbUseClientLibrary('Firebird', AConfig.ConnectionParams.Values['ClientLibrary']);
   Result := TIBConnection.Create(nil);
   Result.HostName := AConfig.ConnectionParams.Values['HostName'];
   Result.DatabaseName := AConfig.ConnectionParams.Values['DatabaseName'];
@@ -180,6 +205,61 @@ end;
 function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
 begin
   Result := TSQLdbFactory.Create(AConfig);
+end;
+{$ELSE}
+// FireDAC's Firebird driver creates the database on connect with
+// CreateDatabase=Yes and drops it on disconnect with DropDatabase=Yes.
+function NewFDConnection(const AConfig: IDatabaseConfig; const AExtra: string): TFDConnection;
+var
+  I: Integer;
+begin
+  PdbFireDACUseVendorLib('FB', AConfig.ConnectionParams.Values['VendorLib']);
+  Result := TFDConnection.Create(nil);
+  Result.LoginPrompt := False;
+  Result.ResourceOptions.SilentMode := True;
+  for I := 0 to AConfig.ConnectionParams.Count - 1 do
+    if not SameText(AConfig.ConnectionParams.Names[I], 'VendorLib') then
+      Result.Params.Add(AConfig.ConnectionParams[I]);
+  Result.Params.Add(AExtra);
+end;
+
+procedure DropDatabase(const AConfig: IDatabaseConfig);
+var
+  LConn: TFDConnection;
+begin
+  LConn := NewFDConnection(AConfig, 'DropDatabase=Yes');
+  try
+    try
+      LConn.Connected := True;
+      LConn.Connected := False;
+    except
+      // did not exist
+    end;
+  finally
+    LConn.Free;
+  end;
+  // Local database file left behind (e.g. the drop failed): remove it.
+  if (Env('PASCALDB_IT_HOST', '') = '') and FileExists(DatabasePath) then
+    DeleteFile(DatabasePath);
+end;
+
+procedure CreateDatabase(const AConfig: IDatabaseConfig);
+var
+  LConn: TFDConnection;
+begin
+  DropDatabase(AConfig);
+  LConn := NewFDConnection(AConfig, 'CreateDatabase=Yes');
+  try
+    LConn.Connected := True;
+    LConn.Connected := False;
+  finally
+    LConn.Free;
+  end;
+end;
+
+function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
+begin
+  Result := TFDFactory.Create(AConfig);
 end;
 {$ENDIF}
 

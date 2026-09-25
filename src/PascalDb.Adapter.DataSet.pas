@@ -128,7 +128,11 @@ end;
 class function TDBParams.FieldTypeOf(AType: TPdbParamType): TFieldType;
 begin
   case AType of
-    pptString: Result := ftString;
+    // Delphi: ftWideString, because a ftString (ANSI) parameter is converted
+    // to the ANSI code page and characters outside it reach the database as
+    // "?" (observed with FireDAC). FPC: string is already UTF-8 (see
+    // CLAUDE.md, "Runtime requirements for FPC applications").
+    pptString: Result := {$IFDEF FPC}ftString{$ELSE}ftWideString{$ENDIF};
     pptBoolean: Result := ftBoolean;
     pptDateTime: Result := ftDateTime;
     pptDouble: Result := ftFloat;
@@ -196,7 +200,12 @@ end;
 
 procedure TDBParams.WriteString(const AName: string; AValue: string);
 begin
+  // AsWideString on Delphi — see FieldTypeOf.
+  {$IFDEF FPC}
   FParams.ParamByName(AName).AsString := AValue;
+  {$ELSE}
+  FParams.ParamByName(AName).AsWideString := AValue;
+  {$ENDIF}
 end;
 
 procedure TDBParams.WriteBoolean(const AName: string; AValue: Boolean);

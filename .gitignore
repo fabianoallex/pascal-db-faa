@@ -38,7 +38,7 @@ __recovery/
 
 # integration test logs and databases
 tests/Integration/fpc/build.log
-tests/Integration/fpc/run.log
+tests/Integration/fpc/*.log
 *.fdb
 
 # written by lazbuild in the working folder (a copy of the Lazarus user package links)

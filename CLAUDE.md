@@ -189,19 +189,30 @@ adapter only wraps its driver's connection, transaction and query (~250 lines):
 | Adapter | Compiler | Package / unit | Status |
 |---|---|---|---|
 | SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows) and Firebird 5 (Linux) |
-| FireDAC | Delphi only | `adapters/firedac` | next: port of the origin's `Db.Adapters.FireDAC` onto the base |
+| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
 | Zeos | dual | `adapters/zeos` | after FireDAC (Zeos not installed in the dev environment yet) |
 
 A third-party adapter implements `IDBComponentProvider` (usually on top of the two units
 above), and `TDBFactory` does the rest: the core never has to change for a new driver.
+
+**FireDAC specifics:** `ConnectionParams` is a FireDAC connection definition (`DriverID=FB`,
+`Database`, `User_Name`, `Password`, `CharacterSet`, ...). `VendorLib` is taken out of it and
+applied to the driver link once per process (`PdbFireDACUseVendorLib`); a Win32 program needs
+the 32-bit client (WOW64 folder of a 64-bit Firebird 2.5). The adapter uses the FireDAC
+runtime units (`Stan.Def`, `Stan.Async`, `DApt`, FB/PG drivers) and runs connections with
+`SilentMode`, so consumers don't need them for the adapter to work; queries use
+`FetchOptions.Mode = fmAll`.
 
 **Use `IDatabaseConfig` through an interface variable** (`LConfig: IDatabaseConfig :=
 TDatabaseConfig.Create`): the properties are declared on the interface, and mixing a class
 variable with a reference-counted interface frees the object too early.
 
 **SQLdb specifics:** set `ConnectorType` (`Firebird`/`PostgreSQL`) in `ConnectionParams`, and
-`ClientLibrary` when fbclient/libpq isn't on the default path (loaded once per process through
-`TSQLDBLibraryLoader`). `TSQLTransaction.Commit`/`Rollback` close the datasets attached to it:
+`ClientLibrary` when fbclient/libpq isn't on the default path. SQLdb loads a client library
+once per process and **the first load wins**: a `TIBConnection` used directly before the
+factory's first connection loads the default library, and the configured one then fails with
+"interface already initialized from library ...". Call `PdbSQLdbUseClientLibrary` before any
+direct SQLdb connection (the integration environment does). `TSQLTransaction.Commit`/`Rollback` close the datasets attached to it:
 read results before committing. Results are fetched completely on `Open`
 (`PacketRecords = -1`), so `RecordCount` is exact.
 
@@ -271,3 +282,21 @@ published, replace the "`pascal-db-faa` (not yet public)" mentions there with li
     concurrency test whose fake `Sleep` returned instantly let a waiting thread burn all its
     retries before the connection holders were scheduled — flaky in a Linux container (use
     real short waits when the test is about contention).
+11. **SQLdb loads the database client library once per process; the first load wins** (see
+    "SQLdb specifics"). Observed: the integration suite passed only while the pool's ramp-up
+    happened to connect first; with the database created through a plain `TIBConnection`
+    first, every test failed with "Firebird interface already initialized from library
+    fbclient.dll". Fix: load the configured library explicitly before any direct connection.
+12. **Test fixtures that keep a reference to a pooled factory keep its connections open past
+    unit finalization** (FPCUnit frees its test objects after the units they use are
+    finalized), so dropping the test database at the end failed silently and the leftover
+    database broke the next run. Fix: release the factory in `TearDown`; the integration
+    environment also starts the pool with no connections, so a leftover database never blocks
+    the DROP.
+13. **On Delphi, `AsString` on a FireDAC `TFDParam` or a Data.DB `TParam` makes an ANSI
+    (`ftString`) parameter**: the text is converted to the ANSI code page and characters outside
+    it reach the database as `?`. Observed with FireDAC on Firebird (`CharacterSet=UTF8`):
+    `'São Paulo → ok'` stored as `'São Paulo ? ok'` — `ã` survives (it's in cp1252), `→` doesn't,
+    which is why Portuguese text never showed it. Fix: `AsWideString` / `ftWideString` for
+    strings on Delphi (FPC is unaffected: its `string` is UTF-8). The origin adapter used
+    `AsString`.
