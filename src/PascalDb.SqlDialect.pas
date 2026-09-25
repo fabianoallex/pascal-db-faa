@@ -44,6 +44,7 @@ type
     function GetRollbackToSavepointSQL(const AName: string): string;
     function GetSavepointSQL(const AName: string): string;
     function SupportsRelease: Boolean;
+    function GetPingSQL: string;
     function GetMigrationTableExistsSQL: string;
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
@@ -57,6 +58,7 @@ type
     function GetRollbackToSavepointSQL(const AName: string): string;
     function GetSavepointSQL(const AName: string): string;
     function SupportsRelease: Boolean;
+    function GetPingSQL: string;
     function GetMigrationTableExistsSQL: string;
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
@@ -114,6 +116,11 @@ begin
   Result := True;
 end;
 
+function TPostgreSQLDialect.GetPingSQL: string;
+begin
+  Result := 'SELECT 1';
+end;
+
 function TPostgreSQLDialect.GetMigrationTableExistsSQL: string;
 begin
   Result :=
@@ -155,6 +162,11 @@ end;
 function TFirebirdDialect.SupportsRelease: Boolean;
 begin
   Result := True;
+end;
+
+function TFirebirdDialect.GetPingSQL: string;
+begin
+  Result := 'SELECT 1 FROM RDB$DATABASE';
 end;
 
 function TFirebirdDialect.GetMigrationTableExistsSQL: string;

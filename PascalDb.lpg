@@ -3,7 +3,13 @@
   <ProjectGroup FileVersion="2">
     <Targets>
       <Target FileName="packages\pascal_db_faa.lpk"/>
+      <Target FileName="packages\pascal_db_faa_sqldb.lpk"/>
       <Target FileName="tests\Unit\fpc\PascalDbUnitTestsFpc.lpi">
+        <BuildModes>
+          <Mode Name="Default"/>
+        </BuildModes>
+      </Target>
+      <Target FileName="tests\Integration\fpc\PascalDbIntegrationTestsFpc.lpi">
         <BuildModes>
           <Mode Name="Default"/>
         </BuildModes>

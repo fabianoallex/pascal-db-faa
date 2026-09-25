@@ -15,14 +15,17 @@ A database access layer for **Delphi and Lazarus/FPC from the same source code**
   parameters.
 - `TMockDBFactory`: a complete mock for testing repositories without a database.
 
-Drivers live in separate adapters. Planned: FireDAC (Delphi only), Zeos (dual) and SQLdb
-(Lazarus only). Any other driver plugs in by implementing `IDBComponentProvider`/`IDBFactory`.
+Drivers live in thin adapters on top of a shared, driver-agnostic base (configuration,
+transactions and savepoints, scripts, parameter semantics, TDataSet-based queries). Available:
+**SQLdb** (Lazarus/FPC; Firebird and PostgreSQL). Next: FireDAC (Delphi only) and Zeos (dual).
+Any other driver plugs in by implementing `IDBComponentProvider`.
 
 ## Status
 
 Extracted from the database core of `delphi-api-infra-faa` (commit `aa49f2b`). The core
 is tested on Delphi 12 CE (Windows) and FPC 3.2.2 (Windows and Linux), 0 leaks on all
-of them (FastMM / heaptrc). The adapters don't exist yet.
+of them (FastMM / heaptrc). The SQLdb adapter passes the integration contract suite against
+Firebird 2.5 (Windows) and Firebird 5 (Linux).
 
 FPC programs must run with a UTF-8 default code page and, on Unix, include `cwstring`
 — see "Runtime requirements for FPC applications" in `CLAUDE.md`.
@@ -35,7 +38,10 @@ packages/               pascal_db_faa.lpk (Lazarus)
 tests/Unit/             DUnitX tests (masters) + PascalDb.UnitTests.dproj
 tests/Unit/fpc/         GENERATED FPCUnit mirror + PascalDbUnitTestsFpc.lpi
 tests/Unit/sql/         SQL fixtures + the generated PascalDbTestSql.res
-tools/                  gen_fpc_mirror.py, build_sql_res.py, test_fpc.sh, test_fpc_docker.sh
+tests/Integration/       contract tests (DUnitX masters) + IntegrationEnv
+tests/Integration/fpc/   GENERATED FPCUnit mirror + PascalDbIntegrationTestsFpc.lpi
+adapters/sqldb/         SQLdb adapter (package pascal_db_faa_sqldb.lpk)
+tools/                  gen_fpc_mirror.py, build_sql_res.py, test_*.sh
 PascalDb.groupproj      Delphi project group
 PascalDb.lpg            Lazarus project group
 ```
@@ -44,6 +50,8 @@ PascalDb.lpg            Lazarus project group
 
 - FPC (Windows): `sh tools/test_fpc.sh`
 - FPC (Linux, via Docker): `sh tools/test_fpc_docker.sh`
+- Integration, Linux + Firebird 5 (Docker): `sh tools/test_integration_docker.sh`
+- Integration, Windows + local Firebird: `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi`
 - Delphi: open `PascalDb.groupproj` and run `PascalDb.UnitTests` (Community Edition can't
   compile from the command line).
 

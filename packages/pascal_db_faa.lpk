@@ -73,6 +73,14 @@
         <Filename Value="..\src\PascalDb.Migrations.pas"/>
         <UnitName Value="PascalDb.Migrations"/>
       </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.Adapter.Base.pas"/>
+        <UnitName Value="PascalDb.Adapter.Base"/>
+      </Item>
+      <Item>
+        <Filename Value="..\src\PascalDb.Adapter.DataSet.pas"/>
+        <UnitName Value="PascalDb.Adapter.DataSet"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

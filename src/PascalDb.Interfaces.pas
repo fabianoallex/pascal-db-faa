@@ -26,6 +26,7 @@ uses
   Classes,
   SysUtils,
   PascalDb.Optionals,
+  PascalDb.SqlSources,
   PascalDb.SqlLoader;
 
 type
@@ -35,6 +36,9 @@ type
     function GetRollbackToSavepointSQL(const AName: string): string;
     function GetReleaseSavepointSQL(const AName: string): string;
     function SupportsRelease: Boolean;
+    /// Cheapest statement that forces a round-trip to the server — used to
+    /// check whether an idle pooled connection is still alive.
+    function GetPingSQL: string;
   end;
 
   IMigrationDialect = interface
@@ -346,6 +350,11 @@ type
     procedure SetPoolIdleTimeoutSeconds(AValue: Integer);
     procedure SetPoolIdleCheckIntervalMs(AValue: Integer);
     procedure SetSQLDialect(AValue: string);
+    function GetSQLDirectory: string;
+    procedure SetSQLDirectory(const AValue: string);
+    function GetSqlSource: ISqlSource;
+    procedure SetSqlSource(const AValue: ISqlSource);
+    function GetConnectionParams: TStrings;
     property PoolWaitMaxAttemps: Integer read GetPoolWaitMaxAttemps write SetPoolWaitMaxAttemps;
     property PoolWaitMilliseconds: Integer read GetPoolWaitMilliseconds write SetPoolWaitMilliseconds;
     property PoolMaxConnections: Integer read GetPoolMaxConnections write SetPoolMaxConnections;
@@ -359,6 +368,13 @@ type
     /// (30000ms).
     property PoolIdleCheckIntervalMs: Integer read GetPoolIdleCheckIntervalMs write SetPoolIdleCheckIntervalMs;
     property SQLDialect: string read GetSQLDialect write SetSQLDialect;
+    /// Logical SQL directory handed to the factory's TSQLLoader (e.g. 'FB').
+    property SQLDirectory: string read GetSQLDirectory write SetSQLDirectory;
+    /// Where the factory's TSQLLoader reads SQL from; nil = embedded resources.
+    property SqlSource: ISqlSource read GetSqlSource write SetSqlSource;
+    /// Driver connection settings as Name=Value lines; each adapter documents
+    /// the names it understands.
+    property ConnectionParams: TStrings read GetConnectionParams;
   end;
 
   IContextTransaction = interface

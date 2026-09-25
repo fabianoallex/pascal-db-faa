@@ -29,13 +29,16 @@ uses
   PascalDb.Mock in '..\..\src\PascalDb.Mock.pas',
   PascalDb.Pool in '..\..\src\PascalDb.Pool.pas',
   PascalDb.Migrations in '..\..\src\PascalDb.Migrations.pas',
+  PascalDb.Adapter.Base in '..\..\src\PascalDb.Adapter.Base.pas',
+  PascalDb.Adapter.DataSet in '..\..\src\PascalDb.Adapter.DataSet.pas',
   PascalDb.DUnitXCompat in 'PascalDb.DUnitXCompat.pas',
   PascalDb.OptionalsTests in 'PascalDb.OptionalsTests.pas',
   PascalDb.ClockCacheTests in 'PascalDb.ClockCacheTests.pas',
   PascalDb.SqlLoaderTests in 'PascalDb.SqlLoaderTests.pas',
   PascalDb.MockTests in 'PascalDb.MockTests.pas',
   PascalDb.PoolTests in 'PascalDb.PoolTests.pas',
-  PascalDb.SqlSourcesTests in 'PascalDb.SqlSourcesTests.pas';
+  PascalDb.SqlSourcesTests in 'PascalDb.SqlSourcesTests.pas',
+  PascalDb.AdapterBaseTests in 'PascalDb.AdapterBaseTests.pas';
 
 // SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
 {$R 'sql\PascalDbTestSql.res'}

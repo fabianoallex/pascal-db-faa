@@ -148,7 +148,16 @@ The FPCUnit runner does both.
   out of date.
 - **Run on FPC:** `sh tools/test_fpc.sh` (regenerates the mirrors and the test `.res`,
   builds with `lazbuild` and runs). **On Linux:** `sh tools/test_fpc_docker.sh` (builds and
-  runs inside a container with FPC 3.2.2; `FPC_IMAGE` selects the image). **On Delphi:** open
+  runs inside a container with FPC 3.2.2; `FPC_IMAGE` selects the image).
+- **Integration (contract) tests** — `tests/Integration/PascalDb.ContractTests.pas` only uses
+  `IDBFactory`/`IQuery`/`IParams`/`IQueryResult`, so the same bodies validate every adapter;
+  `tests/Integration/PascalDb.IntegrationEnv.pas` is the only compiler-specific part (which
+  factory, how to create/drop the database) and documents its `PASCALDB_IT_*` environment
+  variables. Each run creates a fresh Firebird database, migrates it with
+  `TDBMigrationEngine` (SQL from a `TMemorySqlSource`) and drops it at the end. FPC on
+  Windows (local Firebird): build `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi` and
+  run it with `--all --format=plain`. Linux: `sh tools/test_integration_docker.sh` (Firebird 5
+  server container + FPC container on a private network). **On Delphi:** open
   `PascalDb.groupproj` in the IDE and run
   `tests/Unit/PascalDb.UnitTests.dproj`. Delphi Community Edition doesn't compile from the
   command line: `dcc32` prints "This version of the product does not support command line
@@ -162,12 +171,41 @@ The FPCUnit runner does both.
 
 ---
 
-## Adapters (planned)
+## Adapters
 
-The core knows no driver. The reference adapters, each in its own package:
+The core knows no driver. Everything that isn't driver-specific lives in the core, so an
+adapter only wraps its driver's connection, transaction and query (~250 lines):
 
-| Adapter | Compiler | Status |
-|---|---|---|
+- `PascalDb.Adapter.Base` (no Data.DB): `TDatabaseConfig`, `TTransactionBase` (routes every
+  native failure through `BuildDatabaseException`), `TScopeTransaction` (savepoints for nested
+  scopes), `TSqlScript`, `TParamsBase` (the whole `IOptXxx`/`INullXxx`/`IOptNullXxx` semantics
+  over a few primitives; a NULL gets the value's type) and `TDBFactory` (pool + SQL loader +
+  provider; `TestConnection` runs the dialect's `GetPingSQL`, so it works on any driver).
+- `PascalDb.Adapter.DataSet` (Data.DB / db): `TDBParams` over a `TParams` (Zeos, SQLdb) and
+  `TDataSetQueryBase` over the driver's query dataset. Non-nullable getters use `TField`
+  semantics (NULL reads as `''`/`0`/`False`); booleans convert through Variant, so a Firebird
+  2.5 SMALLINT flag reads as a Boolean.
+
+| Adapter | Compiler | Package / unit | Status |
+|---|---|---|---|
+| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows) and Firebird 5 (Linux) |
+| FireDAC | Delphi only | `adapters/firedac` | next: port of the origin's `Db.Adapters.FireDAC` onto the base |
+| Zeos | dual | `adapters/zeos` | after FireDAC (Zeos not installed in the dev environment yet) |
+
+A third-party adapter implements `IDBComponentProvider` (usually on top of the two units
+above), and `TDBFactory` does the rest: the core never has to change for a new driver.
+
+**Use `IDatabaseConfig` through an interface variable** (`LConfig: IDatabaseConfig :=
+TDatabaseConfig.Create`): the properties are declared on the interface, and mixing a class
+variable with a reference-counted interface frees the object too early.
+
+**SQLdb specifics:** set `ConnectorType` (`Firebird`/`PostgreSQL`) in `ConnectionParams`, and
+`ClientLibrary` when fbclient/libpq isn't on the default path (loaded once per process through
+`TSQLDBLibraryLoader`). `TSQLTransaction.Commit`/`Rollback` close the datasets attached to it:
+read results before committing. Results are fetched completely on `Open`
+(`PacketRecords = -1`), so `RecordCount` is exact.
+
+---|---|---|
 | FireDAC | Delphi only | to be ported from the original `Db.Adapters.FireDAC` |
 | Zeos | dual | to be written (Zeos not installed in the dev environment yet) |
 | SQLdb | Lazarus only | to be written |

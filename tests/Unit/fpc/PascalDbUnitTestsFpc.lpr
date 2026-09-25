@@ -30,7 +30,8 @@ uses
   PascalDb.SqlLoaderTests,
   PascalDb.MockTests,
   PascalDb.PoolTests,
-  PascalDb.SqlSourcesTests;
+  PascalDb.SqlSourcesTests,
+  PascalDb.AdapterBaseTests;
 
 // SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
 {$R ../sql/PascalDbTestSql.res}

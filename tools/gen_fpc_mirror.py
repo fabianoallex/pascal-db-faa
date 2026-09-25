@@ -23,7 +23,7 @@ Outside the fixtures:
   uses DUnitX.TestFramework, PascalDb.DUnitXCompat -> fpcunit, testregistry
   TDUnitX.RegisterTestFixture(TX)                  -> RegisterTest(TX)
 
-Usage: python tools/gen_fpc_mirror.py          (every tests/Unit/*Tests.pas)
+Usage: python tools/gen_fpc_mirror.py          (every tests/{Unit,Integration}/*Tests.pas)
        python tools/gen_fpc_mirror.py --check  (fails if any mirror is out of
                                                 date; writes nothing)
 """
@@ -32,8 +32,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC_DIR = ROOT / 'tests' / 'Unit'
-DST_DIR = SRC_DIR / 'fpc'
+# Each suite folder holds DUnitX masters; its fpc/ sub-folder gets the mirrors.
+SUITE_DIRS = [ROOT / 'tests' / 'Unit', ROOT / 'tests' / 'Integration']
 
 GENERATED_NOTE = (
     '{ GENERATED FILE — produced by tools/gen_fpc_mirror.py from\n'
@@ -153,12 +153,13 @@ def convert(text, name):
 
 def main():
     check = '--check' in sys.argv
-    DST_DIR.mkdir(parents=True, exist_ok=True)
     stale = []
-    for src in sorted(SRC_DIR.glob('*Tests.pas')):
+    for src in sorted(p for d in SUITE_DIRS if d.is_dir() for p in d.glob('*Tests.pas')):
+        dst_dir = src.parent / 'fpc'
+        dst_dir.mkdir(parents=True, exist_ok=True)
         text = src.read_text(encoding='utf-8-sig')
         mirror = convert(text, src.stem)
-        dst = DST_DIR / src.name
+        dst = dst_dir / src.name
         current = dst.read_text(encoding='utf-8-sig') if dst.exists() else None
         if current != mirror:
             stale.append(dst.name)
