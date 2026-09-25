@@ -30,9 +30,9 @@
   The database is dropped (if it exists) and created on first use, and
   dropped again at the end of the run. PostgreSQL databases are created and
   dropped with SQL through a maintenance database, outside any transaction.
-  Zeos has no call to drop a Firebird database, so the Zeos + Firebird
-  combination deletes the database file instead: it supports only a local
-  server (PASCALDB_IT_HOST empty). }
+  Zeos has no call of its own to drop a Firebird database; the Zeos runners
+  use PdbZeosDropFirebirdDatabase (PascalDb.Adapter.Zeos), which works on a
+  remote server too. }
 
 interface
 
@@ -234,11 +234,7 @@ begin
   if IsPostgres then
     AParams.Values['Protocol'] := 'postgresql'
   else
-  begin
-    if Host <> '' then
-      raise Exception.Create('The Zeos runners support only a local Firebird server (PASCALDB_IT_HOST empty)');
     AParams.Values['Protocol'] := 'firebird';
-  end;
   AParams.Values['HostName'] := Host;
   AParams.Values['Port'] := Port;
   AParams.Values['Database'] := ADatabase;
@@ -281,10 +277,17 @@ begin
       // server unreachable: nothing to drop
     end;
   end
-  // Zeos can create a Firebird database (CreateNewDatabase) but not drop
-  // one; the database is local (see SetConnectionParams): delete the file.
-  else if FileExists(DatabaseName) then
-    DeleteFile(DatabaseName);
+  else
+  begin
+    try
+      PdbZeosDropFirebirdDatabase(AConfig.ConnectionParams);
+    except
+      // did not exist
+    end;
+    // Local database file left behind (e.g. the drop failed): remove it.
+    if (Host = '') and FileExists(DatabaseName) then
+      DeleteFile(DatabaseName);
+  end;
 end;
 
 procedure CreateDatabase(const AConfig: IDatabaseConfig);
@@ -296,7 +299,7 @@ begin
     ExecOnMaintenanceDb('CREATE DATABASE ' + DatabaseName)
   else
   begin
-    if FileExists(DatabaseName) then
+    if (Host = '') and FileExists(DatabaseName) then
       raise Exception.CreateFmt('Could not delete the test database left by a previous run: %s (still in use?)', [DatabaseName]);
     LConn := PdbZeosNewConnection(AConfig.ConnectionParams);
     try

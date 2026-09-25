@@ -34,7 +34,23 @@
     would never commit.
   - Queries fetch the whole result on Open (FetchAll), so RecordCount is the
     real row count and a Commit is a hard commit: with rows still pending,
-    Zeos commits with "commit retaining" and keeps the transaction open. }
+    Zeos commits with "commit retaining" and keeps the transaction open.
+  - Firebird connections get hard_commit=true unless the settings say
+    otherwise. Without it, a Commit through the Firebird 3+ API first walks
+    the open cursors calling Last until each one unregisters itself
+    (TZFirebirdTransaction.TestCachedResultsAndForceFetchAll); the cursor of
+    an INSERT ... RETURNING opened as a query never does, and the Commit
+    loops forever at 100% CPU (measured: Zeos 8.0.0, FPC 3.2.2, Linux,
+    Firebird 3 client, Firebird 5 server). A hard commit costs nothing here:
+    results are already fully fetched.
+  - Zeos can create a Firebird database (CreateNewDatabase=true) but has no
+    call to drop one. PdbZeosDropFirebirdDatabase connects through Zeos's
+    legacy (ISC) API and calls the client's isc_drop_database on that
+    handle, so it works on a remote server too. The legacy API because
+    isc_drop_database zeroes the handle Zeos keeps, and Disconnect then
+    skips the detach; the Firebird 3+ API's IAttachment.dropDatabase frees
+    the attachment while Zeos still holds it, and there is no way to clear
+    that reference from outside. }
 
 interface
 
@@ -162,7 +178,17 @@ type
 /// provider; also handy for direct connections (e.g. creating a database).
 function PdbZeosNewConnection(ASettings: TStrings): TZConnection;
 
+/// Drops the Firebird database ASettings points to (the same settings as
+/// ConnectionParams; Protocol must be firebird), local or remote. Raises
+/// when it can't connect (e.g. the database doesn't exist) or the server
+/// refuses the drop (e.g. other attachments are open).
+procedure PdbZeosDropFirebirdDatabase(ASettings: TStrings);
+
 implementation
+
+uses
+  ZDbcInterbase6,
+  ZPlainFirebirdInterbaseDriver;
 
 function PdbZeosNewConnection(ASettings: TStrings): TZConnection;
 var
@@ -197,9 +223,35 @@ begin
       else if LName <> '' then
         Result.Properties.Values[LName] := LValue;
     end;
+    // See the unit header.
+    if SameText(Copy(Result.Protocol, 1, 8), 'firebird') and (Result.Properties.Values['hard_commit'] = '') then
+      Result.Properties.Values['hard_commit'] := 'true';
   except
     Result.Free;
     raise;
+  end;
+end;
+
+procedure PdbZeosDropFirebirdDatabase(ASettings: TStrings);
+var
+  LConn: TZConnection;
+  LLegacy: IZInterbase6Connection;
+  LStatus: TARRAY_ISC_STATUS;
+begin
+  LConn := PdbZeosNewConnection(ASettings);
+  try
+    // See the unit header: the legacy API, so the drop clears Zeos's handle.
+    LConn.Properties.Values['FirebirdAPI'] := 'legacy';
+    LConn.Connect;
+    if not Supports(LConn.DbcConnection, IZInterbase6Connection, LLegacy) then
+      raise EDatabaseError.Create('PdbZeosDropFirebirdDatabase: not a Firebird connection (Protocol must be firebird)');
+    FillChar(LStatus, SizeOf(LStatus), 0);
+    if LLegacy.GetPlainDriver.isc_drop_database(@LStatus[0], LLegacy.GetDBHandle) <> 0 then
+      raise EDatabaseError.CreateFmt('PdbZeosDropFirebirdDatabase: isc_drop_database failed (GDS code %d)', [LStatus[1]]);
+    LLegacy := nil;
+    LConn.Disconnect;
+  finally
+    LConn.Free;
   end;
 end;
 

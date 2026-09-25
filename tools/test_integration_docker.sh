@@ -1,18 +1,22 @@
 #!/bin/sh
-# Runs the integration (contract) suite on Linux, SQLdb adapter: a database
-# server container plus an FPC container on a private Docker network. The FPC
+# Runs the integration (contract) suite on Linux, SQLdb or Zeos adapter: a
+# database server container plus an FPC container on a private Docker network. The FPC
 # container installs the client library from Debian (libfbclient2 or libpq5),
 # builds the suite with plain fpc and runs it with heaptrc. Everything is
 # removed at the end, even on failure. Acceptance: 0 errors, 0 failures,
 # 0 unfreed blocks.
 #
 # ENGINE:    firebird (default) or postgresql
+# ADAPTER:   sqldb (default) or zeos
+# ZEOSDBO:   ADAPTER=zeos only: the ZeosLib 8 folder (the one containing
+#            src/core, src/dbc, ...), mounted read-only into the FPC container
 # FPC_IMAGE: an image with FPC 3.2.2 (default: fpc322-bookworm)
 # FB_IMAGE:  Firebird server image (default: firebirdsql/firebird:5)
 # PG_IMAGE:  PostgreSQL server image (default: postgres:17)
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE="${ENGINE:-firebird}"
+ADAPTER="${ADAPTER:-sqldb}"
 FPC_IMAGE="${FPC_IMAGE:-fpc322-bookworm}"
 FB_IMAGE="${FB_IMAGE:-firebirdsql/firebird:5}"
 PG_IMAGE="${PG_IMAGE:-postgres:17}"
@@ -33,6 +37,22 @@ case "$ENGINE" in
   *) echo "ENGINE must be firebird or postgresql" >&2; exit 2 ;;
 esac
 
+ZEOS_MOUNT=""
+case "$ADAPTER" in
+  sqldb)
+    RUNNER_DIR=fpc; RUNNER=PascalDbIntegrationTestsFpc.lpr
+    ADAPTER_OPTS="-Fu/t/adapters/sqldb" ;;
+  zeos)
+    [ -d "${ZEOSDBO:-}/src/dbc" ] || { echo "ADAPTER=zeos needs ZEOSDBO (the ZeosLib folder containing src/dbc)" >&2; exit 2; }
+    ZEOS_MOUNT="$(cd "$ZEOSDBO" && pwd)"
+    command -v cygpath >/dev/null 2>&1 && ZEOS_MOUNT="$(cygpath -w "$ZEOS_MOUNT")"
+    ZEOS_MOUNT="-v $ZEOS_MOUNT:/zeos:ro"
+    RUNNER_DIR=fpc-zeos; RUNNER=PascalDbIntegrationTestsZeosFpc.lpr
+    ADAPTER_OPTS="-dPASCALDB_IT_ZEOS -Fu/t/adapters/zeos -Fu../fpc -Fi/zeos/src"
+    for d in core plain parsesql dbc component; do ADAPTER_OPTS="$ADAPTER_OPTS -Fu/zeos/src/$d"; done ;;
+  *) echo "ADAPTER must be sqldb or zeos" >&2; exit 2 ;;
+esac
+
 cleanup() {
   docker rm -f "$DB" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
@@ -46,20 +66,22 @@ python tools/gen_fpc_mirror.py --check
 docker network create "$NET" >/dev/null
 docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" "$SERVER_IMAGE" >/dev/null
 
-MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" \
+# $ZEOS_MOUNT is unquoted on purpose: empty (no option) or "-v <dir>:/zeos:ro".
+MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MOUNT \
   -e PASCALDB_IT_ENGINE="$ENGINE" \
   -e PASCALDB_IT_HOST="$DB" \
   -e PASCALDB_IT_DATABASE="$IT_DATABASE" \
   -e PASCALDB_IT_PASSWORD="$IT_PASSWORD" \
   -e CLIENT_PKG="$CLIENT_PKG" -e CLIENT_GLOB="$CLIENT_GLOB" -e DB_PORT="$DB_PORT" \
+  -e RUNNER_DIR="$RUNNER_DIR" -e RUNNER="$RUNNER" -e ADAPTER_OPTS="$ADAPTER_OPTS" \
   "$FPC_IMAGE" bash -c '
   set -e
   apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq "$CLIENT_PKG" >/dev/null 2>&1
   export PASCALDB_IT_CLIENT="$(ls $CLIENT_GLOB | head -1)"
   mkdir -p /t/u && cp -r /src/src /src/adapters /src/tests /t/
-  cd /t/tests/Integration/fpc
-  fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src -Fu/t/adapters/sqldb -Fu.. -FU/t/u -gh -gl -o/t/runner \
-    PascalDbIntegrationTestsFpc.lpr > /t/build.log 2>&1 || { grep -iE "error|fatal" /t/build.log | head -30; exit 1; }
+  cd /t/tests/Integration/$RUNNER_DIR
+  fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src $ADAPTER_OPTS -Fu.. -FU/t/u -gh -gl -o/t/runner \
+    $RUNNER > /t/build.log 2>&1 || { grep -iE "error|fatal" /t/build.log | head -30; exit 1; }
   for i in $(seq 1 60); do (echo > /dev/tcp/$PASCALDB_IT_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
   cd /t
   HEAPTRC="log=/t/heap.txt" ./runner --all --format=plain > /t/run.log 2>&1 || true

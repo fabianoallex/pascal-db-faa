@@ -159,9 +159,10 @@ The FPCUnit runner does both.
   `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi` (SQLdb) or
   `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos) and run it with
   `--all --format=plain`. The Zeos runners (FPC and Delphi) define `PASCALDB_IT_ZEOS` and
-  reuse the same fixtures; with Firebird they support only a local server (the database file
-  is deleted to drop it). Linux: `sh tools/test_integration_docker.sh` (`ENGINE=firebird` or
-  `postgresql`; server container + FPC container on a private network).
+  reuse the same fixtures. Linux: `sh tools/test_integration_docker.sh` (`ENGINE=firebird` or
+  `postgresql`; `ADAPTER=sqldb` (default) or `zeos`, the latter with `ZEOSDBO` pointing at the
+  ZeosLib folder, mounted into the container; server container + FPC container on a private
+  network).
 - **PostgreSQL server for Windows runs:** `docker run -d --name pascaldb-it-pg -p 55432:5432
   -e POSTGRES_PASSWORD=postgres postgres:17`, then run with `PASCALDB_IT_ENGINE=postgresql`
   and `PASCALDB_IT_PORT=55432` (user/password default to postgres/postgres). The client is
@@ -202,7 +203,7 @@ adapter only wraps its driver's connection, transaction and query (~250 lines):
 |---|---|---|---|
 | SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux) |
 | FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32) and PostgreSQL 17 (Win64) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
-| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32), PostgreSQL 17 with FPC and Delphi (Win64) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
+| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32 and Win64), PostgreSQL 17 with FPC and Delphi (Win64), Firebird 5 and PostgreSQL 17 with FPC on Linux — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
 
 A third-party adapter implements `IDBComponentProvider` (usually on top of the two units
 above), and `TDBFactory` does the rest: the core never has to change for a new driver.
@@ -243,7 +244,13 @@ whose native handle is already open (Zeos opens it with the first statement) cre
 **savepoint** instead, and the matching `Commit` only releases it — so every statement the
 adapter runs starts the `ITransaction` first. Queries call `FetchAll` after opening, so
 `RecordCount` is exact and commits are hard commits (with rows pending, Zeos uses commit
-retaining). Zeos can create a Firebird database (`CreateNewDatabase=true`) but not drop one.
+retaining). Firebird connections get `hard_commit=true` unless `ConnectionParams` sets it
+(see gotcha 16). Zeos can create a Firebird database (`CreateNewDatabase=true`) but has no
+call to drop one: `PdbZeosDropFirebirdDatabase` connects with `FirebirdAPI=legacy` and calls
+the client's `isc_drop_database` on Zeos's handle, which works on a remote server too (checked
+on Linux against a Firebird 5 container: the `.fdb` is gone after the run). The legacy API
+because `isc_drop_database` zeroes the handle and Zeos's `Disconnect` then skips the detach;
+the Firebird 3+ API's `IAttachment.dropDatabase` would free the attachment Zeos still holds.
 
 **Zeos on Delphi is compiled from source:** the Delphi Zeos runner finds ZeosLib through the
 `ZEOSDBO` environment variable (the folder containing `src\core`, `src\dbc`, ...), set in
@@ -347,3 +354,13 @@ public)" mentions there with links.
     the remaining ones. Separately, `PdbSQLdbUseClientLibrary` leaked its
     `TSQLDBLibraryLoader` when `Enabled := True` raised. Fix: never raise from finalization;
     free the loader on failure. Checked with a nonexistent library path: 14 errors, 0 leaks.
+16. **Zeos 8 + Firebird 3+ API: `Commit` loops forever after an `INSERT ... RETURNING` opened
+    as a query.** Observed on Linux (FPC 3.2.2, Debian's Firebird 3 client, Firebird 5
+    server): the contract test `OptionalColumn_OmittedByTag_UsesDefault` hung at 100% CPU;
+    gdb showed the main thread in `TZFirebirdTransaction.TestCachedResultsAndForceFetchAll`
+    (`ZDbcFirebird.pas`), which calls `Last` on each open cursor until it unregisters itself —
+    that cursor never does. It never showed up on Windows, where the 2.5 client makes Zeos use
+    the legacy API. Fix: `hard_commit=true` by default for Firebird connections (the adapter
+    already fetches every result on `Open`); the suite then passed on Linux and still passed on
+    Windows. Not measured: whether other statement kinds trigger it, and the Delphi runner with
+    the Firebird 3+ API.
