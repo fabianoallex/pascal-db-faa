@@ -2,23 +2,23 @@
 
 {$mode delphi}{$H+}
 
-{ ARQUIVO GERADO por tools/gen_fpc_mirror.py a partir de
-  tests/Unit/PascalDb.PoolTests.pas (DUnitX). Não edite à mão: edite o mestre DUnitX
-  e rode o script de novo. }
+{ GENERATED FILE — produced by tools/gen_fpc_mirror.py from
+  tests/Unit/PascalDb.PoolTests.pas (DUnitX). Do not edit by hand: edit the DUnitX
+  master and run the script again. }
 
-{ Testes do pool de conexões (PascalDb.Pool) sobre conexões, transações e
-  queries falsas: acquire/release, limite e timeout, ramp-up com o banco fora
-  do ar, teste de vivacidade, varredura de ociosas (relógio falso e thread
-  real), descarte de conexão quebrada durante o uso (inclusive Access
-  Violation na leitura de campo), eventos, snapshot e concorrência.
+{ Tests for the connection pool (PascalDb.Pool) over fake connections,
+  transactions and queries: acquire/release, limit and timeout, ramp-up with
+  the database offline, liveness check, idle sweep (fake clock and real
+  thread), discard of a connection broken during use (including an Access
+  Violation while reading a field), events, snapshot and concurrency.
 
-  Relógio e Sleep são substituídos via PascalDb.SystemContext (TFakeClock,
-  TFakeSleep); os eventos são gravados por TPoolEventRecorder — um método,
-  não closure, porque TPoolEventProc é "of object" no FPC 3.2.2.
+  Clock and Sleep are replaced through PascalDb.SystemContext (TFakeClock,
+  TFakeSleep); events are recorded by TPoolEventRecorder — a method, not a
+  closure, because TPoolEventProc is "of object" in FPC 3.2.2.
 
-  Mestre DUnitX, escrito no dialeto de asserts do FPCUnit (TAssert.*, via
-  PascalDb.DUnitXCompat). O espelho em tests/Unit/fpc é gerado a partir do
-  mestre por tools/gen_fpc_mirror.py — edite só o mestre. }
+  DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
+  PascalDb.DUnitXCompat). The mirror in tests/Unit/fpc is generated from the
+  master by tools/gen_fpc_mirror.py — edit only the master. }
 
 interface
 
@@ -37,7 +37,7 @@ uses
 
 type
 
-  { ITestableTransaction — extensão de teste para verificar comandos gravados }
+  { ITestableTransaction — test extension to inspect the recorded commands }
 
   ITestableTransaction = interface(ITransaction)
     ['{AEB38845-ABBF-4DC2-808F-2EACAC280440}']
@@ -50,10 +50,10 @@ type
 
   { TPoolEventRecorder
 
-    Grava os eventos do pool numa lista, para os testes inspecionarem depois.
-    Metodo (OnEvent) em vez de closure: TPoolEventProc e' "of object" no FPC
-    3.2.2 (ver PASCALDB_FUNCREFS em pascaldb.inc), e metodo e' o subconjunto
-    que compila nos dois compiladores. }
+    Records the pool's events in a list, for the tests to inspect afterwards.
+    A method (OnEvent) instead of a closure: TPoolEventProc is "of object" in
+    FPC 3.2.2 (see PASCALDB_FUNCREFS in pascaldb.inc), and a method is the
+    subset that compiles on both compilers. }
 
   TPoolEventRecorder = class
   private
@@ -99,8 +99,8 @@ type
     function GetSQLDialect: ISQLDialect;
     function IsConnected: Boolean;
     procedure Rollback;
-    // Mutável de propósito — testes usam pra simular o driver detectando a
-    // queda da conexão (IsConnected = False) depois de Open/ExecSql falhar.
+    // Mutable on purpose — tests use it to simulate the driver detecting the
+    // lost connection (IsConnected = False) after Open/ExecSql fails.
     property Connected: Boolean read FConnected write FConnected;
   end;
 
@@ -145,10 +145,10 @@ type
   end;
 
   { TFakeQueryResult
-    Mock de IQueryResult cujos métodos podem ser configurados pra lançar uma
-    exceção — usado pra reproduzir o cenário real (Access Violation durante a
-    leitura de campo, depois do Open já ter retornado com sucesso) que
-    TQueryWrapper.Open sozinho não cobria — ver TQueryResultWrapper
+    IQueryResult mock whose methods can be configured to raise an exception —
+    used to reproduce the real scenario (Access Violation while reading a
+    field, after Open had already returned successfully) that
+    TQueryWrapper.Open alone didn't cover — see TQueryResultWrapper
     (PascalDb.Pool). }
 
   TFakeQueryResult = class(TInterfacedObject, IQueryResult)
@@ -198,11 +198,11 @@ type
     function GetTransaction: ITransaction;
     function Open: IQueryResult;
     procedure SetSql(const ASql: string);
-    // Testes de Test_Pool_ConexaoDescartada_* / Test_Pool_ConexaoMantida_* —
-    // faz o próximo Open lançar AExceptionClass em vez de devolver nil.
+    // For Test_Pool_ConnectionDiscarded_* / Test_Pool_ConnectionKept_* —
+    // makes the next Open raise AExceptionClass instead of returning nil.
     procedure SetRaiseOnOpen(AExceptionClass: ExceptClass; const AMsg: string);
-    // Test_Pool_ConexaoDescartada_ExcecaoDuranteLeituraDeCampo — Open passa a
-    // devolver AResult (em vez de nil) quando não há SetRaiseOnOpen configurado.
+    // Test_Pool_ConnectionDiscarded_ExceptionWhileReadingField — Open returns
+    // AResult (instead of nil) when no SetRaiseOnOpen is configured.
     procedure SetOpenResult(AResult: IQueryResult);
   end;
 
@@ -216,9 +216,9 @@ type
     FNextQueryOpenExceptionClass: ExceptClass;
     FNextQueryOpenExceptionMsg: string;
     FNextQueryOpenResult: IQueryResult;
-    // Test_Pool_InicialConnections_BancoForaDoAr_* — quantas próximas chamadas
-    // a CreateConnection devem simular "banco fora do ar" (Connect falhando),
-    // decrementado a cada chamada até chegar a 0.
+    // Test_Pool_IniConnections_DatabaseOffline_* — how many upcoming calls to
+    // CreateConnection must simulate "database offline" (Connect failing),
+    // decremented on each call until it reaches 0.
     FCreateConnectionFailuresRemaining: Integer;
   public
     constructor Create;
@@ -231,25 +231,25 @@ type
     function GetPool: IDBConnectionPool;
     function SqlLoader: TSQLLoader;
     function TestConnection(AConn: IDBConnection): Boolean;
-    // Consumido uma vez pela próxima CreateQuery — usado pelos testes de
-    // descarte por conexão quebrada (ver TFakeQuery.SetRaiseOnOpen).
+    // Consumed once by the next CreateQuery — used by the broken-connection
+    // discard tests (see TFakeQuery.SetRaiseOnOpen).
     procedure RaiseOnNextQueryOpen(AExceptionClass: ExceptClass; const AMsg: string = 'fake error');
-    // Consumido uma vez pela próxima CreateQuery — Open dessa query devolve
-    // AResult (com sucesso) em vez de nil (ver TFakeQuery.SetOpenResult).
+    // Consumed once by the next CreateQuery — that query's Open returns
+    // AResult (successfully) instead of nil (see TFakeQuery.SetOpenResult).
     procedure SetNextQueryOpenResult(AResult: IQueryResult);
-    // Faz as próximas ACount chamadas a CreateConnection lançarem exceção
-    // (simula Connect falhando por banco fora do ar).
+    // Makes the next ACount calls to CreateConnection raise an exception
+    // (simulates Connect failing because the database is offline).
     procedure SimulateCreateConnectionFail(ACount: Integer);
     property SimulateTestConnectionFail: Boolean
       read FSimulateTestConnectionFail write FSimulateTestConnectionFail;
     property TestedConnections: TList<IDBConnection> read FTestedConnections;
-    // Última TFakeDBConnection criada por CreateConnection — testes usam pra
-    // simular IsConnected caindo depois de uma falha (ver TFakeDBConnection.Connected).
+    // Last TFakeDBConnection created by CreateConnection — tests use it to
+    // simulate IsConnected dropping after a failure (see TFakeDBConnection.Connected).
     property LastCreatedConnection: TFakeDBConnection read FLastCreatedConnection;
   end;
 
   { TPoolStressThread
-    Adquire e libera conexões do pool repetidamente para testar concorrência. }
+    Acquires and releases pool connections repeatedly to test concurrency. }
 
   TPoolStressThread = class(TThread)
   private
@@ -269,38 +269,38 @@ type
 
   TPoolTests = class(TTestCase)
   private
-    procedure MaxConnectionsEstoura_Method;
+    procedure MaxConnectionsExceeded_Method;
   published
-    procedure Test_Pool_InicioVazio;
-    procedure Test_Pool_InicialConnections;
-    procedure Test_Pool_MaxConnections_Estoura;
-    procedure Test_Pool_AquireELibera;
-    procedure Test_Pool_CriaNovaCon_QuandoVazio;
+    procedure Test_Pool_StartsEmpty;
+    procedure Test_Pool_IniConnections;
+    procedure Test_Pool_MaxConnections_Exceeded;
+    procedure Test_Pool_AcquireAndRelease;
+    procedure Test_Pool_CreatesNewConnection_WhenEmpty;
     procedure Test_Pool_AcquireQuery;
-    procedure Test_Pool_AcquireQueries_MesmaTransacao;
-    procedure Test_Pool_AcquireQueries_TransacoesDiferentes;
-    procedure Test_Pool_SharedTransaction_RegistraComandos;
-    procedure Test_Pool_TransacoesDiferentes_RegistraComandosSeparados;
-    procedure Test_Pool_ConexaoInativa120s;
-    procedure Test_Pool_ConexaoInativaFalha;
-    procedure Test_Pool_Concorrencia;
-    procedure Test_Pool_IdleTimeout_Desligado_NaoEvictaNada;
-    procedure Test_Pool_IdleTimeout_EvictaSoOsMaisAntigos;
-    procedure Test_Pool_IdleTimeout_RespeitaPiso_IniConnections;
-    procedure Test_Pool_IdleTimeoutConfig_ValoresPadraoEValidacao;
-    procedure Test_Pool_IdleSweep_DestroyNaoTrava;
-    procedure Test_Pool_Concorrencia_ComIdleSweepAtivo;
-    procedure Test_Pool_Evento_ConnectionCreated_DisparaAoCrescer;
-    procedure Test_Pool_Evento_ConnectionDiscarded_TestConnectionFalha;
-    procedure Test_Pool_Evento_AcquireTimeout_DisparaAntesDaExcecao;
-    procedure Test_Pool_Evento_IdleSweepClosed_DisparaComContagem;
-    procedure Test_Pool_ConexaoDescartada_ExcecaoExternal;
-    procedure Test_Pool_ConexaoDescartada_IsConnectedFalseAposExcecao;
-    procedure Test_Pool_ConexaoMantida_ExcecaoDeNegocio;
-    procedure Test_Pool_ConexaoDescartada_ExcecaoDuranteLeituraDeCampo;
-    procedure Test_EDatabaseUnavailableException_PreservaDetalheOriginal;
-    procedure Test_Pool_InicialConnections_BancoForaDoAr_NaoLancaExcecao;
-    procedure Test_Pool_InicialConnections_BancoForaDoAr_RecuperaNaProximaAcquire;
+    procedure Test_Pool_AcquireQueries_SameTransaction;
+    procedure Test_Pool_AcquireQueries_DifferentTransactions;
+    procedure Test_Pool_SharedTransaction_RecordsCommands;
+    procedure Test_Pool_DifferentTransactions_RecordSeparateCommands;
+    procedure Test_Pool_IdleConnection120s;
+    procedure Test_Pool_IdleConnectionFails;
+    procedure Test_Pool_Concurrency;
+    procedure Test_Pool_IdleTimeout_Off_EvictsNothing;
+    procedure Test_Pool_IdleTimeout_EvictsOnlyTheOldest;
+    procedure Test_Pool_IdleTimeout_RespectsIniConnectionsFloor;
+    procedure Test_Pool_IdleTimeoutConfig_DefaultsAndValidation;
+    procedure Test_Pool_IdleSweep_DestroyDoesNotHang;
+    procedure Test_Pool_Concurrency_WithIdleSweepActive;
+    procedure Test_Pool_Event_ConnectionCreated_FiresOnGrowth;
+    procedure Test_Pool_Event_ConnectionDiscarded_TestConnectionFails;
+    procedure Test_Pool_Event_AcquireTimeout_FiresBeforeException;
+    procedure Test_Pool_Event_IdleSweepClosed_FiresWithCount;
+    procedure Test_Pool_ConnectionDiscarded_ExternalException;
+    procedure Test_Pool_ConnectionDiscarded_IsConnectedFalseAfterException;
+    procedure Test_Pool_ConnectionKept_BusinessException;
+    procedure Test_Pool_ConnectionDiscarded_ExceptionWhileReadingField;
+    procedure Test_EDatabaseUnavailableException_PreservesOriginalDetail;
+    procedure Test_Pool_IniConnections_DatabaseOffline_DoesNotRaise;
+    procedure Test_Pool_IniConnections_DatabaseOffline_RecoversOnNextAcquire;
   end;
 
 implementation
@@ -686,7 +686,7 @@ begin
   if FCreateConnectionFailuresRemaining > 0 then
   begin
     Dec(FCreateConnectionFailuresRemaining);
-    raise Exception.Create('fake connect failure (banco fora do ar)');
+    raise Exception.Create('fake connect failure (database offline)');
   end;
 
   FLastCreatedConnection := TFakeDBConnection.Create;
@@ -763,7 +763,7 @@ end;
 
 { TPoolTests }
 
-procedure TPoolTests.MaxConnectionsEstoura_Method;
+procedure TPoolTests.MaxConnectionsExceeded_Method;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -781,7 +781,7 @@ begin
   end;
 end;
 
-procedure TPoolTests.Test_Pool_InicioVazio;
+procedure TPoolTests.Test_Pool_StartsEmpty;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -794,10 +794,10 @@ begin
   LFactory := TDBFactoryMock.Create;
   LPool := TConnectionPool.Create(LFactory, LConfig);
 
-  TAssert.AssertEquals('Pool vazio: GetPoolSize deve ser 0 quando IniConnections = 0', 0, LPool.GetPoolSize);
+  TAssert.AssertEquals('Empty pool: GetPoolSize must be 0 when IniConnections = 0', 0, LPool.GetPoolSize);
 end;
 
-procedure TPoolTests.Test_Pool_InicialConnections;
+procedure TPoolTests.Test_Pool_IniConnections;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -810,10 +810,10 @@ begin
   LFactory := TDBFactoryMock.Create;
   LPool := TConnectionPool.Create(LFactory, LConfig);
 
-  TAssert.AssertEquals('Pool deve ter 5 conexões iniciais', 5, LPool.GetPoolSize);
+  TAssert.AssertEquals('The pool must have 5 initial connections', 5, LPool.GetPoolSize);
 end;
 
-procedure TPoolTests.Test_Pool_InicialConnections_BancoForaDoAr_NaoLancaExcecao;
+procedure TPoolTests.Test_Pool_IniConnections_DatabaseOffline_DoesNotRaise;
 var
   LConfig: IConnectionPoolConfig;
   LMockFactory: TDBFactoryMock;
@@ -823,11 +823,11 @@ var
   LRecorder: TPoolEventRecorder;
   I: Integer;
 begin
-  // Simula TFDFactory.Create com o banco inteiramente fora do ar: as 3
-  // tentativas do ramp-up inicial falham. O construtor do pool não pode
-  // deixar a exceção subir (ver CreateInitialConnections) — é exatamente
-  // isso que garante que TFDFactory.Create/ConfigurarBancoXxx não derrube o
-  // boot da aplicação inteira.
+  // Simulates the factory being created with the database completely
+  // offline: all 3 attempts of the initial ramp-up fail. The pool constructor
+  // must not let the exception propagate (see CreateInitialConnections) —
+  // that is exactly what guarantees that building the factory doesn't bring
+  // down the whole application at boot.
   LConfig := TConnectionPoolConfig.Create;
   LConfig.IniConnections := 3;
   LConfig.MaxConnections := 10;
@@ -843,10 +843,10 @@ begin
     LPool := TConnectionPool.Create(LFactory, LConfig,
       LRecorder.OnEvent);
 
-    TAssert.AssertEquals('Nenhuma conexão deve sobreviver ao ramp-up com o banco fora do ar', 0, LPool.GetPoolSize);
-    TAssert.AssertEquals('FActiveConnections deve voltar a 0 após cada falha (sem vazamento de contagem)', 0, LPool.GetActiveConnections);
+    TAssert.AssertEquals('No connection may survive the ramp-up with the database offline', 0, LPool.GetPoolSize);
+    TAssert.AssertEquals('FActiveConnections must go back to 0 after each failure (no count leak)', 0, LPool.GetActiveConnections);
 
-    TAssert.AssertEquals('Cada falha do ramp-up inicial deve gerar 1 evento pekConnectionDiscarded', 3, LEvents.Count);
+    TAssert.AssertEquals('Each failure of the initial ramp-up must produce 1 pekConnectionDiscarded event', 3, LEvents.Count);
     for I := 0 to LEvents.Count - 1 do
     begin
       TAssert.AssertEquals(Ord(pekConnectionDiscarded), Ord(LEvents[I].Kind));
@@ -860,7 +860,7 @@ begin
   end;
 end;
 
-procedure TPoolTests.Test_Pool_InicialConnections_BancoForaDoAr_RecuperaNaProximaAcquire;
+procedure TPoolTests.Test_Pool_IniConnections_DatabaseOffline_RecoversOnNextAcquire;
 var
   LConfig: IConnectionPoolConfig;
   LMockFactory: TDBFactoryMock;
@@ -868,9 +868,9 @@ var
   LPool: IDBConnectionPool;
   LConn: IDBConnection;
 begin
-  // Banco volta a responder logo depois do boot: o ramp-up inicial falha
-  // (2 tentativas), mas a próxima AcquireConnection real (1ª requisição/health
-  // check) já não tem mais falha simulada e deve suceder normalmente.
+  // The database comes back right after boot: the initial ramp-up fails
+  // (2 attempts), but the next real AcquireConnection (first request/health
+  // check) no longer has a simulated failure and must succeed normally.
   LConfig := TConnectionPoolConfig.Create;
   LConfig.IniConnections := 2;
   LConfig.MaxConnections := 10;
@@ -881,16 +881,16 @@ begin
 
   LPool := TConnectionPool.Create(LFactory, LConfig);
 
-  TAssert.AssertEquals('Ramp-up inicial falhou por completo — pool nasce vazio, não quebrado', 0, LPool.GetActiveConnections);
+  TAssert.AssertEquals('The initial ramp-up failed completely — the pool starts empty, not broken', 0, LPool.GetActiveConnections);
 
   LConn := LPool.AcquireConnection;
 
-  TAssert.AssertTrue('Banco já respondendo: AcquireConnection deve suceder normalmente', Assigned(LConn));
+  TAssert.AssertTrue('Database responding again: AcquireConnection must succeed normally', Assigned(LConn));
   TAssert.AssertEquals(1, LPool.GetActiveConnections);
   TAssert.AssertEquals(Int64(1), LPool.GetSnapshot.TotalCreated);
 end;
 
-procedure TPoolTests.Test_Pool_MaxConnections_Estoura;
+procedure TPoolTests.Test_Pool_MaxConnections_Exceeded;
 var
   LRaised: Boolean;
 begin
@@ -898,18 +898,18 @@ begin
   try
     LRaised := False;
     try
-      MaxConnectionsEstoura_Method;
+      MaxConnectionsExceeded_Method;
     except
       on E: EPoolTimeoutException do
         LRaised := True;
     end;
-    TAssert.AssertTrue('Deve lançar EPoolTimeoutException quando IniConnections > MaxConnections', LRaised);
+    TAssert.AssertTrue('Must raise EPoolTimeoutException when IniConnections > MaxConnections', LRaised);
   finally
     TSleep.Reset;
   end;
 end;
 
-procedure TPoolTests.Test_Pool_AquireELibera;
+procedure TPoolTests.Test_Pool_AcquireAndRelease;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -923,22 +923,22 @@ begin
   LFactory := TDBFactoryMock.Create;
   LPool := TConnectionPool.Create(LFactory, LConfig);
 
-  TAssert.AssertEquals('1. Pool deve ter 3 conexões', 3, LPool.GetPoolSize);
+  TAssert.AssertEquals('1. The pool must have 3 connections', 3, LPool.GetPoolSize);
 
   LConn1 := LPool.AcquireConnection;
-  TAssert.AssertEquals('2. Pool deve ter 2 conexões após 1 acquire', 2, LPool.GetPoolSize);
+  TAssert.AssertEquals('2. The pool must have 2 connections after 1 acquire', 2, LPool.GetPoolSize);
 
   LConn2 := LPool.AcquireConnection;
-  TAssert.AssertEquals('3. Pool deve ter 1 conexão após 2 acquires', 1, LPool.GetPoolSize);
+  TAssert.AssertEquals('3. The pool must have 1 connection after 2 acquires', 1, LPool.GetPoolSize);
 
   LConn2 := nil;
-  TAssert.AssertEquals('4. Pool deve ter 2 conexões após release de LConn2', 2, LPool.GetPoolSize);
+  TAssert.AssertEquals('4. The pool must have 2 connections after releasing LConn2', 2, LPool.GetPoolSize);
 
   LConn1 := nil;
-  TAssert.AssertEquals('5. Pool deve ter 3 conexões após release de LConn1', 3, LPool.GetPoolSize);
+  TAssert.AssertEquals('5. The pool must have 3 connections after releasing LConn1', 3, LPool.GetPoolSize);
 end;
 
-procedure TPoolTests.Test_Pool_CriaNovaCon_QuandoVazio;
+procedure TPoolTests.Test_Pool_CreatesNewConnection_WhenEmpty;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -952,15 +952,15 @@ begin
   LFactory := TDBFactoryMock.Create;
   LPool := TConnectionPool.Create(LFactory, LConfig);
 
-  TAssert.AssertEquals('1. Pool deve ter 0 conexões ociosas', 0, LPool.GetPoolSize);
-  TAssert.AssertEquals('2. Pool deve ter 0 conexões ativas', 0, LPool.GetActiveConnections);
+  TAssert.AssertEquals('1. The pool must have 0 idle connections', 0, LPool.GetPoolSize);
+  TAssert.AssertEquals('2. The pool must have 0 active connections', 0, LPool.GetActiveConnections);
 
   LConn := LPool.AcquireConnection;
 
-  TAssert.AssertEquals('3. Pool ainda deve ter 0 conexões ociosas', 0, LPool.GetPoolSize);
-  TAssert.AssertEquals('4. Pool deve ter 1 conexão ativa', 1, LPool.GetActiveConnections);
+  TAssert.AssertEquals('3. The pool must still have 0 idle connections', 0, LPool.GetPoolSize);
+  TAssert.AssertEquals('4. The pool must have 1 active connection', 1, LPool.GetActiveConnections);
 
-  TAssert.AssertTrue('Conexão não deve ser nil', Assigned(LConn));
+  TAssert.AssertTrue('The connection must not be nil', Assigned(LConn));
 end;
 
 procedure TPoolTests.Test_Pool_AcquireQuery;
@@ -981,11 +981,11 @@ begin
   LQuery := nil;
   LScope := LPool.AcquireQuery(LQuery);
 
-  TAssert.AssertTrue('Query não deve ser nil', Assigned(LQuery));
-  TAssert.AssertTrue('IScopeTransaction não deve ser nil', Assigned(LScope));
+  TAssert.AssertTrue('The query must not be nil', Assigned(LQuery));
+  TAssert.AssertTrue('IScopeTransaction must not be nil', Assigned(LScope));
 end;
 
-procedure TPoolTests.Test_Pool_AcquireQueries_MesmaTransacao;
+procedure TPoolTests.Test_Pool_AcquireQueries_SameTransaction;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1004,12 +1004,12 @@ begin
   LScope1 := LPool.AcquireQuery(LQuery1);
   LScope2 := LPool.AcquireQuery(LQuery2, LScope1.GetOriginalTransaction);
 
-  TAssert.AssertTrue('Query1 não deve ser nil', Assigned(LQuery1));
-  TAssert.AssertTrue('Query2 não deve ser nil', Assigned(LQuery2));
-  TAssert.AssertTrue('As transações das duas queries devem ser a mesma instância', LScope1.GetOriginalTransaction = LScope2.GetOriginalTransaction);
+  TAssert.AssertTrue('Query1 must not be nil', Assigned(LQuery1));
+  TAssert.AssertTrue('Query2 must not be nil', Assigned(LQuery2));
+  TAssert.AssertTrue('The two queries must share the same transaction instance', LScope1.GetOriginalTransaction = LScope2.GetOriginalTransaction);
 end;
 
-procedure TPoolTests.Test_Pool_AcquireQueries_TransacoesDiferentes;
+procedure TPoolTests.Test_Pool_AcquireQueries_DifferentTransactions;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1028,14 +1028,14 @@ begin
   LScope1 := LPool.AcquireQuery(LQuery1);
   LScope2 := LPool.AcquireQuery(LQuery2);
 
-  TAssert.AssertTrue('Query1 não deve ser nil', Assigned(LQuery1));
-  TAssert.AssertTrue('Query2 não deve ser nil', Assigned(LQuery2));
-  TAssert.AssertTrue('Scope1 não deve ser nil', Assigned(LScope1));
-  TAssert.AssertTrue('Scope2 não deve ser nil', Assigned(LScope2));
-  TAssert.AssertTrue('As transações das duas queries devem ser instâncias diferentes', LScope1.GetOriginalTransaction <> LScope2.GetOriginalTransaction);
+  TAssert.AssertTrue('Query1 must not be nil', Assigned(LQuery1));
+  TAssert.AssertTrue('Query2 must not be nil', Assigned(LQuery2));
+  TAssert.AssertTrue('Scope1 must not be nil', Assigned(LScope1));
+  TAssert.AssertTrue('Scope2 must not be nil', Assigned(LScope2));
+  TAssert.AssertTrue('The two queries must have different transaction instances', LScope1.GetOriginalTransaction <> LScope2.GetOriginalTransaction);
 end;
 
-procedure TPoolTests.Test_Pool_SharedTransaction_RegistraComandos;
+procedure TPoolTests.Test_Pool_SharedTransaction_RecordsCommands;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1059,11 +1059,11 @@ begin
   LQuery2.SetSql('CMD2');
   LQuery2.ExecSql;
 
-  TAssert.AssertTrue('Transação deve implementar ITestableTransaction', Supports(LScope.GetOriginalTransaction, ITestableTransaction, LTestable));
-  TAssert.AssertEquals('Ambos os comandos devem estar registrados na mesma transação compartilhada', 2, LTestable.GetCommands.Count);
+  TAssert.AssertTrue('The transaction must implement ITestableTransaction', Supports(LScope.GetOriginalTransaction, ITestableTransaction, LTestable));
+  TAssert.AssertEquals('Both commands must be recorded in the same shared transaction', 2, LTestable.GetCommands.Count);
 end;
 
-procedure TPoolTests.Test_Pool_TransacoesDiferentes_RegistraComandosSeparados;
+procedure TPoolTests.Test_Pool_DifferentTransactions_RecordSeparateCommands;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1093,14 +1093,14 @@ begin
   Supports(LScope1.GetOriginalTransaction, ITestableTransaction, LTestable1);
   Supports(LScope2.GetOriginalTransaction, ITestableTransaction, LTestable2);
 
-  TAssert.AssertEquals('Transação 1 deve ter somente 1 comando', 1, LTestable1.GetCommands.Count);
-  TAssert.AssertEquals('Transação 2 deve ter 2 comandos', 2, LTestable2.GetCommands.Count);
+  TAssert.AssertEquals('Transaction 1 must have only 1 command', 1, LTestable1.GetCommands.Count);
+  TAssert.AssertEquals('Transaction 2 must have 2 commands', 2, LTestable2.GetCommands.Count);
 end;
 
-procedure TPoolTests.Test_Pool_ConexaoInativa120s;
+procedure TPoolTests.Test_Pool_IdleConnection120s;
 
-  procedure TestarSegundos(const AMensagem: string; ASegundos: Integer;
-    ATestedCountEsperado: Integer);
+  procedure CheckSeconds(const AMessage: string; ASeconds: Integer;
+    AExpectedTestedCount: Integer);
   var
     LConfig: IConnectionPoolConfig;
     LFactory: IDBFactory;
@@ -1114,8 +1114,8 @@ procedure TPoolTests.Test_Pool_ConexaoInativa120s;
 
     LClock := TFakeClock.Create;
     LClock.SetDefaultTime(BaseTime);
-    LClock.EnqueueTime(BaseTime);                                // liberação em CreateInitialConnections
-    LClock.EnqueueTime(BaseTime + (ASegundos / 86400));          // verificação em AcquireConnection
+    LClock.EnqueueTime(BaseTime);                                // release in CreateInitialConnections
+    LClock.EnqueueTime(BaseTime + (ASeconds / 86400));          // check in AcquireConnection
 
     TClock.SetClock(LClock);
     try
@@ -1127,24 +1127,24 @@ procedure TPoolTests.Test_Pool_ConexaoInativa120s;
       LFactory := LMockFactory;
       LPool := TConnectionPool.Create(LFactory, LConfig);
 
-      TAssert.AssertEquals('Antes do acquire não deve haver conexões testadas', 0, LMockFactory.TestedConnections.Count);
+      TAssert.AssertEquals('No connection may have been tested before the acquire', 0, LMockFactory.TestedConnections.Count);
 
       LConn := LPool.AcquireConnection;
 
-      TAssert.AssertEquals(AMensagem, ATestedCountEsperado, LMockFactory.TestedConnections.Count);
+      TAssert.AssertEquals(AMessage, AExpectedTestedCount, LMockFactory.TestedConnections.Count);
     finally
       TClock.Reset;
     end;
   end;
 
 begin
-  TestarSegundos('Com 120s: deve testar a conexão (Count=1)',  120, 1);
-  TestarSegundos('Com 119s: não deve testar (Count=0)',        119, 0);
-  TestarSegundos('Com 1s: não deve testar (Count=0)',            1, 0);
-  TestarSegundos('Com 5280s: deve testar a conexão (Count=1)', 5280, 1);
+  CheckSeconds('At 120s: must test the connection (Count=1)',  120, 1);
+  CheckSeconds('At 119s: must not test (Count=0)',        119, 0);
+  CheckSeconds('At 1s: must not test (Count=0)',            1, 0);
+  CheckSeconds('At 5280s: must test the connection (Count=1)', 5280, 1);
 end;
 
-procedure TPoolTests.Test_Pool_ConexaoInativaFalha;
+procedure TPoolTests.Test_Pool_IdleConnectionFails;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1158,12 +1158,12 @@ begin
 
   LClock := TFakeClock.Create;
   LClock.SetDefaultTime(BaseTime);
-  // Liberações durante CreateInitialConnections (2 conexões, em ordem de índice)
+  // Releases during CreateInitialConnections (2 connections, in index order)
   LClock.EnqueueTime(BaseTime);                      // LastRelease conn1
   LClock.EnqueueTime(BaseTime + (50 / 86400));       // LastRelease conn2
-  // Verificações em AcquireConnection
-  LClock.EnqueueTime(BaseTime + (121 / 86400));      // 121s p/ conn1 → testa → falha → remove
-  LClock.EnqueueTime(BaseTime + (130 / 86400));      // 80s p/ conn2 → não testa → usa
+  // Checks in AcquireConnection
+  LClock.EnqueueTime(BaseTime + (121 / 86400));      // 121s for conn1 → tested → fails → removed
+  LClock.EnqueueTime(BaseTime + (130 / 86400));      // 80s for conn2 → not tested → used
 
   TClock.SetClock(LClock);
   try
@@ -1175,15 +1175,15 @@ begin
     LFactory := LMockFactory;
     LPool := TConnectionPool.Create(LFactory, LConfig);
 
-    TAssert.AssertEquals('Pool deve ter 2 conexões ativas após inicialização', 2, LPool.GetActiveConnections);
+    TAssert.AssertEquals('The pool must have 2 active connections after initialization', 2, LPool.GetActiveConnections);
 
     LMockFactory.SimulateTestConnectionFail := True;
 
     LConn := LPool.AcquireConnection;
 
-    TAssert.AssertEquals('Após remover a conexão falha, deve restar 1 conexão ativa', 1, LPool.GetActiveConnections);
+    TAssert.AssertEquals('After removing the failed connection, 1 active connection must remain', 1, LPool.GetActiveConnections);
 
-    TAssert.AssertTrue('Deve retornar a segunda conexão (saudável)', Assigned(LConn));
+    TAssert.AssertTrue('Must return the second (healthy) connection', Assigned(LConn));
   finally
     TClock.Reset;
   end;
@@ -1193,7 +1193,7 @@ end;
 
 constructor TPoolStressThread.Create(APool: IDBConnectionPool; AIterations: Integer);
 begin
-  inherited Create(True); // suspenso — aguarda chamada explícita de Start
+  inherited Create(True); // suspended — waits for an explicit call to Start
   FPool := APool;
   FIterations := AIterations;
   FreeOnTerminate := False;
@@ -1209,7 +1209,7 @@ begin
     for I := 1 to FIterations do
     begin
       LConn := FPool.AcquireConnection;
-      LConn := nil; // libera imediatamente → devolve ao pool
+      LConn := nil; // release immediately → back to the pool
     end;
   except
     on E: Exception do
@@ -1220,10 +1220,10 @@ begin
   end;
 end;
 
-procedure TPoolTests.Test_Pool_Concorrencia;
+procedure TPoolTests.Test_Pool_Concurrency;
 const
   NUM_THREADS = 20;
-  ITERACOES   = 50;
+  ITERATIONS   = 50;
   MAX_CONNS   = 5;
 var
   LConfig: IConnectionPoolConfig;
@@ -1232,39 +1232,39 @@ var
   LThreads: array[1..NUM_THREADS] of TPoolStressThread;
   I: Integer;
 begin
-  // TFakeSleep evita espera real: threads em contenção reentram imediatamente
+  // TFakeSleep avoids real waiting: contending threads retry immediately
   TSleep.SetSleep(TFakeSleep.Create);
   try
     LConfig := TConnectionPoolConfig.Create;
     LConfig.IniConnections  := 0;
     LConfig.MaxConnections  := MAX_CONNS;
-    LConfig.WaitMaxAttemps  := 2000; // suficiente para 20 threads × 50 iterações
+    LConfig.WaitMaxAttemps  := 2000; // enough for 20 threads × 50 iterations
     LConfig.WaitMilliseconds := 0;
 
     LFactory := TDBFactoryMock.Create;
     LPool := TConnectionPool.Create(LFactory, LConfig);
 
-    // Cria todas as threads suspensas
+    // Create every thread suspended
     for I := 1 to NUM_THREADS do
-      LThreads[I] := TPoolStressThread.Create(LPool, ITERACOES);
+      LThreads[I] := TPoolStressThread.Create(LPool, ITERATIONS);
 
-    // Dispara todas de uma vez para forçar concorrência real
+    // Start them all at once to force real concurrency
     for I := 1 to NUM_THREADS do
       LThreads[I].Start;
 
-    // Aguarda cada thread e verifica que não gerou erro
+    // Wait for each thread and check it didn't report an error
     for I := 1 to NUM_THREADS do
     begin
       LThreads[I].WaitFor;
-      TAssert.AssertFalse(Format('Thread %d reportou erro: %s', [I, LThreads[I].ErrorMessage]), LThreads[I].ErrorOccurred);
+      TAssert.AssertFalse(Format('Thread %d reported an error: %s', [I, LThreads[I].ErrorMessage]), LThreads[I].ErrorOccurred);
       LThreads[I].Free;
     end;
 
-    // Após todas as threads terminarem, nenhuma conexão deve estar em uso:
-    // GetPoolSize (ociosas) deve igualar GetActiveConnections (total físico criado)
-    TAssert.AssertEquals('Todas as conexões físicas devem ter voltado ao pool — nenhum vazamento', LPool.GetActiveConnections, LPool.GetPoolSize);
+    // After every thread finishes, no connection may still be in use:
+    // GetPoolSize (idle) must equal GetActiveConnections (total physical created)
+    TAssert.AssertEquals('Every physical connection must be back in the pool — no leak', LPool.GetActiveConnections, LPool.GetPoolSize);
 
-    TAssert.AssertTrue('O pool nunca deve ter criado mais conexões do que o limite máximo', LPool.GetActiveConnections <= MAX_CONNS);
+    TAssert.AssertTrue('The pool must never have created more connections than the maximum', LPool.GetActiveConnections <= MAX_CONNS);
   finally
     TSleep.Reset;
   end;
@@ -1272,17 +1272,18 @@ end;
 
 { TPoolTests — idle timeout }
 
-procedure TPoolTests.Test_Pool_IdleTimeout_Desligado_NaoEvictaNada;
+procedure TPoolTests.Test_Pool_IdleTimeout_Off_EvictsNothing;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
-  // LPoolIntf segura a referência contada do início ao fim (mesmo padrão dos
-  // testes originais, ex. Test_Pool_AquireELibera) — sem isso, os ciclos de
-  // Acquire/libera abaixo derrubam a contagem de TConnectionPool a zero no
-  // meio do teste e o _Release automático do TInterfacedObject destrói o
-  // pool ali mesmo; o LPool.Free explícito no final vira free duplo.
-  // LPool é só uma "view" da classe concreta, pra chamar SweepIdleConnections
-  // (que não faz parte de IDBConnectionPool) — nunca dar Free nela.
+  // LPoolIntf holds the counted reference from start to end (same pattern as
+  // the original tests, e.g. Test_Pool_AcquireAndRelease) — without it, the
+  // Acquire/release cycles below drop TConnectionPool's count to zero in the
+  // middle of the test and TInterfacedObject's automatic _Release destroys
+  // the pool right there; the explicit LPool.Free at the end becomes a double
+  // free. LPool is just a "view" of the concrete class, to call
+  // SweepIdleConnections (which isn't part of IDBConnectionPool) — never Free
+  // it.
   LPoolIntf: IDBConnectionPool;
   LPool: TConnectionPool;
   LClock: TFakeClock;
@@ -1294,7 +1295,7 @@ begin
   LClock.SetDefaultTime(BaseTime);
   TClock.SetClock(LClock);
   try
-    // IdleTimeoutSeconds não configurado -> fica 0 = desligado (padrão)
+    // IdleTimeoutSeconds not configured -> stays 0 = off (default)
     LConfig := TConnectionPoolConfig.Create;
     LConfig.IniConnections := 0;
     LConfig.MaxConnections := 10;
@@ -1306,25 +1307,25 @@ begin
     LConn1 := LPoolIntf.AcquireConnection;
     LConn2 := LPoolIntf.AcquireConnection;
     LConn1 := nil;
-    LConn2 := nil; // 2 conexões ociosas no pool
+    LConn2 := nil; // 2 idle connections in the pool
 
-    TAssert.AssertEquals('Pré-condição: 2 conexões ociosas', 2, LPoolIntf.GetPoolSize);
+    TAssert.AssertEquals('Precondition: 2 idle connections', 2, LPoolIntf.GetPoolSize);
 
-    LClock.SetDefaultTime(BaseTime + (100000 / 86400)); // bem além de qualquer limite razoável
+    LClock.SetDefaultTime(BaseTime + (100000 / 86400)); // well beyond any reasonable limit
     LPool.SweepIdleConnections;
 
-    TAssert.AssertEquals('IdleTimeoutSeconds=0 (padrão): SweepIdleConnections não deve remover nada', 2, LPoolIntf.GetPoolSize);
-    TAssert.AssertEquals('IdleTimeoutSeconds=0 (padrão): contagem de ativas não deve mudar', 2, LPoolIntf.GetActiveConnections);
+    TAssert.AssertEquals('IdleTimeoutSeconds=0 (default): SweepIdleConnections must not remove anything', 2, LPoolIntf.GetPoolSize);
+    TAssert.AssertEquals('IdleTimeoutSeconds=0 (default): the active count must not change', 2, LPoolIntf.GetActiveConnections);
   finally
     TClock.Reset;
   end;
 end;
 
-procedure TPoolTests.Test_Pool_IdleTimeout_EvictaSoOsMaisAntigos;
+procedure TPoolTests.Test_Pool_IdleTimeout_EvictsOnlyTheOldest;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
-  LPoolIntf: IDBConnectionPool; // ver comentário em Test_Pool_IdleTimeout_Desligado_NaoEvictaNada
+  LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
   LPool: TConnectionPool;
   LClock: TFakeClock;
   LConn1, LConn2, LConn3: IDBConnection;
@@ -1335,10 +1336,10 @@ begin
   LClock.SetDefaultTime(BaseTime);
   TClock.SetClock(LClock);
   try
-    // IdleTimeoutSeconds fica 0 (padrão) de propósito: assim NENHUMA thread
-    // de varredura é criada — o teste chama SweepIdleConnections(60)
-    // diretamente, na thread do próprio teste, com TFakeClock. Determinístico,
-    // sem concorrência nenhuma envolvida.
+    // IdleTimeoutSeconds stays 0 (default) on purpose: that way NO sweep
+    // thread is created — the test calls SweepIdleConnections(60) directly,
+    // on the test's own thread, with TFakeClock. Deterministic, with no
+    // concurrency involved at all.
     LConfig := TConnectionPoolConfig.Create;
     LConfig.IniConnections := 0;
     LConfig.MaxConnections := 10;
@@ -1350,32 +1351,32 @@ begin
     LConn1 := LPoolIntf.AcquireConnection;
     LConn2 := LPoolIntf.AcquireConnection;
     LConn3 := LPoolIntf.AcquireConnection;
-    TAssert.AssertEquals('Pré-condição: 3 conexões ativas', 3, LPoolIntf.GetActiveConnections);
+    TAssert.AssertEquals('Precondition: 3 active connections', 3, LPoolIntf.GetActiveConnections);
 
     LClock.SetDefaultTime(BaseTime);
-    LConn1 := nil; // LastRelease = T0        (65s de idade no sweep abaixo)
+    LConn1 := nil; // LastRelease = T0        (65s old at the sweep below)
     LClock.SetDefaultTime(BaseTime + (10 / 86400));
-    LConn2 := nil; // LastRelease = T0+10s     (55s de idade — NÃO deve sair)
+    LConn2 := nil; // LastRelease = T0+10s     (55s old — must NOT go)
     LClock.SetDefaultTime(BaseTime + (20 / 86400));
-    LConn3 := nil; // LastRelease = T0+20s     (45s de idade — NÃO deve sair)
+    LConn3 := nil; // LastRelease = T0+20s     (45s old — must NOT go)
 
-    TAssert.AssertEquals('Pré-condição: 3 conexões ociosas no pool', 3, LPoolIntf.GetPoolSize);
+    TAssert.AssertEquals('Precondition: 3 idle connections in the pool', 3, LPoolIntf.GetPoolSize);
 
-    LClock.SetDefaultTime(BaseTime + (65 / 86400)); // "agora" = T0+65s
+    LClock.SetDefaultTime(BaseTime + (65 / 86400)); // "now" = T0+65s
     LPool.SweepIdleConnections(60);
 
-    TAssert.AssertEquals('Só a conexão liberada em T0 (65s de idade, >=60) deve ser removida', 2, LPoolIntf.GetPoolSize);
-    TAssert.AssertEquals('FActiveConnections deve acompanhar a remoção', 2, LPoolIntf.GetActiveConnections);
+    TAssert.AssertEquals('Only the connection released at T0 (65s old, >=60) must be removed', 2, LPoolIntf.GetPoolSize);
+    TAssert.AssertEquals('FActiveConnections must follow the removal', 2, LPoolIntf.GetActiveConnections);
   finally
     TClock.Reset;
   end;
 end;
 
-procedure TPoolTests.Test_Pool_IdleTimeout_RespeitaPiso_IniConnections;
+procedure TPoolTests.Test_Pool_IdleTimeout_RespectsIniConnectionsFloor;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
-  LPoolIntf: IDBConnectionPool; // ver comentário em Test_Pool_IdleTimeout_Desligado_NaoEvictaNada
+  LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
   LPool: TConnectionPool;
   LClock: TFakeClock;
   LConn1, LConn2, LConn3: IDBConnection;
@@ -1386,77 +1387,77 @@ begin
   LClock.SetDefaultTime(BaseTime);
   TClock.SetClock(LClock);
   try
-    // IdleTimeoutSeconds fica 0 (padrão) de propósito — ver comentário no
-    // teste Test_Pool_IdleTimeout_EvictaSoOsMaisAntigos.
+    // IdleTimeoutSeconds stays 0 (default) on purpose — see the comment in
+    // Test_Pool_IdleTimeout_EvictsOnlyTheOldest.
     LConfig := TConnectionPoolConfig.Create;
-    LConfig.IniConnections := 2; // piso: nunca evictar abaixo disso
+    LConfig.IniConnections := 2; // floor: never evict below this
     LConfig.MaxConnections := 10;
 
     LFactory := TDBFactoryMock.Create;
     LPoolIntf := TConnectionPool.Create(LFactory, LConfig);
     LPool := LPoolIntf as TConnectionPool;
 
-    // CreateInitialConnections já deixou 2 ociosas (LastRelease = BaseTime).
-    // Esvazia as 2 (reuso) e força a criação de uma 3ª nova, depois libera
-    // as 3 — pra ter 3 conexões ociosas de verdade, todas velhas o bastante.
-    LConn1 := LPoolIntf.AcquireConnection; // reusa uma das 2 do pool
-    LConn2 := LPoolIntf.AcquireConnection; // reusa a outra
-    LConn3 := LPoolIntf.AcquireConnection; // pool vazio agora -> cria nova (3ª física)
+    // CreateInitialConnections already left 2 idle (LastRelease = BaseTime).
+    // Drain both (reuse) and force the creation of a new 3rd one, then
+    // release all 3 — to have 3 really idle connections, all old enough.
+    LConn1 := LPoolIntf.AcquireConnection; // reuses one of the 2 in the pool
+    LConn2 := LPoolIntf.AcquireConnection; // reuses the other
+    LConn3 := LPoolIntf.AcquireConnection; // pool empty now -> creates a new one (3rd physical)
     LConn1 := nil;
     LConn2 := nil;
     LConn3 := nil;
-    TAssert.AssertEquals('Pré-condição: 3 conexões ociosas', 3, LPoolIntf.GetPoolSize);
+    TAssert.AssertEquals('Precondition: 3 idle connections', 3, LPoolIntf.GetPoolSize);
 
-    // Todas MUITO além do limite de 60s — sem piso, evictaria tudo.
+    // All of them WAY past the 60s limit — without a floor, it would evict everything.
     LClock.SetDefaultTime(BaseTime + (100000 / 86400));
     LPool.SweepIdleConnections(60);
 
-    TAssert.AssertEquals('Nunca deve evictar abaixo de IniConnections, mesmo com todas idosas', 2, LPoolIntf.GetPoolSize);
-    TAssert.AssertEquals('FActiveConnections deve parar no piso também', 2, LPoolIntf.GetActiveConnections);
+    TAssert.AssertEquals('Must never evict below IniConnections, even with all of them old', 2, LPoolIntf.GetPoolSize);
+    TAssert.AssertEquals('FActiveConnections must stop at the floor too', 2, LPoolIntf.GetActiveConnections);
   finally
     TClock.Reset;
   end;
 end;
 
-procedure TPoolTests.Test_Pool_IdleTimeoutConfig_ValoresPadraoEValidacao;
+procedure TPoolTests.Test_Pool_IdleTimeoutConfig_DefaultsAndValidation;
 var
   LConfig: IConnectionPoolConfig;
 begin
   LConfig := TConnectionPoolConfig.Create;
 
-  TAssert.AssertEquals('Padrão de IdleTimeoutSeconds deve ser 0 (desligado)', 0, LConfig.IdleTimeoutSeconds);
-  TAssert.AssertEquals('Padrão de IdleCheckIntervalMs deve ser 30000ms', 30000, LConfig.IdleCheckIntervalMs);
+  TAssert.AssertEquals('IdleTimeoutSeconds must default to 0 (off)', 0, LConfig.IdleTimeoutSeconds);
+  TAssert.AssertEquals('IdleCheckIntervalMs must default to 30000ms', 30000, LConfig.IdleCheckIntervalMs);
 
   LConfig.IdleCheckIntervalMs := 0;
-  TAssert.AssertEquals('IdleCheckIntervalMs <= 0 deve ser ignorado (mantém o padrão)', 30000, LConfig.IdleCheckIntervalMs);
+  TAssert.AssertEquals('IdleCheckIntervalMs <= 0 must be ignored (keeps the default)', 30000, LConfig.IdleCheckIntervalMs);
 
   LConfig.IdleCheckIntervalMs := -5;
-  TAssert.AssertEquals('IdleCheckIntervalMs negativo deve ser ignorado', 30000, LConfig.IdleCheckIntervalMs);
+  TAssert.AssertEquals('A negative IdleCheckIntervalMs must be ignored', 30000, LConfig.IdleCheckIntervalMs);
 
   LConfig.IdleCheckIntervalMs := 5000;
-  TAssert.AssertEquals('IdleCheckIntervalMs válido deve ser aceito', 5000, LConfig.IdleCheckIntervalMs);
+  TAssert.AssertEquals('A valid IdleCheckIntervalMs must be accepted', 5000, LConfig.IdleCheckIntervalMs);
 
   LConfig.IdleTimeoutSeconds := -1;
-  TAssert.AssertEquals('IdleTimeoutSeconds negativo deve ser ignorado', 0, LConfig.IdleTimeoutSeconds);
+  TAssert.AssertEquals('A negative IdleTimeoutSeconds must be ignored', 0, LConfig.IdleTimeoutSeconds);
 
   LConfig.IdleTimeoutSeconds := 45;
-  TAssert.AssertEquals('IdleTimeoutSeconds válido (>=0) deve ser aceito', 45, LConfig.IdleTimeoutSeconds);
+  TAssert.AssertEquals('A valid IdleTimeoutSeconds (>=0) must be accepted', 45, LConfig.IdleTimeoutSeconds);
 end;
 
-procedure TPoolTests.Test_Pool_IdleSweep_DestroyNaoTrava;
+procedure TPoolTests.Test_Pool_IdleSweep_DestroyDoesNotHang;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
   LPool: TConnectionPool;
   LStart, LElapsed: UInt64;
 begin
-  // Sem TFakeClock/TFakeSleep aqui de propósito: quer a thread de varredura
-  // REAL rodando, pra provar que Destroy não trava nem AV mesmo com ela viva.
+  // No TFakeClock/TFakeSleep here on purpose: we want the REAL sweep thread
+  // running, to prove Destroy neither hangs nor raises an AV with it alive.
   LConfig := TConnectionPoolConfig.Create;
   LConfig.IniConnections := 1;
   LConfig.MaxConnections := 10;
   LConfig.IdleTimeoutSeconds := 1;
-  LConfig.IdleCheckIntervalMs := 5000; // não importa: SetEvent acorda na hora, não espera isso
+  LConfig.IdleCheckIntervalMs := 5000; // irrelevant: SetEvent wakes it immediately, it doesn't wait this long
 
   LFactory := TDBFactoryMock.Create;
   LPool := TConnectionPool.Create(LFactory, LConfig);
@@ -1465,14 +1466,14 @@ begin
   LPool.Free;
   LElapsed := PdbTickMs - LStart;
 
-  TAssert.AssertTrue(Format('Destroy com sweep ativo deveria ser quase instantâneo (SetEvent), levou %dms',
+  TAssert.AssertTrue(Format('Destroy with an active sweep should be almost instant (SetEvent), took %dms',
       [LElapsed]), LElapsed < 2000);
 end;
 
-procedure TPoolTests.Test_Pool_Concorrencia_ComIdleSweepAtivo;
+procedure TPoolTests.Test_Pool_Concurrency_WithIdleSweepActive;
 const
   NUM_THREADS = 20;
-  ITERACOES   = 50;
+  ITERATIONS   = 50;
   MAX_CONNS   = 5;
 var
   LConfig: IConnectionPoolConfig;
@@ -1481,9 +1482,9 @@ var
   LThreads: array[1..NUM_THREADS] of TPoolStressThread;
   I: Integer;
 begin
-  // Igual Test_Pool_Concorrencia, mas com a thread de varredura REAL ativa e
-  // rodando em paralelo (intervalo curto) — cobre o lock entre
-  // Acquire/Release concorrentes e SweepIdleConnections ao mesmo tempo.
+  // Same as Test_Pool_Concurrency, but with the REAL sweep thread active and
+  // running in parallel (short interval) — covers the lock between
+  // concurrent Acquire/Release and SweepIdleConnections at the same time.
   TSleep.SetSleep(TFakeSleep.Create);
   try
     LConfig := TConnectionPoolConfig.Create;
@@ -1498,7 +1499,7 @@ begin
     LPool := TConnectionPool.Create(LFactory, LConfig);
 
     for I := 1 to NUM_THREADS do
-      LThreads[I] := TPoolStressThread.Create(LPool, ITERACOES);
+      LThreads[I] := TPoolStressThread.Create(LPool, ITERATIONS);
 
     for I := 1 to NUM_THREADS do
       LThreads[I].Start;
@@ -1506,20 +1507,20 @@ begin
     for I := 1 to NUM_THREADS do
     begin
       LThreads[I].WaitFor;
-      TAssert.AssertFalse(Format('Thread %d reportou erro: %s', [I, LThreads[I].ErrorMessage]), LThreads[I].ErrorOccurred);
+      TAssert.AssertFalse(Format('Thread %d reported an error: %s', [I, LThreads[I].ErrorMessage]), LThreads[I].ErrorOccurred);
       LThreads[I].Free;
     end;
 
-    TAssert.AssertEquals('Mesmo com sweep concorrente, toda conexão física deve estar ou ativa ou no pool — sem vazamento', LPool.GetActiveConnections, LPool.GetPoolSize);
-    TAssert.AssertTrue('O pool nunca deve ter criado mais conexões do que o limite máximo', LPool.GetActiveConnections <= MAX_CONNS);
+    TAssert.AssertEquals('Even with a concurrent sweep, every physical connection must be either active or in the pool — no leak', LPool.GetActiveConnections, LPool.GetPoolSize);
+    TAssert.AssertTrue('The pool must never have created more connections than the maximum', LPool.GetActiveConnections <= MAX_CONNS);
   finally
     TSleep.Reset;
   end;
 end;
 
-{ TPoolTests — eventos e snapshot }
+{ TPoolTests — events and snapshot }
 
-procedure TPoolTests.Test_Pool_Evento_ConnectionCreated_DisparaAoCrescer;
+procedure TPoolTests.Test_Pool_Event_ConnectionCreated_FiresOnGrowth;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1539,11 +1540,11 @@ begin
     LPool := TConnectionPool.Create(LFactory, LConfig,
       LRecorder.OnEvent);
 
-    TAssert.AssertEquals('Sem IniConnections, a construção do pool não deve disparar eventos', 0, LEvents.Count);
+    TAssert.AssertEquals('Without IniConnections, building the pool must not fire events', 0, LEvents.Count);
 
     LConn := LPool.AcquireConnection;
 
-    TAssert.AssertEquals('Criar 1 conexão física deve disparar exatamente 1 evento pekConnectionCreated', 1, LEvents.Count);
+    TAssert.AssertEquals('Creating 1 physical connection must fire exactly 1 pekConnectionCreated event', 1, LEvents.Count);
     TAssert.AssertEquals(Ord(pekConnectionCreated), Ord(LEvents[0].Kind));
     TAssert.AssertEquals(1, LEvents[0].ActiveConnections);
     TAssert.AssertEquals(10, LEvents[0].MaxConnections);
@@ -1554,7 +1555,7 @@ begin
   end;
 end;
 
-procedure TPoolTests.Test_Pool_Evento_ConnectionDiscarded_TestConnectionFalha;
+procedure TPoolTests.Test_Pool_Event_ConnectionDiscarded_TestConnectionFails;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1566,17 +1567,17 @@ var
   LRecorder: TPoolEventRecorder;
   BaseTime: TDateTime;
 begin
-  // Mesmo cenário de Test_Pool_ConexaoInativaFalha: 2 conexões no ramp-up,
-  // a 1ª falha no teste de vivacidade (>=120s ociosa) e é descartada, a 2ª
-  // é reaproveitada.
+  // Same scenario as Test_Pool_IdleConnectionFails: 2 connections in the
+  // ramp-up, the 1st fails the liveness check (>=120s idle) and is discarded,
+  // the 2nd is reused.
   BaseTime := StrToDateTime('28/12/2025 11:44:18');
 
   LClock := TFakeClock.Create;
   LClock.SetDefaultTime(BaseTime);
   LClock.EnqueueTime(BaseTime);                      // LastRelease conn1
   LClock.EnqueueTime(BaseTime + (50 / 86400));       // LastRelease conn2
-  LClock.EnqueueTime(BaseTime + (121 / 86400));      // 121s p/ conn1 → testa → falha → remove
-  LClock.EnqueueTime(BaseTime + (130 / 86400));      // 80s p/ conn2 → não testa → usa
+  LClock.EnqueueTime(BaseTime + (121 / 86400));      // 121s for conn1 → tested → fails → removed
+  LClock.EnqueueTime(BaseTime + (130 / 86400));      // 80s for conn2 → not tested → used
 
   TClock.SetClock(LClock);
   LRecorder := TPoolEventRecorder.Create;
@@ -1591,15 +1592,15 @@ begin
     LPool := TConnectionPool.Create(LFactory, LConfig,
       LRecorder.OnEvent);
 
-    LEvents.Clear; // descarta os 2 pekConnectionCreated do ramp-up inicial
+    LEvents.Clear; // drop the 2 pekConnectionCreated events from the initial ramp-up
 
     LMockFactory.SimulateTestConnectionFail := True;
     LConn := LPool.AcquireConnection;
 
-    TAssert.AssertEquals('O descarte da conexão morta deve disparar exatamente 1 evento pekConnectionDiscarded', 1, LEvents.Count);
+    TAssert.AssertEquals('Discarding the dead connection must fire exactly 1 pekConnectionDiscarded event', 1, LEvents.Count);
     TAssert.AssertEquals(Ord(pekConnectionDiscarded), Ord(LEvents[0].Kind));
     TAssert.AssertEquals(Ord(pdrStaleCheckFailed), Ord(LEvents[0].DiscardReason));
-    TAssert.AssertEquals('Após o descarte, ActiveConnections deve refletir só a conexão restante', 1, LEvents[0].ActiveConnections);
+    TAssert.AssertEquals('After the discard, ActiveConnections must reflect only the remaining connection', 1, LEvents[0].ActiveConnections);
 
     TAssert.AssertEquals(Int64(2), LPool.GetSnapshot.TotalCreated);
     TAssert.AssertEquals(Int64(1), LPool.GetSnapshot.TotalDiscarded);
@@ -1609,7 +1610,7 @@ begin
   end;
 end;
 
-procedure TPoolTests.Test_Pool_Evento_AcquireTimeout_DisparaAntesDaExcecao;
+procedure TPoolTests.Test_Pool_Event_AcquireTimeout_FiresBeforeException;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1619,8 +1620,8 @@ var
   LRaised: Boolean;
   LTimeoutCount: Integer;
 begin
-  // Mesmo cenário de Test_Pool_MaxConnections_Estoura: IniConnections (5) >
-  // MaxConnections (3) força o ramp-up a estourar EPoolTimeoutException.
+  // Same scenario as Test_Pool_MaxConnections_Exceeded: IniConnections (5) >
+  // MaxConnections (3) forces the ramp-up to raise EPoolTimeoutException.
   LConfig := TConnectionPoolConfig.Create;
   LConfig.MaxConnections := 3;
   LConfig.IniConnections := 5;
@@ -1639,25 +1640,25 @@ begin
         LRaised := True;
     end;
 
-    TAssert.AssertTrue('Deveria ter lançado EPoolTimeoutException', LRaised);
+    TAssert.AssertTrue('Should have raised EPoolTimeoutException', LRaised);
 
     LTimeoutCount := 0;
     for LEvent in LEvents do
       if LEvent.Kind = pekAcquireTimeout then
         Inc(LTimeoutCount);
 
-    TAssert.AssertEquals('Deve disparar exatamente 1 evento pekAcquireTimeout, logo antes da exceção', 1, LTimeoutCount);
+    TAssert.AssertEquals('Must fire exactly 1 pekAcquireTimeout event, right before the exception', 1, LTimeoutCount);
   finally
     TSleep.Reset;
     LRecorder.Free;
   end;
 end;
 
-procedure TPoolTests.Test_Pool_Evento_IdleSweepClosed_DisparaComContagem;
+procedure TPoolTests.Test_Pool_Event_IdleSweepClosed_FiresWithCount;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
-  LPoolIntf: IDBConnectionPool; // ver comentário em Test_Pool_IdleTimeout_Desligado_NaoEvictaNada
+  LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
   LPool: TConnectionPool;
   LClock: TFakeClock;
   LConn1, LConn2, LConn3: IDBConnection;
@@ -1665,8 +1666,8 @@ var
   LRecorder: TPoolEventRecorder;
   BaseTime: TDateTime;
 begin
-  // Mesmo cenário de Test_Pool_IdleTimeout_EvictaSoOsMaisAntigos: só a
-  // conexão liberada há mais tempo deve ser fechada pela varredura.
+  // Same scenario as Test_Pool_IdleTimeout_EvictsOnlyTheOldest: only the
+  // connection released the longest ago must be closed by the sweep.
   BaseTime := StrToDateTime('28/12/2025 11:44:18');
   LClock := TFakeClock.Create;
   LClock.SetDefaultTime(BaseTime);
@@ -1688,20 +1689,20 @@ begin
     LConn3 := LPoolIntf.AcquireConnection;
 
     LClock.SetDefaultTime(BaseTime);
-    LConn1 := nil; // LastRelease = T0        (65s de idade no sweep abaixo)
+    LConn1 := nil; // LastRelease = T0        (65s old at the sweep below)
     LClock.SetDefaultTime(BaseTime + (10 / 86400));
-    LConn2 := nil; // LastRelease = T0+10s     (55s de idade — NÃO deve sair)
+    LConn2 := nil; // LastRelease = T0+10s     (55s old — must NOT go)
     LClock.SetDefaultTime(BaseTime + (20 / 86400));
-    LConn3 := nil; // LastRelease = T0+20s     (45s de idade — NÃO deve sair)
+    LConn3 := nil; // LastRelease = T0+20s     (45s old — must NOT go)
 
-    LEvents.Clear; // descarta os 3 pekConnectionCreated do crescimento acima
+    LEvents.Clear; // drop the 3 pekConnectionCreated events from the growth above
 
-    LClock.SetDefaultTime(BaseTime + (65 / 86400)); // "agora" = T0+65s
+    LClock.SetDefaultTime(BaseTime + (65 / 86400)); // "now" = T0+65s
     LPool.SweepIdleConnections(60);
 
-    TAssert.AssertEquals('Uma varredura que fecha conexões deve disparar exatamente 1 evento pekIdleSweepClosed', 1, LEvents.Count);
+    TAssert.AssertEquals('A sweep that closes connections must fire exactly 1 pekIdleSweepClosed event', 1, LEvents.Count);
     TAssert.AssertEquals(Ord(pekIdleSweepClosed), Ord(LEvents[0].Kind));
-    TAssert.AssertEquals('Só a conexão mais antiga (65s de idade, >=60) deve ter sido fechada', 1, LEvents[0].ClosedCount);
+    TAssert.AssertEquals('Only the oldest connection (65s old, >=60) must have been closed', 1, LEvents[0].ClosedCount);
 
     TAssert.AssertEquals(Int64(1), LPoolIntf.GetSnapshot.TotalIdleSwept);
   finally
@@ -1710,9 +1711,9 @@ begin
   end;
 end;
 
-{ TPoolTests — descarte de conexão quebrada durante o uso }
+{ TPoolTests — discard of a connection broken during use }
 
-procedure TPoolTests.Test_Pool_ConexaoDescartada_ExcecaoExternal;
+procedure TPoolTests.Test_Pool_ConnectionDiscarded_ExternalException;
 var
   LRaised: Boolean;
   LConfig: IConnectionPoolConfig;
@@ -1724,12 +1725,12 @@ var
   LEvents: TList<TPoolEvent>;
   LRecorder: TPoolEventRecorder;
 begin
-  // Reproduz o cenário real: Query.Open estoura EAccessViolation (driver
-  // nativo encontrando o servidor derrubado no meio da chamada) — a conexão
-  // precisa ser descartada mesmo que IsConnected ainda reporte True (estado
-  // em memória, não é round-trip real). BuildDatabaseException troca a AV
-  // pela EDatabaseUnavailableException antes de relançar — é essa que deve
-  // chegar ao chamador, nunca a AV crua (ver PascalDb.Interfaces).
+  // Reproduces the real scenario: Query.Open blows up with EAccessViolation
+  // (native driver hitting a server that went down mid-call) — the
+  // connection must be discarded even if IsConnected still reports True
+  // (in-memory state, not a real round-trip). BuildDatabaseException swaps
+  // the AV for EDatabaseUnavailableException before re-raising — that is what
+  // must reach the caller, never the raw AV (see PascalDb.Interfaces).
   LConfig := TConnectionPoolConfig.Create;
   LConfig.IniConnections := 1;
   LConfig.MaxConnections := 10;
@@ -1741,14 +1742,14 @@ begin
   try
     LPool := TConnectionPool.Create(LFactory, LConfig,
       LRecorder.OnEvent);
-    LEvents.Clear; // descarta o pekConnectionCreated do ramp-up
+    LEvents.Clear; // drop the pekConnectionCreated event from the ramp-up
 
-    TAssert.AssertEquals('Pré-condição: 1 conexão ociosa', 1, LPool.GetPoolSize);
+    TAssert.AssertEquals('Precondition: 1 idle connection', 1, LPool.GetPoolSize);
 
     LMockFactory.RaiseOnNextQueryOpen(EAccessViolation, 'fake AV');
     LQuery := nil;
     LScope := LPool.AcquireQuery(LQuery);
-    TAssert.AssertEquals('A conexão saiu do pool para a query', 0, LPool.GetPoolSize);
+    TAssert.AssertEquals('The connection left the pool for the query', 0, LPool.GetPoolSize);
 
     LRaised := False;
 
@@ -1764,14 +1765,14 @@ begin
 
     end;
 
-    TAssert.AssertTrue('Open deve propagar EDatabaseUnavailableException, não a EAccessViolation crua', LRaised);
+    TAssert.AssertTrue('Open must propagate EDatabaseUnavailableException, not the raw EAccessViolation', LRaised);
 
     LQuery := nil;
-    LScope := nil; // solta as duas referências que seguram a conexão
+    LScope := nil; // release both references holding the connection
 
-    TAssert.AssertEquals('Conexão que sofreu EAccessViolation não deve voltar ao pool', 0, LPool.GetPoolSize);
-    TAssert.AssertEquals('Conexão descartada não conta mais como ativa', 0, LPool.GetActiveConnections);
-    TAssert.AssertEquals('Deve disparar exatamente 1 evento pekConnectionDiscarded', 1, LEvents.Count);
+    TAssert.AssertEquals('A connection that hit EAccessViolation must not go back to the pool', 0, LPool.GetPoolSize);
+    TAssert.AssertEquals('A discarded connection no longer counts as active', 0, LPool.GetActiveConnections);
+    TAssert.AssertEquals('Must fire exactly 1 pekConnectionDiscarded event', 1, LEvents.Count);
     TAssert.AssertEquals(Ord(pekConnectionDiscarded), Ord(LEvents[0].Kind));
     TAssert.AssertEquals(Ord(pdrBrokenAfterUse), Ord(LEvents[0].DiscardReason));
   finally
@@ -1779,7 +1780,7 @@ begin
   end;
 end;
 
-procedure TPoolTests.Test_Pool_ConexaoDescartada_IsConnectedFalseAposExcecao;
+procedure TPoolTests.Test_Pool_ConnectionDiscarded_IsConnectedFalseAfterException;
 var
   LRaised: Boolean;
   LConfig: IConnectionPoolConfig;
@@ -1791,9 +1792,9 @@ var
   LEvents: TList<TPoolEvent>;
   LRecorder: TPoolEventRecorder;
 begin
-  // Exceção "normal" do driver (não EExternal), mas a conexão já reporta
-  // IsConnected=False logo depois — sinal de queda real (ex.: "unavailable
-  // database"), mesmo sem AV.
+  // A "normal" driver exception (not EExternal), but the connection already
+  // reports IsConnected=False right after — a sign of a real drop (e.g.
+  // "unavailable database"), even without an AV.
   LConfig := TConnectionPoolConfig.Create;
   LConfig.IniConnections := 1;
   LConfig.MaxConnections := 10;
@@ -1811,7 +1812,7 @@ begin
     LQuery := nil;
     LScope := LPool.AcquireQuery(LQuery);
 
-    // Simula o driver detectando a queda no momento da falha
+    // Simulates the driver detecting the drop at the moment of the failure
     LMockFactory.LastCreatedConnection.Connected := False;
 
     LRaised := False;
@@ -1828,20 +1829,20 @@ begin
 
     end;
 
-    TAssert.AssertTrue('Open deve propagar EDatabaseUnavailableException, não a exceção crua do driver', LRaised);
+    TAssert.AssertTrue('Open must propagate EDatabaseUnavailableException, not the raw driver exception', LRaised);
 
     LQuery := nil;
     LScope := nil;
 
-    TAssert.AssertEquals('Conexão com IsConnected=False após a falha não deve voltar ao pool', 0, LPool.GetPoolSize);
-    TAssert.AssertEquals('Deve disparar exatamente 1 evento pekConnectionDiscarded', 1, LEvents.Count);
+    TAssert.AssertEquals('A connection with IsConnected=False after the failure must not go back to the pool', 0, LPool.GetPoolSize);
+    TAssert.AssertEquals('Must fire exactly 1 pekConnectionDiscarded event', 1, LEvents.Count);
     TAssert.AssertEquals(Ord(pdrBrokenAfterUse), Ord(LEvents[0].DiscardReason));
   finally
     LRecorder.Free;
   end;
 end;
 
-procedure TPoolTests.Test_Pool_ConexaoMantida_ExcecaoDeNegocio;
+procedure TPoolTests.Test_Pool_ConnectionKept_BusinessException;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1852,10 +1853,10 @@ var
   LEvents: TList<TPoolEvent>;
   LRecorder: TPoolEventRecorder;
 begin
-  // Caso negativo, o mais importante dos três: uma exceção de dados comum
-  // (ex.: violação de constraint, chave duplicada) com a conexão ainda
-  // IsConnected=True NÃO pode descartar a conexão — senão todo erro de
-  // negócio corriqueiro geraria churn de conexão no pool.
+  // Negative case, the most important of the three: a common data exception
+  // (e.g. constraint violation, duplicate key) while the connection is still
+  // IsConnected=True must NOT discard the connection — otherwise every
+  // ordinary business error would churn connections in the pool.
   LConfig := TConnectionPoolConfig.Create;
   LConfig.IniConnections := 1;
   LConfig.MaxConnections := 10;
@@ -1869,41 +1870,40 @@ begin
       LRecorder.OnEvent);
     LEvents.Clear;
 
-    TAssert.AssertEquals('Pré-condição: 1 conexão ociosa', 1, LPool.GetPoolSize);
+    TAssert.AssertEquals('Precondition: 1 idle connection', 1, LPool.GetPoolSize);
 
     LMockFactory.RaiseOnNextQueryOpen(Exception, 'violation of PRIMARY or UNIQUE KEY constraint');
     LQuery := nil;
     LScope := LPool.AcquireQuery(LQuery);
-    // LastCreatedConnection.Connected permanece True (default) — a conexão
-    // continua saudável, só a operação falhou.
+    // LastCreatedConnection.Connected stays True (default) — the connection
+    // is still healthy, only the operation failed.
 
-    // try/except direto (não AssertRaises) — precisa confirmar que a
-    // exceção propagada NÃO é EDatabaseUnavailableException; "Exception"
-    // como classe esperada em AssertRaises deixaria passar até uma
-    // reclassificação errada, já que EDatabaseUnavailableException também
-    // "is Exception".
+    // A direct try/except (not a flag-only check) — it must confirm that the
+    // propagated exception is NOT EDatabaseUnavailableException; expecting
+    // just "Exception" would let even a wrong reclassification pass, since
+    // EDatabaseUnavailableException also "is Exception".
     try
       LQuery.Open;
-      TAssert.Fail('Open deveria ter propagado a exceção simulada');
+      TAssert.Fail('Open should have propagated the simulated exception');
     except
       on E: EDatabaseUnavailableException do
-        TAssert.Fail('Erro de dados normal não pode virar EDatabaseUnavailableException — ' +
-          'a conexão está saudável, só a operação falhou');
+        TAssert.Fail('A normal data error must not become EDatabaseUnavailableException — ' +
+          'the connection is healthy, only the operation failed');
       on E: Exception do
-        ; // esperado: a exceção original, sem reclassificação
+        ; // expected: the original exception, not reclassified
     end;
 
     LQuery := nil;
     LScope := nil;
 
-    TAssert.AssertEquals('Exceção de negócio com conexão ainda saudável não deve descartar a conexão', 1, LPool.GetPoolSize);
-    TAssert.AssertEquals('Nenhum evento pekConnectionDiscarded deve disparar para erro de dados normal', 0, LEvents.Count);
+    TAssert.AssertEquals('A business exception with a still-healthy connection must not discard the connection', 1, LPool.GetPoolSize);
+    TAssert.AssertEquals('No pekConnectionDiscarded event may fire for a normal data error', 0, LEvents.Count);
   finally
     LRecorder.Free;
   end;
 end;
 
-procedure TPoolTests.Test_Pool_ConexaoDescartada_ExcecaoDuranteLeituraDeCampo;
+procedure TPoolTests.Test_Pool_ConnectionDiscarded_ExceptionWhileReadingField;
 var
   LConfig: IConnectionPoolConfig;
   LFactory: IDBFactory;
@@ -1917,11 +1917,11 @@ var
   LRecorder: TPoolEventRecorder;
   LRaised: Boolean;
 begin
-  // Reproduz o gap real encontrado em produção: Open retorna com sucesso (o
-  // servidor caiu só depois, no meio do fetch dos campos) — a AV acontece
-  // num GetAsXxx/GetNullableXxx chamado pelo Repository ao montar o DTO de
-  // resposta, não dentro do próprio Open. Sem TQueryResultWrapper, esse
-  // ponto não tinha nenhuma classificação.
+  // Reproduces the real gap found in production: Open returns successfully
+  // (the server went down only later, in the middle of fetching the fields)
+  // — the AV happens in a GetAsXxx/GetNullableXxx called by the repository
+  // while building the response DTO, not inside Open itself. Without
+  // TQueryResultWrapper, that point had no classification at all.
   LConfig := TConnectionPoolConfig.Create;
   LConfig.IniConnections := 1;
   LConfig.MaxConnections := 10;
@@ -1936,36 +1936,36 @@ begin
     LEvents.Clear;
 
     LFakeResult := TFakeQueryResult.Create;
-    LFakeResult.SetRaiseOnAnyCall(EAccessViolation, 'fake AV no fetch');
+    LFakeResult.SetRaiseOnAnyCall(EAccessViolation, 'fake AV in fetch');
     LMockFactory.SetNextQueryOpenResult(LFakeResult);
 
     LQuery := nil;
     LScope := LPool.AcquireQuery(LQuery);
 
     LResult := LQuery.Open;
-    TAssert.AssertTrue('Open deve retornar com sucesso (a falha é só na leitura do campo)', Assigned(LResult));
+    TAssert.AssertTrue('Open must return successfully (the failure is only in the field read)', Assigned(LResult));
 
-    // try/except direto em vez de AssertRaises — evita depender de como o
-    // closure da anônima interage com o refcount de LResult (ver diagnóstico
-    // de GetActiveConnections abaixo, que separa "vazou referência" de
-    // "descartou mas o evento não disparou"). Espera EDatabaseUnavailableException
-    // (BuildDatabaseException troca a AV crua por ela antes de relançar).
+    // A direct try/except, kept inline so no extra reference to LResult is
+    // held anywhere else (see the GetActiveConnections diagnostic below,
+    // which tells "leaked a reference" apart from "discarded but the event
+    // didn't fire"). Expects EDatabaseUnavailableException
+    // (BuildDatabaseException swaps the raw AV for it before re-raising).
     LRaised := False;
     try
-      LResult.GetAsString('QUALQUER_CAMPO');
+      LResult.GetAsString('ANY_FIELD');
     except
       on E: EDatabaseUnavailableException do
         LRaised := True;
     end;
-    TAssert.AssertTrue('A leitura do campo deve propagar EDatabaseUnavailableException, não a AV crua', LRaised);
+    TAssert.AssertTrue('The field read must propagate EDatabaseUnavailableException, not the raw AV', LRaised);
 
     LResult := nil;
     LQuery := nil;
     LScope := nil;
 
-    TAssert.AssertEquals('Conexão que sofreu EAccessViolation na leitura de campo deve sair de ativa (0), não ficar presa como se ainda estivesse em uso', 0, LPool.GetActiveConnections);
-    TAssert.AssertEquals('Conexão que sofreu EAccessViolation na leitura de campo não deve voltar ao pool', 0, LPool.GetPoolSize);
-    TAssert.AssertEquals('Deve disparar exatamente 1 evento pekConnectionDiscarded', 1, LEvents.Count);
+    TAssert.AssertEquals('A connection that hit EAccessViolation in a field read must leave the active count (0), not stay stuck as if still in use', 0, LPool.GetActiveConnections);
+    TAssert.AssertEquals('A connection that hit EAccessViolation in a field read must not go back to the pool', 0, LPool.GetPoolSize);
+    TAssert.AssertEquals('Must fire exactly 1 pekConnectionDiscarded event', 1, LEvents.Count);
     TAssert.AssertEquals(Ord(pekConnectionDiscarded), Ord(LEvents[0].Kind));
     TAssert.AssertEquals(Ord(pdrBrokenAfterUse), Ord(LEvents[0].DiscardReason));
   finally
@@ -1973,20 +1973,20 @@ begin
   end;
 end;
 
-procedure TPoolTests.Test_EDatabaseUnavailableException_PreservaDetalheOriginal;
+procedure TPoolTests.Test_EDatabaseUnavailableException_PreservesOriginalDetail;
 var
   LOriginal: Exception;
   LWrapped: EDatabaseUnavailableException;
 begin
   LOriginal := EAccessViolation.Create(
-    'Access violation at address 00D5D0F6 in module ''RetaWebLocalSvc.exe''. Read of address 005B005D');
+    'Access violation at address 00D5D0F6 in module ''App.exe''. Read of address 005B005D');
   try
     LWrapped := EDatabaseUnavailableException.Create(LOriginal);
     try
-      TAssert.AssertEquals('OriginalClassName deve preservar a classe da exceção nativa', 'EAccessViolation', LWrapped.OriginalClassName);
-      TAssert.AssertEquals('OriginalMessage deve preservar o texto original (endereço da AV incluso)', LOriginal.Message, LWrapped.OriginalMessage);
-      TAssert.AssertEquals('Message pública não deve vazar o texto técnico da AV pro cliente', 0, Pos('Access violation', LWrapped.Message));
-      TAssert.AssertTrue('Message pública deve ser genérica e não vazia', Length(LWrapped.Message) > 0);
+      TAssert.AssertEquals('OriginalClassName must preserve the native exception class', 'EAccessViolation', LWrapped.OriginalClassName);
+      TAssert.AssertEquals('OriginalMessage must preserve the original text (AV address included)', LOriginal.Message, LWrapped.OriginalMessage);
+      TAssert.AssertEquals('The public Message must not leak the AV technical text to the client', 0, Pos('Access violation', LWrapped.Message));
+      TAssert.AssertTrue('The public Message must be generic and non-empty', Length(LWrapped.Message) > 0);
     finally
       LWrapped.Free;
     end;

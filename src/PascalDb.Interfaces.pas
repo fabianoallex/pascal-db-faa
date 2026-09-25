@@ -2,22 +2,23 @@
 
 {$I pascaldb.inc}
 
-{ Contratos da lib, agnósticos de driver: conexão, transação (e transação de
-  escopo), query, resultado, parâmetros, script, pool, configuração e a
-  fábrica (IDBFactory) que junta tudo. Nenhuma unit de driver é referenciada
-  aqui — FireDAC, Zeos, SQLdb ou qualquer outro entram por adapter, que
-  implementa IDBComponentProvider/IDBFactory.
+{ The library's driver-agnostic contracts: connection, transaction (and
+  scope transaction), query, result, parameters, script, pool, configuration
+  and the factory (IDBFactory) that ties them together. No driver unit is
+  referenced here — FireDAC, Zeos, SQLdb or any other comes in through an
+  adapter that implements IDBComponentProvider/IDBFactory.
 
-  Também concentra a classificação de "conexão quebrada": quando uma operação
-  nativa falha, IsConnectionBrokenError/MarkConnectionBrokenIfNeeded decidem se
-  a conexão física deve ser descartada pelo pool, e BuildDatabaseException
-  troca a exceção de baixo nível do driver (inclusive Access Violation) por
-  EDatabaseUnavailableException, com mensagem segura para expor e o detalhe
-  original preservado em OriginalClassName/OriginalMessage.
+  It also owns the "broken connection" classification: when a native
+  operation fails, IsConnectionBrokenError/MarkConnectionBrokenIfNeeded decide
+  whether the physical connection must be discarded by the pool, and
+  BuildDatabaseException replaces the driver's low-level exception (Access
+  Violation included) with EDatabaseUnavailableException, whose message is
+  safe to expose, with the original detail kept in
+  OriginalClassName/OriginalMessage.
 
-  IParams e IQueryResult expõem os tipos de PascalDb.Optionals (IOptXxx,
-  INullXxx, IOptNullXxx): o bind de um parâmetro opcional só acontece quando
-  HasValue, e coluna nullable é lida como INullXxx. }
+  IParams and IQueryResult expose the PascalDb.Optionals types (IOptXxx,
+  INullXxx, IOptNullXxx): an optional parameter is only bound when HasValue,
+  and a nullable column is read as INullXxx. }
 
 interface
 
@@ -38,11 +39,11 @@ type
 
   IMigrationDialect = interface
     ['{A5F2C9E1-3B7D-4F8A-92C6-1E4D8B5F3A2C}']
-    // Retorna 1/0 na coluna "EXISTS" — verifica se a tabela SCHEMA_MIGRATIONS existe
+    // Returns 1/0 in the "EXISTS" column — whether the SCHEMA_MIGRATIONS table exists
     function GetMigrationTableExistsSQL: string;
-    // Retorna o maior VERSION aplicado na coluna "VERSION" (0 se vazia)
+    // Returns the highest applied VERSION in the "VERSION" column (0 if empty)
     function GetMigrationLastVersionSQL: string;
-    // INSERT com parâmetro nomeado :VERSION
+    // INSERT with the named parameter :VERSION
     function GetMigrationInsertVersionSQL: string;
   end;
 
@@ -62,19 +63,19 @@ type
     function GetRealConnection: IDBConnection;
   end;
 
-  // Levantada (via BuildDatabaseException) em vez da exceção nativa (FireDAC
-  // ou EExternal/AV) sempre que IsConnectionBrokenError classifica a falha
-  // como conexão quebrada. Nunca deveria chegar ao cliente/aos logs como um
-  // "Access violation at address ..." sem contexto nenhum — essa classe dá
-  // um tipo estável e reconhecível pro que é, de fato, sempre a mesma causa
-  // raiz (servidor de banco fora do ar / conexão perdida), independente de
-  // qual chamada nativa especificamente crashou. `Message` é genérica de
-  // propósito (segura de expor ao cliente); o detalhe original (classe +
-  // texto da exceção nativa, endereço de AV incluso) fica só em
-  // OriginalClassName/OriginalMessage, pra quem for logar/investigar — não
-  // existe "inner exception" nativa em Delphi, é assim que se preserva o
-  // contexto sem vazar ruído pro cliente. Fora desta lib,
-  // Horse.Middleware.ErrorHandler mapeia essa classe pra 503.
+  // Raised (via BuildDatabaseException) instead of the native exception
+  // (driver exception or EExternal/AV) whenever IsConnectionBrokenError
+  // classifies the failure as a broken connection. It should never reach a
+  // client or the logs as a context-free "Access violation at address ..." —
+  // this class gives a stable, recognizable type to what is, in fact, always
+  // the same root cause (database server down / connection lost), no matter
+  // which native call happened to crash. `Message` is generic on purpose
+  // (safe to expose to a client); the original detail (class + text of the
+  // native exception, AV address included) is kept only in
+  // OriginalClassName/OriginalMessage, for whoever logs/investigates — Delphi
+  // has no native "inner exception", so this is how the context is preserved
+  // without leaking noise to the client. An HTTP layer on top of this library
+  // would typically map this class to 503.
   EDatabaseUnavailableException = class(Exception)
   private
     FOriginalClassName: string;
@@ -85,12 +86,12 @@ type
     property OriginalMessage: string read FOriginalMessage;
   end;
 
-  // Implementada só pelo wrapper que o pool devolve em AcquireConnection
-  // (PascalDb.Pool.TConnectionWrapper) — nunca pelos adapters "reais"
-  // (TFDConnectionAdapter etc.), que não sabem nada sobre pool. Ver
-  // MarkConnectionBrokenIfNeeded logo abaixo: é o ponto único que decide
-  // quando chamar MarkForDiscard, a partir dos pontos onde a lib toca o
-  // driver nativo (Query.Open/ExecSql, Commit/Rollback de transação).
+  // Implemented only by the wrapper the pool returns from AcquireConnection
+  // (PascalDb.Pool.TConnectionWrapper) — never by the "real" adapters, which
+  // know nothing about the pool. See MarkConnectionBrokenIfNeeded below: it is
+  // the single point that decides when to call MarkForDiscard, from the
+  // places where the library touches the native driver (Query.Open/ExecSql,
+  // transaction Commit/Rollback).
   IDiscardableConnection = interface
     ['{6C8B2E39-6D40-4C4E-9E77-8B5B0DDE9E56}']
     procedure MarkForDiscard;
@@ -282,20 +283,20 @@ type
     property Script: TStrings read GetScript write SetScript;
   end;
 
-  // Contadores acumulados desde a criação do pool + estado atual — pensado
-  // para leitura periódica (health check, timer de métricas), não para
-  // reagir a cada mudança. Complementa TPoolEvent (PascalDb.Pool): o
-  // evento cobre "aconteceu agora", o snapshot cobre "quanto já aconteceu
-  // no total e como está agora".
+  // Counters accumulated since the pool was created + current state — meant
+  // for periodic reading (health check, metrics timer), not for reacting to
+  // each change. Complements TPoolEvent (PascalDb.Pool): the event covers
+  // "it happened now", the snapshot covers "how much has happened in total
+  // and what it looks like now".
   TPoolSnapshot = record
-    ActiveConnections: Integer;  // conexões físicas vivas agora (ociosas + em uso)
-    PoolSize: Integer;           // conexões ociosas na fila agora
+    ActiveConnections: Integer;  // live physical connections now (idle + in use)
+    PoolSize: Integer;           // idle connections in the queue now
     MaxConnections: Integer;
     IniConnections: Integer;
-    TotalCreated: Int64;         // conexões físicas criadas desde o início (ramp-up + crescimento sob carga)
-    TotalDiscarded: Int64;       // conexões descartadas por falha de reconexão ou teste de vivacidade
-    TotalTimeouts: Int64;        // AcquireConnection que esgotaram as tentativas de espera (EPoolTimeoutException)
-    TotalIdleSwept: Int64;       // conexões fechadas por PoolIdleTimeoutSeconds
+    TotalCreated: Int64;         // physical connections created since start (ramp-up + growth under load)
+    TotalDiscarded: Int64;       // connections discarded after a failed reconnect or liveness check
+    TotalTimeouts: Int64;        // AcquireConnection calls that ran out of wait attempts (EPoolTimeoutException)
+    TotalIdleSwept: Int64;       // connections closed by PoolIdleTimeoutSeconds
   end;
 
   { IDBConnectionPool }
@@ -308,9 +309,9 @@ type
     function AcquireQuery(out AQuery: IQuery; ATransaction: ITransaction = nil): IScopeTransaction;
     function GetActiveConnections: Integer;
     function GetPoolSize: Integer;
-    // Estado atual + contadores acumulados, para logging/métricas periódicos
-    // (ver TPoolSnapshot). Implementações que não rastreiam os totais (ex.:
-    // pools de teste/mock) podem devolver os contadores zerados.
+    // Current state + accumulated counters, for periodic logging/metrics
+    // (see TPoolSnapshot). Implementations that don't track the totals (e.g.
+    // test/mock pools) may return the counters as zero.
     function GetSnapshot: TPoolSnapshot;
     property WaitMaxAttemps: Integer read GetWaitMaxAttemps;
     property WaitMilliseconds: Integer read GetWaitMilliseconds;
@@ -319,9 +320,10 @@ type
   IDBConnectionPoolInternalActions = interface
     ['{C1EA34EC-6E45-4B99-A2D2-2AEAB4BF382D}']
     procedure ReleaseConnection(AConn: IDBConnection);
-    // Fim de vida de uma conexão que saiu marcada via IDiscardableConnection
-    // (MarkConnectionBrokenIfNeeded) — descarta em vez de reenfileirar, sem
-    // esperar o próximo AcquireConnection provar que ela está morta.
+    // End of life of a connection that came back marked via
+    // IDiscardableConnection (MarkConnectionBrokenIfNeeded) — discards it
+    // instead of re-queueing, without waiting for the next AcquireConnection
+    // to prove it is dead.
     procedure DiscardConnection(AConn: IDBConnection);
     procedure ReleaseQuery(var AQuery: IQuery);
   end;
@@ -348,12 +350,13 @@ type
     property PoolWaitMilliseconds: Integer read GetPoolWaitMilliseconds write SetPoolWaitMilliseconds;
     property PoolMaxConnections: Integer read GetPoolMaxConnections write SetPoolMaxConnections;
     property PoolIniConnections: Integer read GetPoolIniConnections write SetPoolIniConnections;
-    /// Segundos que uma conexão pode ficar ociosa no pool antes de ser
-    /// fechada (nunca abaixo de PoolIniConnections). 0 (padrão) = desligado,
-    /// comportamento idêntico ao de antes desta propriedade existir.
+    /// Seconds a connection may stay idle in the pool before being closed
+    /// (never below PoolIniConnections). 0 (default) = off, identical to the
+    /// behavior before this property existed.
     property PoolIdleTimeoutSeconds: Integer read GetPoolIdleTimeoutSeconds write SetPoolIdleTimeoutSeconds;
-    /// Intervalo entre varreduras de ociosidade. Só importa quando
-    /// PoolIdleTimeoutSeconds > 0. Valores <= 0 caem no padrão (30000ms).
+    /// Interval between idle sweeps. Only matters when
+    /// PoolIdleTimeoutSeconds > 0. Values <= 0 fall back to the default
+    /// (30000ms).
     property PoolIdleCheckIntervalMs: Integer read GetPoolIdleCheckIntervalMs write SetPoolIdleCheckIntervalMs;
     property SQLDialect: string read GetSQLDialect write SetSQLDialect;
   end;
@@ -395,54 +398,53 @@ type
     function TestConnection(AConn: IDBConnection): Boolean;
   end;
 
-// Classifica se uma exceção ocorrida durante uma operação de banco (Query,
-// Commit, Rollback) indica que a conexão física ficou com estado
-// comprometido e não deve ser reaproveitada:
-// - EExternal (base de EAccessViolation, EStackOverflow, EPrivilege, ...) —
-//   a CPU faltou dentro de uma chamada nativa; o objeto de conexão não é
-//   mais confiável, independente do que IsConnected reportar depois (por
-//   isso o curto-circuito do "or": nunca se chama IsConnected depois de uma
-//   EExternal).
-// - Qualquer outra exceção seguida de IsConnected = False — a conexão caiu
-//   de fato (ex.: servidor indisponível).
-// Deliberadamente NÃO cobre exceções de dados "normais" (violação de
-// constraint, tipo inválido, etc.) com a conexão ainda IsConnected = True —
-// aí a conexão continua saudável, só a operação falhou; descartar nesse caso
-// geraria churn de conexão em todo erro de negócio comum (ex.: chave
-// duplicada), sem necessidade.
+// Classifies whether an exception raised during a database operation
+// (Query, Commit, Rollback) means the physical connection was left in a
+// compromised state and must not be reused:
+// - EExternal (base of EAccessViolation, EStackOverflow, EPrivilege, ...) —
+//   the CPU faulted inside a native call; the connection object can no
+//   longer be trusted, whatever IsConnected reports afterwards (hence the
+//   short-circuit "or": IsConnected is never called after an EExternal).
+// - Any other exception followed by IsConnected = False — the connection
+//   really dropped (e.g. server unavailable).
+// It deliberately does NOT cover "normal" data exceptions (constraint
+// violation, invalid type, etc.) while the connection is still
+// IsConnected = True — the connection is still healthy there, only the
+// operation failed; discarding in that case would churn connections on
+// every common business error (e.g. duplicate key) for no reason.
 function IsConnectionBrokenError(E: Exception; AConn: IDBConnection): Boolean;
 
-// Marca AConn para descarte (via IDiscardableConnection) se E indicar
-// conexão quebrada — ver IsConnectionBrokenError. Devolve se marcou ou não;
-// convertido em no-op (devolve False) se AConn não implementar
-// IDiscardableConnection (conexão obtida fora do pool, ou adapter de
-// teste/mock) ou não estiver Assigned.
+// Marks AConn for discard (via IDiscardableConnection) if E indicates a
+// broken connection — see IsConnectionBrokenError. Returns whether it marked
+// it; becomes a no-op (returns False) if AConn doesn't implement
+// IDiscardableConnection (connection obtained outside the pool, or a
+// test/mock adapter) or isn't Assigned.
 function MarkConnectionBrokenIfNeeded(AConn: IDBConnection; E: Exception): Boolean;
 
-// Chamado nos locais onde a lib toca o driver nativo: TQueryWrapper.Open/
-// ExecSql e TQueryResultWrapper (leitura de campo do IQueryResult devolvido
-// por Open — cobre o AV que acontece só no meio do fetch, depois do Open já
-// ter retornado com sucesso) em PascalDb.Pool;
-// TFDTransactionAdapter.StartTransaction/Commit/Rollback/ExecSql em
-// Db.Adapters.FireDAC — StartTransaction é o primeiro round-trip real ao
-// servidor quando o Repository chama LScope.StartTransaction explicitamente
-// ANTES do try/except (padrão documentado no CLAUDE.md para Insert/Update, e
-// usado também por Find/Get que abrem transação cedo).
+// Called wherever the library touches the native driver: TQueryWrapper.Open/
+// ExecSql and TQueryResultWrapper (field reads on the IQueryResult returned
+// by Open — covers the AV that only happens mid-fetch, after Open already
+// returned successfully) in PascalDb.Pool; and, in adapters, the
+// transaction's StartTransaction/Commit/Rollback/ExecSql — StartTransaction
+// is the first real round-trip to the server when a repository calls
+// LScope.StartTransaction explicitly BEFORE its try/except (a common pattern
+// for Insert/Update, also used by Find/Get code that opens a transaction
+// early).
 //
-// Marca a conexão (MarkConnectionBrokenIfNeeded) e devolve a exceção a
-// relançar: uma EDatabaseUnavailableException NOVA se E foi classificado
-// como conexão quebrada (nunca deixa uma EAccessViolation ou outra exceção
-// de baixo nível do driver vazar pro chamador como está — é o que chegava
-// ao cliente HTTP como "Access violation at address ..." sem contexto
-// nenhum, antes desta função existir), ou nil se não (erro de dados normal,
-// ex. violação de constraint — o chamador deve relançar E como está).
+// Marks the connection (MarkConnectionBrokenIfNeeded) and returns the
+// exception to re-raise: a NEW EDatabaseUnavailableException if E was
+// classified as a broken connection (never lets an EAccessViolation or any
+// other low-level driver exception leak to the caller as is — that is what
+// used to reach HTTP clients as a context-free "Access violation at address
+// ..." before this function existed), or nil otherwise (a normal data error,
+// e.g. a constraint violation — the caller must re-raise E as is).
 //
-// Por que devolve em vez de já relançar: "raise E;" (relançar por
-// REFERÊNCIA um objeto capturado no frame de OUTRA procedure) causa Access
-// Violation nesta versão do Delphi — só é seguro relançar uma exceção NOVA
-// (`raise Result;`, sempre seguro de qualquer frame) ou fazer bare "raise;"
-// LEXICAMENTE dentro do próprio except de quem capturou. Por isso todo call
-// site segue o padrão:
+// Why it returns instead of re-raising itself: "raise E;" (re-raising BY
+// REFERENCE an object caught in ANOTHER procedure's frame) causes an Access
+// Violation in this Delphi version — the only safe options are raising a NEW
+// exception (`raise Result;`, safe from any frame) or a bare "raise;"
+// LEXICALLY inside the catcher's own except block. That is why every call
+// site follows the pattern:
 //   except
 //     on E: Exception do
 //     begin
@@ -481,7 +483,7 @@ end;
 
 constructor EDatabaseUnavailableException.Create(AOriginalException: Exception);
 begin
-  inherited Create('Banco de dados indisponível ou conexão perdida. Tente novamente em instantes.');
+  inherited Create('Database unavailable or connection lost. Please try again shortly.');
   if Assigned(AOriginalException) then
   begin
     FOriginalClassName := AOriginalException.ClassName;

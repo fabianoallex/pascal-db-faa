@@ -1,14 +1,14 @@
 ﻿program PascalDbUnitTestsFpc;
 
-{ Runner FPCUnit dos testes unitários. Mesma cobertura da suíte DUnitX
-  (tests/Unit/PascalDb.UnitTests.dpr): os fixtures em tests/Unit/fpc são
-  gerados a partir dos mestres DUnitX por tools/gen_fpc_mirror.py.
+{ FPCUnit runner for the unit tests. Same coverage as the DUnitX suite
+  (tests/Unit/PascalDb.UnitTests.dpr): the fixtures in tests/Unit/fpc are
+  generated from the DUnitX masters by tools/gen_fpc_mirror.py.
 
-  Console (saída de texto), quando chamado com qualquer parâmetro:
+  Console (text output), when called with any parameter:
     .\PascalDbUnitTestsFpc.exe --all --format=plain
-  GUI (árvore de testes + barra verde/vermelha), sem parâmetros:
+  GUI (test tree + green/red bar), with no parameters:
     .\PascalDbUnitTestsFpc.exe
-  Fora do Windows roda sempre em modo console (sem LCL/widgetset). }
+  Outside Windows it always runs in console mode (no LCL/widgetset). }
 
 {$mode delphi}{$H+}
 
@@ -29,9 +29,9 @@ uses
 var
   ConsoleApp: TTestRunner;
 begin
-  // Console FPC puro: DefaultSystemCodePage nao e' UTF-8 por padrao, e os
-  // literais acentuados dos testes seriam transcodificados errado — mesma
-  // armadilha documentada no pascal-redis-faa.
+  // Plain FPC console: DefaultSystemCodePage isn't UTF-8 by default, and the
+  // tests' accented literals would be transcoded wrongly — same trap
+  // documented in pascal-redis-faa.
   SetMultiByteConversionCodePage(CP_UTF8);
 
   {$IFDEF MSWINDOWS}
@@ -49,7 +49,7 @@ begin
     ConsoleApp := TTestRunner.Create(nil);
     try
       ConsoleApp.Initialize;
-      ConsoleApp.Title := 'pascal-db-faa - testes unitarios (FPCUnit)';
+      ConsoleApp.Title := 'pascal-db-faa - unit tests (FPCUnit)';
       ConsoleApp.Run;
     finally
       ConsoleApp.Free;

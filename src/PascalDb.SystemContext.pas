@@ -2,11 +2,11 @@
 
 {$I pascaldb.inc}
 
-{ Relógio (TClock) e espera (TSleep) substituíveis. O código da lib chama
-  TClock.Now e TSleep.Sleep em vez de SysUtils.Now/Sleep, e os testes trocam
-  a implementação com SetClock/SetSleep (e voltam ao padrão com Reset) — é o
-  que permite testar timeout, ociosidade e espera do pool sem relógio real
-  nem Sleep. }
+{ Replaceable clock (TClock) and wait (TSleep). Library code calls TClock.Now
+  and TSleep.Sleep instead of SysUtils.Now/Sleep, and tests swap the
+  implementation with SetClock/SetSleep (and restore the default with Reset)
+  — that is what makes the pool's timeout, idle and wait behavior testable
+  without a real clock or Sleep. }
 
 interface
 

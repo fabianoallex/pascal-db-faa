@@ -2,10 +2,10 @@
 
 {$I pascaldb.inc}
 
-{ Registro global de fábricas por nome (TDBRegistry): permite que o ponto de
-  montagem da aplicação registre uma ou mais IDBFactory (ex.: uma por banco)
-  e que o resto do código as recupere pelo nome, sem depender do adapter
-  concreto. GetFactory devolve nil para nome não registrado. }
+{ Global registry of factories by name (TDBRegistry): lets the application's
+  composition root register one or more IDBFactory instances (e.g. one per
+  database) and the rest of the code look them up by name, without depending
+  on the concrete adapter. GetFactory returns nil for an unregistered name. }
 
 interface
 

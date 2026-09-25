@@ -2,16 +2,16 @@
 
 {$I pascaldb.inc}
 
-{ Diferenças de SQL entre bancos que a própria lib precisa gerar: savepoints
-  (criar, voltar, liberar) via ISQLDialect, e as consultas da tabela de
-  controle de migrations via IMigrationDialect. Implementações para
-  PostgreSQL e Firebird, registradas no initialization desta unit com os
-  nomes 'PostgreSQL' e 'Firebird'; adapters resolvem o dialeto com
-  TSQLDialectFactory.GetDialect(Config.SQLDialect). Banco novo:
-  RegisterDialect(Nome, Classe) no ponto de montagem da aplicação.
+{ SQL differences between databases that the library itself has to generate:
+  savepoints (create, roll back to, release) via ISQLDialect, and the queries
+  on the migrations control table via IMigrationDialect. Implementations for
+  PostgreSQL and Firebird, registered in this unit's initialization section
+  under the names 'PostgreSQL' and 'Firebird'; adapters resolve the dialect
+  with TSQLDialectFactory.GetDialect(Config.SQLDialect). New database:
+  RegisterDialect(Name, Class) in the application's composition root.
 
-  SQL de negócio NÃO passa por aqui — esse fica nos arquivos .sql de cada
-  projeto (ver PascalDb.SqlLoader). }
+  Business SQL does NOT go through here — it lives in each project's .sql
+  files (see PascalDb.SqlLoader). }
 
 interface
 
@@ -87,7 +87,7 @@ var
   LDialectClass: TSQLDialectClass;
 begin
   if not FDialects.TryGetValue(AName, LDialectClass) then
-    raise Exception.CreateFmt('Dialeto SQL "%s" não encontrado ou não registrado.', [AName]);
+    raise Exception.CreateFmt('SQL dialect "%s" not found or not registered.', [AName]);
 
   Result := LDialectClass.Create as ISQLDialect;
 end;

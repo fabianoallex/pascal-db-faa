@@ -1,46 +1,47 @@
 # pascal-db-faa
 
-Camada de acesso a banco de dados para **Delphi e Lazarus/FPC com o mesmo código**
+A database access layer for **Delphi and Lazarus/FPC from the same source code**
 (dual-compiler).
 
-- Contratos agnósticos de driver: `IDBFactory`, `IDBConnection`, `ITransaction`,
+- Driver-agnostic contracts: `IDBFactory`, `IDBConnection`, `ITransaction`,
   `IScopeTransaction`, `IQuery`, `IQueryResult`, `IParams`.
-- Pool de conexões com ramp-up, limite, espera, varredura de ociosas, descarte de conexão
-  quebrada e eventos/snapshot para métricas.
-- Migrations versionadas.
-- SQL em templates com tags (`[TAG {] ... [} TAG]`, `${LITERAL}`).
-- Tipos opcionais/nuláveis (`IOptXxx`, `INullXxx`, `IOptNullXxx`) integrados aos parâmetros.
-- `TMockDBFactory`: mock completo para testar repositórios sem banco.
+- Connection pool with ramp-up, limit, bounded waiting, idle sweep, discard of broken
+  connections, and events/snapshot for metrics.
+- Versioned migrations.
+- SQL in tagged templates (`[TAG {] ... [} TAG]`, `${LITERAL}`).
+- Optional/nullable types (`IOptXxx`, `INullXxx`, `IOptNullXxx`) integrated with the
+  parameters.
+- `TMockDBFactory`: a complete mock for testing repositories without a database.
 
-Os drivers ficam em adapters separados. Planejados: FireDAC (só Delphi), Zeos (dual) e SQLdb
-(só Lazarus). Qualquer outro driver entra implementando `IDBComponentProvider`/`IDBFactory`.
+Drivers live in separate adapters. Planned: FireDAC (Delphi only), Zeos (dual) and SQLdb
+(Lazarus only). Any other driver plugs in by implementing `IDBComponentProvider`/`IDBFactory`.
 
-## Estado
+## Status
 
-Extraído do núcleo de banco do `delphi-api-infra-faa` (commit `aa49f2b`). O núcleo compila no
-FPC 3.2.2 (Lazarus 4.0) e no Delphi 12 CE: 158/158 testes nos dois, 0 leaks nos dois
-(heaptrc / FastMM). Os adapters ainda não existem.
+Extracted from the database core of `delphi-api-infra-faa` (commit `aa49f2b`). The core
+compiles on FPC 3.2.2 (Lazarus 4.0) and on Delphi 12 CE: 158/158 tests on both, 0 leaks on
+both (heaptrc / FastMM). The adapters don't exist yet.
 
-## Estrutura
+## Layout
 
 ```
-src/                    núcleo (todas as units incluem pascaldb.inc)
+src/                    core (every unit includes pascaldb.inc)
 packages/               pascal_db_faa.lpk (Lazarus)
-tests/Unit/             testes DUnitX (mestres) + PascalDb.UnitTests.dproj
-tests/Unit/fpc/         espelho FPCUnit GERADO + PascalDbUnitTestsFpc.lpi
+tests/Unit/             DUnitX tests (masters) + PascalDb.UnitTests.dproj
+tests/Unit/fpc/         GENERATED FPCUnit mirror + PascalDbUnitTestsFpc.lpi
 tools/                  gen_fpc_mirror.py, test_fpc.sh
-PascalDb.groupproj      grupo Delphi
-PascalDb.lpg            grupo Lazarus
+PascalDb.groupproj      Delphi project group
+PascalDb.lpg            Lazarus project group
 ```
 
-## Testes
+## Tests
 
 - FPC: `sh tools/test_fpc.sh`
-- Delphi: abrir `PascalDb.groupproj` e rodar `PascalDb.UnitTests` (o Community Edition não
-  compila por linha de comando).
+- Delphi: open `PascalDb.groupproj` and run `PascalDb.UnitTests` (Community Edition can't
+  compile from the command line).
 
-Convenções, armadilhas Delphi × FPC já encontradas e pendências: ver `CLAUDE.md`.
+Conventions, the Delphi × FPC gotchas found so far and open items: see `CLAUDE.md`.
 
-## Licença
+## License
 
 MIT.

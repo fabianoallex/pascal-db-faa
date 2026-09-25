@@ -1,24 +1,24 @@
 ﻿unit PascalDb.DUnitXCompat;
 
-{ Adaptador fino: expõe a API de asserts do FPCUnit (TAssert.AssertEquals,
-  AssertTrue, AssertFalse, Fail) por cima do Assert do DUnitX. Mesmo padrão do
-  Redis.DUnitXCompat no pascal-redis-faa.
+{ Thin adapter: exposes FPCUnit's assertion API (TAssert.AssertEquals,
+  AssertTrue, AssertFalse, Fail) on top of DUnitX's Assert. Same pattern as
+  Redis.DUnitXCompat in pascal-redis-faa.
 
-  Os testes são escritos UMA vez, no dialeto do FPCUnit, nos mestres DUnitX
-  (tests/Unit/*Tests.pas); o espelho FPCUnit (tests/Unit/fpc) é gerado por
-  tools/gen_fpc_mirror.py trocando só a declaração das fixtures. Este
-  adaptador é o que deixa o mestre compilar no Delphi.
+  Tests are written ONCE, in FPCUnit's dialect, in the DUnitX masters
+  (tests/Unit/*Tests.pas); the FPCUnit mirror (tests/Unit/fpc) is generated
+  by tools/gen_fpc_mirror.py, swapping only the fixture declarations. This
+  adapter is what lets the master compile on Delphi.
 
-  O conjunto de overloads espelha o do TAssert do FPCUnit 3.2.2 — inclusive o
-  que ele NÃO tem: não existe AssertEquals(Double, Double) sem delta. Um
-  overload desses aqui deixaria o mestre compilar no Delphi comparando ponto
-  flutuante de um jeito, enquanto no FPC a mesma linha cai no overload
-  Currency (4 casas decimais) e compara de outro — foi assim que um teste de
-  TDateTime passava no FPC com precisão de Currency. Ponto flutuante sempre
-  com delta explícito (0 = exato).
+  The overload set mirrors FPCUnit 3.2.2's TAssert — including what it does
+  NOT have: there is no delta-less AssertEquals(Double, Double). Such an
+  overload here would let the master compile on Delphi comparing floating
+  point one way, while on FPC the same line falls into the Currency overload
+  (4 decimal places) and compares another way — that is how a TDateTime test
+  passed on FPC at Currency precision. Floating point always takes an
+  explicit delta (0 = exact).
 
-  Comparação de texto é sempre sensível a maiúsculas, como a do FPCUnit:
-  Assert.AreEqual(string, string) do DUnitX ignora maiúsculas POR PADRÃO. }
+  Text comparison is always case-sensitive, like FPCUnit's: DUnitX's
+  Assert.AreEqual(string, string) ignores case BY DEFAULT. }
 
 interface
 
@@ -53,7 +53,7 @@ implementation
 
 class procedure TAssert.AssertEquals(const AExpected, AActual: string);
 begin
-  // False = sensivel a maiusculas. O padrao do DUnitX seria True.
+  // False = case-sensitive. DUnitX's default would be True.
   Assert.AreEqual(AExpected, AActual, False);
 end;
 

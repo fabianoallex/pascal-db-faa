@@ -2,32 +2,33 @@
 
 {$I pascaldb.inc}
 
-{ Cache flyweight genérico (TClockCache<K, V>), thread-safe e de latência
-  previsível, pensado para processos que rodam sem parar. É o que sustenta o
-  cache de instâncias dos tipos opcionais (PascalDb.Optionals).
+{ Generic flyweight cache (TClockCache<K, V>), thread-safe and with
+  predictable latency, meant for processes that run nonstop. It backs the
+  instance cache of the optional types (PascalDb.Optionals).
 
-  Evicção por "G-Clock híbrido com busca de vítima amortizada", em vez de LRU
-  (caro sob concorrência) ou FIFO (ineficiente):
+  Eviction is a "hybrid G-Clock with amortized victim search", instead of LRU
+  (expensive under concurrency) or FIFO (inefficient):
 
-  - Ciclo único: com o cache cheio, o Put dá no máximo UM giro completo no anel
-    de slots (FCapacity), então a latência é constante e previsível (O(N)).
-  - Vidas: cada item tem um contador. Get/Update incrementam (recompensa por
-    frequência, até AMaxLives); o giro de evicção decrementa (punição por
-    ociosidade).
-  - Vítima: durante o giro, procura um item com 0 vidas. Se não achar nenhum,
-    sacrifica o de menor contagem visto no giro.
-  - Admissão (AdmissionPolicy): apAlwaysAdmit sempre admite o item novo,
-    substituindo o menos "quente" mesmo que ainda tenha vidas;
-    apProtectHotItems só admite se algum item já estiver com 0 vidas.
+  - Single sweep: with the cache full, Put makes at most ONE full turn around
+    the ring of slots (FCapacity), so latency is constant and predictable
+    (O(N)).
+  - Lives: each item has a counter. Get/Update increment it (reward for
+    frequency, up to AMaxLives); the eviction sweep decrements it (penalty
+    for idleness).
+  - Victim: during the sweep, it looks for an item with 0 lives. If none is
+    found, it sacrifices the one with the lowest count seen during the sweep.
+  - Admission (AdmissionPolicy): apAlwaysAdmit always admits the new item,
+    replacing the least "hot" one even if it still has lives;
+    apProtectHotItems only admits it if some item is already at 0 lives.
 
-  Memória fixa definida no Create (slots pré-alocados, sem fragmentação), e
-  valores pensados para interfaces (contagem de referência). TCacheHitRate
-  mede hits/misses para acompanhar a eficiência em produção.
+  Fixed memory, set in Create (pre-allocated slots, no fragmentation), with
+  values designed to be interfaces (reference counted). TCacheHitRate tracks
+  hits/misses to monitor efficiency in production.
 
-  Dual-compiler: o comparador opcional do construtor nunca é repassado como
-  nil ao TDictionary (o do FPC 3.2.2 guarda o nil e dá Access Violation; o do
-  Delphi troca por Default), e os contadores usam PascalDb.Threading em vez de
-  TInterlocked, que não existe no FPC. }
+  Dual-compiler: the constructor's optional comparer is never forwarded to
+  TDictionary as nil (FPC 3.2.2's stores the nil and raises an Access
+  Violation; Delphi's replaces it with Default), and the counters use
+  PascalDb.Threading instead of TInterlocked, which doesn't exist in FPC. }
 
 interface
 
@@ -39,7 +40,7 @@ type
   TClockItem<K, V> = record
     Key: K;
     Value: V;
-    Lives: Integer;     // Contador de frequência (G-Clock)
+    Lives: Integer;     // Frequency counter (G-Clock)
     InUse: Boolean;
   end;
 
@@ -81,7 +82,7 @@ type
   TClockCache<K, V> = class
   type
     TItem = TClockItem<K, V>;
-    TMap = TDictionary<K, Integer>; // Mapeia Chave -> Índice no Array
+    TMap = TDictionary<K, Integer>; // Maps Key -> index in the array
     TRemoveEvent = procedure(var AValue: V) of object;
   private
     FItems: array of TItem;
@@ -183,9 +184,10 @@ begin
     FMaxLives := 1;
   FCapacity := ACapacity;
   SetLength(FItems, FCapacity);
-  // Nao repassar AComparer = nil: o TDictionary do Delphi troca nil pelo
-  // comparador padrao, mas o do FPC 3.2.2 (rtl-generics) guarda o nil e da'
-  // Access Violation no primeiro Add/TryGetValue (GetHashCode sobre nil).
+  // Never forward AComparer = nil: Delphi's TDictionary replaces nil with the
+  // default comparer, but FPC 3.2.2's (rtl-generics) stores the nil and
+  // raises an Access Violation on the first Add/TryGetValue (GetHashCode on
+  // nil).
   if Assigned(AComparer) then
     FMap := TMap.Create(AComparer)
   else
@@ -220,25 +222,25 @@ begin
 
   for I := 1 to FCapacity do
   begin
-    // 1. Cache ainda tem posições sem uso
+    // 1. The cache still has unused slots
     if not FItems[FHand].InUse then
       Exit(True);
 
-    // 2. Já achamos alguém que morreu naturalmente?
+    // 2. Did we already find one that died naturally?
     if FItems[FHand].Lives = 0 then
     begin
       Eject;
       Exit(True);
     end;
 
-    // 3. Senão, monitoramos quem é o mais fraco deste ciclo
+    // 3. Otherwise, track the weakest one in this sweep
     if FItems[FHand].Lives < MinLives then
     begin
       MinLives := FItems[FHand].Lives;
       WeakestIdx := FHand;
     end;
 
-    Dec(FItems[FHand].Lives);  // Segunda chance: tira a marcação
+    Dec(FItems[FHand].Lives);  // Second chance: remove the mark
     FHand := (FHand + 1) mod FCapacity;
   end;
 
@@ -248,7 +250,7 @@ begin
       Exit(False);
   end;
 
-  FHand := WeakestIdx; // posiciona o hand
+  FHand := WeakestIdx; // position the hand
   Eject;
   Result := True;
 end;
@@ -284,7 +286,7 @@ begin
       if not Evict then
         Exit;
 
-    // O Evict parou no FHand que deve ser usado.
+    // Evict stopped at the FHand that must be used.
     FItems[FHand].Key := AKey;
     FItems[FHand].Value := AValue;
     FItems[FHand].Lives := Math.Min(FMaxLives, AInitialLives);
@@ -292,7 +294,7 @@ begin
 
     FMap.AddOrSetValue(AKey, FHand);
 
-    // Avança o ponteiro APÓS a inserção ter sido concluída no mapa
+    // Advance the hand AFTER the insertion into the map has completed
     FHand := (FHand + 1) mod FCapacity;
   finally
     FLock.EndWrite;
@@ -309,7 +311,7 @@ begin
     if Result then
     begin
       AValue := FItems[Idx].Value;
-      if FItems[Idx].Lives < FMaxLives then  // limite
+      if FItems[Idx].Lives < FMaxLives then  // cap
         PdbAtomicInc(FItems[Idx].Lives);
 
       CacheHitRate.IncHits;

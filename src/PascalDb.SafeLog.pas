@@ -2,35 +2,25 @@
 
 {$I pascaldb.inc}
 
-{ SafeWriteln: Writeln no console protegido por uma seção crítica global.
+{ SafeWriteln: Writeln to the console, guarded by a global critical section.
 
-  Código que roda fora da main thread (handlers de servidor HTTP, callbacks de
-  pipe/mensageria, threads do pool) não pode usar Writeln direto: sob
-  concorrência ele corrompe o buffer do console.
+  Code that runs off the main thread (HTTP server handlers, pipe/messaging
+  callbacks, pool threads) must not call Writeln directly: under concurrency
+  it corrupts the console buffer.
 
-  Num binário sem console (sem a diretiva APPTYPE CONSOLE: serviço Windows,
-  app VCL/LCL/FMX) não existe saída padrão, e Writeln(Output) levanta EInOutError
-  (105) na primeira chamada. O guard IsConsole torna SafeWriteln um no-op
-  nesses binários, para o mesmo código de startup servir aos dois. A
-  consequência é que diagnóstico que só passa por aqui some sem aviso num
-  serviço — por isso quem precisa de log persistente deve informar os
-  callbacks de evento (pool, migrations) em vez de depender deste fallback. }
+  In a binary without a console (no APPTYPE CONSOLE directive: Windows
+  service, VCL/LCL/FMX app) there is no standard output, and Writeln(Output)
+  raises EInOutError (105) on the first call. The IsConsole guard turns
+  SafeWriteln into a no-op in those binaries, so the same startup code serves
+  both. The consequence is that diagnostics that only go through here vanish
+  silently in a service — anyone who needs persistent logging should pass the
+  event callbacks (pool, migrations) instead of relying on this fallback. }
 
 interface
 
-/// Escreve no console protegido por uma seção crítica global.
-///
-/// Handlers HTTP (Horse) e OnRequest de pipe-server rodam em thread pool —
-/// Writeln direto nesse contexto corrompe o buffer do console sob
-/// concorrência. Use SafeWriteln em qualquer ponto que possa ser chamado
-/// fora da main thread.
-///
-/// Num binário SEM {$APPTYPE CONSOLE} (serviço Windows, app VCL/FMX) não existe
-/// handle de saída padrão: `Writeln(Output)` levanta EInOutError (I/O error 105)
-/// na primeira chamada. O guard `IsConsole` torna SafeWriteln um no-op nesses
-/// binários, para que o mesmo código de startup sirva ao executável console e ao
-/// serviço sem derrubar o segundo. Log persistente é responsabilidade do
-/// Common.FileLog — que grava igual nos dois.
+/// Writes to the console guarded by a global critical section. Safe to call
+/// from any thread; a no-op in binaries without a console (see the unit
+/// header).
 procedure SafeWriteln(const AText: string); overload;
 procedure SafeWriteln(const AFormatStr: string; const AArgs: array of const); overload;
 
@@ -45,7 +35,7 @@ var
 
 procedure SafeWriteln(const AText: string);
 begin
-  // sem console não há Output associado — Writeln levantaria EInOutError (105)
+  // no console means no Output handle — Writeln would raise EInOutError (105)
   if not IsConsole then
     Exit;
 
@@ -59,7 +49,7 @@ end;
 
 procedure SafeWriteln(const AFormatStr: string; const AArgs: array of const);
 begin
-  // checa antes do Format: sem console a formatação também é trabalho jogado fora
+  // check before Format: without a console, formatting is wasted work too
   if not IsConsole then
     Exit;
 

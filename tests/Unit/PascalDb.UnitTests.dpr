@@ -1,12 +1,12 @@
 ﻿program PascalDb.UnitTests;
 
-{ Runner DUnitX dos testes unitários. Não precisa de banco: tudo roda sobre
-  TMockDBFactory e fakes em memória.
+{ DUnitX runner for the unit tests. No database needed: everything runs on
+  TMockDBFactory and in-memory fakes.
 
-  A suíte irmã em FPCUnit fica em tests/Unit/fpc — mesma cobertura e corpo
-  dos testes idêntico: os arquivos de lá são GERADOS a partir destes por
-  tools/gen_fpc_mirror.py (o PascalDb.DUnitXCompat existe para isso). Edite
-  sempre os mestres DUnitX daqui e regenere o espelho. }
+  The sibling FPCUnit suite lives in tests/Unit/fpc — same coverage and
+  identical test bodies: the files there are GENERATED from these by
+  tools/gen_fpc_mirror.py (PascalDb.DUnitXCompat exists for that). Always
+  edit the DUnitX masters here and regenerate the mirror. }
 
 {$APPTYPE CONSOLE}
 {$STRONGLINKTYPES ON}
@@ -41,7 +41,7 @@ var
   logger: ITestLogger;
   nunitLogger: ITestLogger;
 begin
-  // Criterio de aceite dos dois lados: 0 leaks (FastMM aqui, heaptrc no FPC).
+  // Acceptance criterion on both sides: 0 leaks (FastMM here, heaptrc on FPC).
   ReportMemoryLeaksOnShutdown := True;
   try
     TDUnitX.CheckCommandLine;

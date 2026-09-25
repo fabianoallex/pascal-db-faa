@@ -2,33 +2,34 @@
 
 {$I pascaldb.inc}
 
-{ Pool de conexões (TConnectionPool) sobre qualquer IDBFactory.
+{ Connection pool (TConnectionPool) on top of any IDBFactory.
 
-  AcquireConnection/AcquireQuery entregam conexões "embrulhadas": quando a
-  última referência ao wrapper (conexão, query ou transação de escopo) é
-  solta, a conexão volta sozinha ao pool — ou é descartada, se foi marcada
-  como quebrada durante o uso (ver IDiscardableConnection e
-  BuildDatabaseException em PascalDb.Interfaces).
+  AcquireConnection/AcquireQuery hand out "wrapped" connections: when the
+  last reference to the wrapper (connection, query or scope transaction) is
+  released, the connection goes back to the pool by itself — or is
+  discarded, if it was marked as broken during use (see
+  IDiscardableConnection and BuildDatabaseException in PascalDb.Interfaces).
 
-  Comportamento configurável por IConnectionPoolConfig:
-  - ramp-up de IniConnections no construtor, que NUNCA derruba o boot se o
-    banco estiver fora do ar — as falhas viram eventos e a próxima Acquire
-    tenta de novo;
-  - crescimento sob demanda até MaxConnections, com espera limitada
-    (WaitMaxAttemps × WaitMilliseconds) e EPoolTimeoutException ao esgotar;
-  - teste de vivacidade de conexões paradas e descarte das mortas;
-  - varredura de conexões ociosas (IdleTimeoutSeconds), numa thread dedicada
-    (TIdleSweepThread) que nunca fecha abaixo de IniConnections.
+  Behavior configurable through IConnectionPoolConfig:
+  - ramp-up of IniConnections in the constructor, which NEVER brings the
+    application down if the database is offline — failures become events
+    and the next Acquire tries again;
+  - on-demand growth up to MaxConnections, with bounded waiting
+    (WaitMaxAttemps × WaitMilliseconds) and EPoolTimeoutException when it
+    runs out;
+  - liveness check of stale connections and discard of dead ones;
+  - sweep of idle connections (IdleTimeoutSeconds), in a dedicated thread
+    (TIdleSweepThread) that never closes below IniConnections.
 
-  Observabilidade: eventos (TPoolEventProc) só para o que é anormal ou
-  crescimento de capacidade, nunca para o caminho feliz; e GetSnapshot para
-  leitura periódica de estado + contadores acumulados.
+  Observability: events (TPoolEventProc) only for what is abnormal or for
+  capacity growth, never for the happy path; and GetSnapshot for periodic
+  reads of state + accumulated counters.
 
-  Dual-compiler: a thread de varredura é subclasse de TThread (não
-  CreateAnonymousThread), e TPoolEventProc segue PASCALDB_FUNCREFS
-  (pascaldb.inc): closure ou método no Delphi, método no FPC 3.2.2.
-  Tempo e espera passam por PascalDb.SystemContext, para os testes
-  controlarem relógio e Sleep. }
+  Dual-compiler: the sweep thread is a TThread subclass (not
+  CreateAnonymousThread), and TPoolEventProc follows PASCALDB_FUNCREFS
+  (pascaldb.inc): closure or method in Delphi, method in FPC 3.2.2. Time and
+  waiting go through PascalDb.SystemContext, so tests control the clock and
+  Sleep. }
 
 interface
 
@@ -79,11 +80,11 @@ type
     property MaxConnections: Integer read GetMaxConnections write SetMaxConnections;
     property WaitMaxAttemps: Integer read GetWaitMaxAttemps write SetWaitMaxAttemps;
     property WaitMilliseconds: Integer read GetWaitMilliseconds write SetWaitMilliseconds;
-    /// Segundos que uma conexão pode ficar ociosa no pool antes de ser
-    /// fechada (nunca abaixo de IniConnections). 0 (padrão) = desligado.
+    /// Seconds a connection may stay idle in the pool before being closed
+    /// (never below IniConnections). 0 (default) = off.
     property IdleTimeoutSeconds: Integer read GetIdleTimeoutSeconds write SetIdleTimeoutSeconds;
-    /// Intervalo entre varreduras de ociosidade. Só importa quando
-    /// IdleTimeoutSeconds > 0. Valores <= 0 caem no padrão (30000ms).
+    /// Interval between idle sweeps. Only matters when
+    /// IdleTimeoutSeconds > 0. Values <= 0 fall back to the default (30000ms).
     property IdleCheckIntervalMs: Integer read GetIdleCheckIntervalMs write SetIdleCheckIntervalMs;
   end;
 
@@ -113,47 +114,47 @@ type
     procedure SetIdleCheckIntervalMs(AValue: Integer);
   end;
 
-  // Eventos do pool cobrem só o que é sinal de operação anormal ou de
-  // crescimento de capacidade — nunca o caminho feliz (acquire/release de uma
-  // conexão já pronta no pool, que acontece em toda requisição). Diferente de
-  // TMigrationEvent (PascalDb.Migrations, que roda poucas vezes no startup), aqui
-  // NÃO existe fallback de log no console quando AOnEvent não é informado:
-  // silêncio é o comportamento correto de um pool saudável, e notificar em
-  // toda acquire/release geraria uma linha de log por requisição.
+  // Pool events only cover what signals abnormal operation or capacity
+  // growth — never the happy path (acquire/release of a connection already
+  // ready in the pool, which happens on every request). Unlike
+  // TMigrationEvent (PascalDb.Migrations, which runs a few times at startup),
+  // there is NO console-log fallback here when AOnEvent is not provided:
+  // silence is the correct behavior of a healthy pool, and notifying on every
+  // acquire/release would produce one log line per request.
   TPoolEventKind = (
-    pekConnectionCreated,    // nova conexão física criada (ramp-up inicial ou crescimento sob carga)
-    pekConnectionDiscarded,  // uma conexão do pool foi descartada (falhou reconectar, falhou o teste
-                             // de vivacidade, ou saiu marcada como quebrada durante o uso — ver TPoolDiscardReason)
-    pekAcquireThrottled,     // AcquireConnection precisou esperar (pool no limite) antes de conseguir uma conexão
-    pekAcquireTimeout,       // esgotou as tentativas de espera; EPoolTimeoutException será lançada em seguida
-    pekIdleSweepClosed       // a varredura de ociosidade fechou uma ou mais conexões
+    pekConnectionCreated,    // new physical connection created (initial ramp-up or growth under load)
+    pekConnectionDiscarded,  // a pool connection was discarded (reconnect failed, liveness check failed,
+                             // or it came back marked as broken during use — see TPoolDiscardReason)
+    pekAcquireThrottled,     // AcquireConnection had to wait (pool at its limit) before getting a connection
+    pekAcquireTimeout,       // ran out of wait attempts; EPoolTimeoutException is raised next
+    pekIdleSweepClosed       // the idle sweep closed one or more connections
   );
 
   TPoolDiscardReason = (
-    pdrConnectFailed,     // ConnectionItem.Connection.Connect falhou ao reconectar, ou
-                           // AcquireConnection falhou ao abrir uma conexão nova durante o
-                           // ramp-up inicial (CreateInitialConnections, banco fora do ar no boot)
-    pdrStaleCheckFailed,  // FFactory.TestConnection retornou False (conexão parada/morta)
-    pdrBrokenAfterUse     // IsConnectionBrokenError (PascalDb.Interfaces) marcou a conexão via
-                           // IDiscardableConnection durante o uso (Query/Commit/Rollback) —
-                           // descartada no release, nunca volta ociosa ao pool
+    pdrConnectFailed,     // ConnectionItem.Connection.Connect failed to reconnect, or
+                           // AcquireConnection failed to open a new connection during the
+                           // initial ramp-up (CreateInitialConnections, database offline at boot)
+    pdrStaleCheckFailed,  // FFactory.TestConnection returned False (stale/dead connection)
+    pdrBrokenAfterUse     // IsConnectionBrokenError (PascalDb.Interfaces) marked the connection via
+                           // IDiscardableConnection during use (Query/Commit/Rollback) —
+                           // discarded on release, never goes back idle to the pool
   );
 
   TPoolEvent = record
     Kind: TPoolEventKind;
-    ActiveConnections: Integer;  // FActiveConnections no momento do evento
-    PoolSize: Integer;           // conexões ociosas na fila no momento do evento
+    ActiveConnections: Integer;  // FActiveConnections at the time of the event
+    PoolSize: Integer;           // idle connections in the queue at the time of the event
     MaxConnections: Integer;
     IniConnections: Integer;
     WaitAttempts: Integer;             // pekAcquireThrottled / pekAcquireTimeout
     ClosedCount: Integer;              // pekIdleSweepClosed
     DiscardReason: TPoolDiscardReason; // pekConnectionDiscarded
-    ErrorMessage: string;              // pekConnectionDiscarded (mensagem da exceção de Connect, se houver)
+    ErrorMessage: string;              // pekConnectionDiscarded (Connect's exception message, if any)
   end;
 
-  // Ver PASCALDB_FUNCREFS em pascaldb.inc: "reference to" no Delphi (aceita
-  // closure e metodo), "of object" no FPC 3.2.2 — passar um metodo compila
-  // nos dois.
+  // See PASCALDB_FUNCREFS in pascaldb.inc: "reference to" in Delphi (accepts
+  // a closure or a method), "of object" in FPC 3.2.2 — passing a method
+  // compiles on both.
   TPoolEventProc = {$IFDEF PASCALDB_FUNCREFS}reference to procedure(const AEvent: TPoolEvent)
     {$ELSE}procedure(const AEvent: TPoolEvent) of object{$ENDIF};
 
@@ -191,9 +192,9 @@ type
     procedure DiscardConnection(AConn: IDBConnection);
     procedure ReleaseQuery(var AQuery: IQuery);
   public
-    // AOnEvent é opcional — sem ele, o pool simplesmente não notifica nada
-    // (ver comentário em TPoolEventKind sobre por que não há fallback de
-    // console aqui, ao contrário de TDBMigrationEngine).
+    // AOnEvent is optional — without it, the pool simply doesn't notify
+    // anything (see the comment on TPoolEventKind for why there is no
+    // console fallback here, unlike TDBMigrationEngine).
     constructor Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig = nil;
       AOnEvent: TPoolEventProc = nil);
     destructor Destroy; override;
@@ -203,17 +204,17 @@ type
     function GetPoolSize: Integer;
     function GetWaitMaxAttemps: Integer;
     function GetWaitMilliseconds: Integer;
-    // Estado atual + contadores acumulados desde a criação do pool — ver
-    // TPoolSnapshot (PascalDb.Interfaces) para o propósito de cada campo.
+    // Current state + counters accumulated since the pool was created — see
+    // TPoolSnapshot (PascalDb.Interfaces) for the purpose of each field.
     function GetSnapshot: TPoolSnapshot;
-    /// Fecha, imediatamente, as conexões ociosas mais antigas do pool que
-    /// ultrapassarem IdleTimeoutSeconds, nunca abaixo de IniConnections.
-    /// A thread de varredura automática chama a versão sem parâmetro
-    /// periodicamente quando IdleTimeoutSeconds > 0.
-    /// Ambas são públicas principalmente para permitir testes determinísticos
-    /// (com IClock fake) sem esperar o intervalo real nem depender da thread
-    /// de fundo — a versão com parâmetro nem precisa de IdleTimeoutSeconds
-    /// configurado (nem, portanto, de nenhuma thread ter sido iniciada).
+    /// Immediately closes the pool's oldest idle connections that exceed
+    /// IdleTimeoutSeconds, never below IniConnections.
+    /// The automatic sweep thread calls the parameterless version
+    /// periodically when IdleTimeoutSeconds > 0.
+    /// Both are public mainly to allow deterministic tests (with a fake
+    /// IClock) without waiting for the real interval or depending on the
+    /// background thread — the parameterized version doesn't even need
+    /// IdleTimeoutSeconds configured (nor, therefore, any thread started).
     procedure SweepIdleConnections; overload;
     procedure SweepIdleConnections(AIdleTimeoutSeconds: Integer); overload;
   end;
@@ -221,12 +222,12 @@ type
 implementation
 
 type
-  { Thread de varredura de conexoes ociosas.
+  { Idle-connection sweep thread.
 
-    Classe dedicada em vez de TThread.CreateAnonymousThread: o FPC 3.2.2 nao
-    tem metodos anonimos. Acessa membros privados do pool (mesma unit). O
-    ciclo de vida (Terminate via FIdleSweepWake, WaitFor unico, Free) continua
-    sendo do TConnectionPool — ver StartIdleSweep/StopIdleSweep. }
+    A dedicated class instead of TThread.CreateAnonymousThread: FPC 3.2.2 has
+    no anonymous methods. It accesses the pool's private members (same unit).
+    The lifecycle (Terminate via FIdleSweepWake, a single WaitFor, Free)
+    still belongs to TConnectionPool — see StartIdleSweep/StopIdleSweep. }
   TIdleSweepThread = class(TThread)
   private
     FPool: TConnectionPool;
@@ -251,7 +252,7 @@ end;
 type
 
   { TConnectionWrapper
-    Auto-devolve a conexão ao pool quando destruído. }
+    Returns the connection to the pool automatically when destroyed. }
 
   TConnectionWrapper = class(TInterfacedObject, IDBConnection, IUnwrapDBConnection, IDiscardableConnection)
   private
@@ -269,15 +270,16 @@ type
     function IsConnected: Boolean;
     procedure Commit;
     procedure Rollback;
-    // IDiscardableConnection — ver comentário na declaração da interface
-    // (PascalDb.Interfaces) e MarkConnectionBrokenIfNeeded, chamado a partir de
-    // TQueryWrapper.Open/ExecSql e TFDTransactionAdapter.Commit/Rollback.
+    // IDiscardableConnection — see the comment on the interface declaration
+    // (PascalDb.Interfaces) and MarkConnectionBrokenIfNeeded, called from
+    // TQueryWrapper.Open/ExecSql and from the adapter's transaction
+    // Commit/Rollback.
     procedure MarkForDiscard;
     function ShouldDiscard: Boolean;
   end;
 
   { TQueryWrapper
-    Auto-devolve a query ao pool quando destruído. }
+    Returns the query to the pool automatically when destroyed. }
 
   TQueryWrapper = class(TInterfacedObject, IQuery)
   private
@@ -297,26 +299,26 @@ type
   end;
 
   { TQueryResultWrapper
-    Envolve o IQueryResult devolvido por Query.Open. Todo acesso a campo
-    (GetAsXxx, GetNullableXxx, Next, ...) passa por aqui — é o ponto certo pra
-    aplicar a mesma classificação de MarkConnectionBrokenIfNeeded usada em
-    TQueryWrapper.Open/ExecSql: um AV ou perda de conexão no meio da leitura
-    dos campos (ex.: servidor caiu durante o fetch, depois do Open já ter
-    retornado com sucesso) precisa marcar a conexão pro descarte tanto quanto
-    uma falha no próprio Open — sem isso, TQueryWrapper.Open só cobre a
-    metade do ciclo de vida da query que menos concentra acesso ao driver
-    nativo (a maior parte da leitura de dados acontece aqui, não no Open). }
+    Wraps the IQueryResult returned by Query.Open. Every field access
+    (GetAsXxx, GetNullableXxx, Next, ...) goes through here — the right place
+    to apply the same MarkConnectionBrokenIfNeeded classification used in
+    TQueryWrapper.Open/ExecSql: an AV or lost connection in the middle of
+    reading fields (e.g. the server went down during the fetch, after Open had
+    already returned successfully) must mark the connection for discard just
+    like a failure in Open itself — without this, TQueryWrapper.Open only
+    covers the half of the query's lifecycle that touches the native driver
+    the least (most of the data reading happens here, not in Open). }
 
   TQueryResultWrapper = class(TInterfacedObject, IQueryResult)
   private
     FInternalResult: IQueryResult;
     FConnection: IDBConnection;
-    // Devolve a exceção a relançar (nova EDatabaseUnavailableException) ou
-    // nil (relançar E como está) — nunca relança ela mesma. Ver comentário
-    // em BuildDatabaseException (PascalDb.Interfaces): "raise E;" por referência,
-    // a partir do frame de Guard (que não é onde E foi capturado), causa AV
-    // nesta versão do Delphi — por isso cada método abaixo relança
-    // localmente, lexicamente dentro do próprio except.
+    // Returns the exception to re-raise (a new EDatabaseUnavailableException)
+    // or nil (re-raise E as is) — it never re-raises it itself. See the
+    // comment on BuildDatabaseException (PascalDb.Interfaces): "raise E;" by
+    // reference, from Guard's frame (which is not where E was caught), causes
+    // an AV in this Delphi version — that's why each method below re-raises
+    // locally, lexically inside its own except block.
     function Guard(E: Exception): Exception;
   public
     constructor Create(AResult: IQueryResult; AConnection: IDBConnection);
@@ -369,11 +371,11 @@ begin
   except
     on E: Exception do
     begin
-      // Ver BuildDatabaseException (PascalDb.Interfaces) — nunca "raise E;" aqui:
-      // relançar por referência um objeto capturado no frame de OUTRA
-      // procedure causa Access Violation nesta versão do Delphi. Só é seguro
-      // relançar uma exceção NOVA (LNewE) ou "raise;" bare, lexicamente
-      // dentro deste próprio except.
+      // See BuildDatabaseException (PascalDb.Interfaces) — never "raise E;"
+      // here: re-raising by reference an object caught in ANOTHER
+      // procedure's frame causes an Access Violation in this Delphi version.
+      // It is only safe to raise a NEW exception (LNewE) or a bare "raise;",
+      // lexically inside this very except block.
       LNewE := BuildDatabaseException(FInternalQuery.GetConnection, E);
       if Assigned(LNewE) then
         raise LNewE;
@@ -412,21 +414,21 @@ begin
   except
     on E: Exception do
     begin
-      // Ver BuildDatabaseException (PascalDb.Interfaces): só relança como
-      // EDatabaseUnavailableException em EExternal (ex.: Access Violation
-      // dentro da chamada nativa) ou se IsConnected virou False — violação
-      // de constraint e outros erros de dados normais relançam E como está.
-      // Nunca "raise E;" aqui (ver comentário em TQueryWrapper.ExecSql).
+      // See BuildDatabaseException (PascalDb.Interfaces): it only re-raises
+      // as EDatabaseUnavailableException on EExternal (e.g. an Access
+      // Violation inside the native call) or if IsConnected turned False —
+      // constraint violations and other normal data errors re-raise E as is.
+      // Never "raise E;" here (see the comment in TQueryWrapper.ExecSql).
       LNewE := BuildDatabaseException(FInternalQuery.GetConnection, E);
       if Assigned(LNewE) then
         raise LNewE;
       raise;
     end;
   end;
-  // O resultado cru não passa por nenhum wrapper do pool — sem isso, um AV
-  // durante a leitura dos campos (ex.: servidor caiu no meio do fetch, já
-  // depois do Open ter retornado com sucesso) nunca seria classificado.
-  // Ver TQueryResultWrapper.
+  // The raw result doesn't go through any pool wrapper — without this, an AV
+  // while reading fields (e.g. the server went down mid-fetch, after Open had
+  // already returned successfully) would never be classified.
+  // See TQueryResultWrapper.
   Result := TQueryResultWrapper.Create(LRawResult, FInternalQuery.GetConnection);
 end;
 
@@ -812,7 +814,7 @@ end;
 constructor EPoolTimeoutException.Create(Active, Max, InQueue, Attempts: Integer);
 begin
   inherited CreateFmt(
-    'Timeout ao aguardar conexão. Pool: %d/%d ativas, %d na fila. Tentativas: %d',
+    'Timed out waiting for a connection. Pool: %d/%d active, %d queued. Attempts: %d',
     [Active, Max, InQueue, Attempts]
   );
 end;
@@ -830,7 +832,7 @@ end;
 constructor TConnectionPoolConfig.Create;
 begin
   inherited Create;
-  FIdleCheckIntervalMs := 30000; // só importa se IdleTimeoutSeconds > 0
+  FIdleCheckIntervalMs := 30000; // only matters if IdleTimeoutSeconds > 0
 end;
 
 function TConnectionPoolConfig.GetIniConnections: Integer;
@@ -902,7 +904,7 @@ end;
 constructor TConnectionPool.Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig;
   AOnEvent: TPoolEventProc);
 
-  // Referência fraca para quebrar ciclo circular TConnectionPool <-> IDBFactory
+  // Weak reference to break the TConnectionPool <-> IDBFactory reference cycle
   procedure SetWeak(aInterfaceField: PInterface; const aValue: IInterface);
   begin
     PPointer(aInterfaceField)^ := Pointer(aValue);
@@ -926,12 +928,12 @@ begin
     FMaxConnections  := 20;
     FWaitMilliseconds := 20;
     FWaitMaxAttemps  := 50;
-    FIdleTimeoutSeconds := 0; // desligado por padrão
+    FIdleTimeoutSeconds := 0; // off by default
     FIdleCheckIntervalMs := 30000;
   end;
 
   if FIdleCheckIntervalMs <= 0 then
-    FIdleCheckIntervalMs := 30000; // config já validava isso, mas o branch "sem AConfig" não
+    FIdleCheckIntervalMs := 30000; // the config already validated this, but the "no AConfig" branch didn't
 
   FActiveConnections := 0;
 
@@ -948,11 +950,11 @@ end;
 
 destructor TConnectionPool.Destroy;
 begin
-  // Precisa parar ANTES de mexer em FPool/FLockPool — senão a thread de
-  // varredura pode disparar em cima de campos já liberados.
+  // Must stop BEFORE touching FPool/FLockPool — otherwise the sweep thread
+  // could fire on fields that were already freed.
   StopIdleSweep;
 
-  // Anula a referência fraca antes do Release automático gerado pelo compilador
+  // Clear the weak reference before the compiler-generated automatic Release
   PPointer(@FFactory)^ := nil;
 
   FLockPool.Enter;
@@ -998,9 +1000,9 @@ end;
 
 procedure TConnectionPool.StartIdleSweep;
 begin
-  // Evento manual-reset: SetEvent no Terminate acorda a thread na hora,
-  // sem esperar o intervalo cheio — mesmo padrão usado no reconnect thread
-  // do pascal-named-pipes-faa (TPipeClient.FReconnectAbort).
+  // Manual-reset event: SetEvent on shutdown wakes the thread immediately,
+  // without waiting the full interval — same pattern as the reconnect thread
+  // in pascal-named-pipes-faa (TPipeClient.FReconnectAbort).
   FIdleSweepWake := TEvent.Create(nil, True, False, '');
   FIdleSweepThread := TIdleSweepThread.Create(Self);
 end;
@@ -1033,9 +1035,9 @@ begin
 
   LToClose := TList<IDBConnection>.Create;
   try
-    // Fase 1 (rápida, sob lock): decidir o que sai. FPool é FIFO por
-    // LastRelease crescente, então o item da frente é sempre o mais antigo —
-    // basta espiar e parar no primeiro que ainda não está ocioso o bastante.
+    // Phase 1 (fast, under the lock): decide what goes. FPool is FIFO by
+    // increasing LastRelease, so the front item is always the oldest — just
+    // peek and stop at the first one that isn't idle long enough.
     FLockPool.Enter;
     try
       while (FPool.Count > FIniConnections) and (FPool.Count > 0) do
@@ -1046,21 +1048,22 @@ begin
 
         FPool.Dequeue;
         LToClose.Add(LItem.Connection);
-        Dec(FActiveConnections); // já estamos sob FLockPool; ver DecrementActiveConnections
+        Dec(FActiveConnections); // already under FLockPool; see DecrementActiveConnections
       end;
     finally
       FLockPool.Leave;
     end;
 
-    // Fase 2 (lenta, fora do lock): desconectar de fato. Nunca fazer IO de
-    // rede com FLockPool preso — bloquearia todo AcquireConnection/
-    // ReleaseConnection concorrente da aplicação até o Disconnect terminar.
+    // Phase 2 (slow, outside the lock): actually disconnect. Never do network
+    // IO while holding FLockPool — it would block every concurrent
+    // AcquireConnection/ReleaseConnection in the application until the
+    // Disconnect finishes.
     for LConn in LToClose do
     begin
       try
         LConn.Disconnect(True);
       except
-        // ignora — a conexão está sendo descartada de qualquer forma
+        // ignore — the connection is being discarded anyway
       end;
     end;
 
@@ -1079,9 +1082,10 @@ end;
 procedure TConnectionPool.CreateInitialConnections;
 var
   I: Integer;
-  { Holders mantém os Wrappers vivos durante o loop para forçar o pool a
-    criar conexões físicas novas. Ao sair do procedure, o array sai de escopo,
-    todos os Wrappers são liberados e as conexões voltam ao pool. }
+  { Holders keeps the wrappers alive during the loop to force the pool to
+    create new physical connections. When the procedure exits, the array
+    goes out of scope, every wrapper is released and the connections go back
+    to the pool. }
   Holders: TArray<IDBConnection>;
   LEvent: TPoolEvent;
 begin
@@ -1094,19 +1098,20 @@ begin
     try
       Holders[I] := AcquireConnection;
     except
-      // IniConnections > MaxConnections é erro de configuração, não "banco
-      // fora do ar" — continua subindo, como sempre subiu (ver
-      // Test_Pool_MaxConnections_Estoura/Test_Pool_Evento_AcquireTimeout_*).
+      // IniConnections > MaxConnections is a configuration error, not
+      // "database offline" — it keeps propagating, as it always did (see
+      // Test_Pool_MaxConnections_Exceeded/Test_Pool_Event_AcquireTimeout_*).
       on E: EPoolTimeoutException do
         raise;
       on E: Exception do
       begin
-        { Banco fora do ar (ou inacessível) no boot: não deixamos a falha subir
-          e derrubar TConnectionPool.Create/TFDFactory.Create por causa do
-          ramp-up inicial. Holders[I] fica nil (AcquireConnection já reverteu
-          FActiveConnections em TryGetNewConnection) e o pool nasce sem essa
-          conexão pré-aquecida; a próxima AcquireConnection real (primeira
-          requisição, health check, etc.) tenta de novo. }
+        { Database offline (or unreachable) at boot: don't let the failure
+          propagate and bring down TConnectionPool.Create (or the factory
+          that creates it) because of the initial ramp-up. Holders[I] stays
+          nil (AcquireConnection already reverted FActiveConnections in
+          TryGetNewConnection) and the pool starts without this pre-warmed
+          connection; the next real AcquireConnection (first request, health
+          check, etc.) tries again. }
         Inc(FTotalDiscarded);
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrConnectFailed;
@@ -1348,10 +1353,10 @@ begin
   try
     LRealConn.Rollback;
   except
-    // Chamado a partir de TConnectionWrapper.Destroy (um destructor) — nunca
-    // deixa a exceção escapar daqui. Uma conexão que falha no Rollback não
-    // parecia quebrada até agora (senão já teria vindo com FDiscard=True);
-    // não arrisca reenfileirar mesmo assim, descarta.
+    // Called from TConnectionWrapper.Destroy (a destructor) — never lets the
+    // exception escape from here. A connection that fails on Rollback didn't
+    // look broken until now (otherwise it would already have come with
+    // FDiscard=True); still, don't risk re-queueing it — discard it.
     DiscardConnection(LRealConn);
     Exit;
   end;
@@ -1381,7 +1386,7 @@ begin
   try
     LRealConn.Disconnect(True);
   except
-    // ignora — a conexão está sendo descartada de qualquer forma
+    // ignore — the connection is being discarded anyway
   end;
 
   DecrementActiveConnections;

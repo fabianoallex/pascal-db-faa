@@ -1,156 +1,168 @@
-# pascal-db-faa — Guia para agentes de IA
+# pascal-db-faa — Guide for AI agents
 
-Camada de acesso a banco de dados **dual-compiler** (Delphi + Lazarus/FPC): contratos
-agnósticos (`IDBFactory`/`IQuery`/`IParams`), pool de conexões, migrations, SQL em templates
-com tags, tipos opcionais/nuláveis e um mock completo para testes. Os drivers de conexão
-ficam fora do núcleo, em adapters.
+A **dual-compiler** (Delphi + Lazarus/FPC) database access layer: driver-agnostic contracts
+(`IDBFactory`/`IQuery`/`IParams`), connection pool, migrations, tagged SQL templates,
+optional/nullable types and a complete mock for tests. Connection drivers live outside the
+core, in adapters.
 
-Para as regras gerais de dual-compiler (anatomia do projeto, `.inc`, testes espelhados, CI),
-use a skill `dual-compiler-delphi-lazarus`. Este arquivo registra só o que é específico
-daqui.
+For the general dual-compiler rules (project anatomy, `.inc`, mirrored tests, CI), use the
+`dual-compiler-delphi-lazarus` skill. This file records only what is specific to this repo.
 
 ---
 
-## Origem: extraído do delphi-api-infra-faa
+## Language
 
-O núcleo saiu de `delphi-api-infra-faa` (`src/Db/*` + as dependências em `src/Common`), no
-commit **`aa49f2b` (2026-08-25)**. Os dois repositórios são **independentes**: correções
-feitas lá depois desse commit (principalmente no pool, que era a área mais ativa) **não
-chegam aqui sozinhas**. Se o delphi-api-infra-faa passar a consumir esta lib (decisão em
-aberto), essa divergência some; até lá, compare com `git log aa49f2b..HEAD -- src/Db
-src/Common/Common.Optionals.pas` do lado de lá antes de assumir que os dois estão iguais.
+Everything in this repository is in **English**: code, identifiers, comments, runtime
+messages (exceptions, logs), test names and assertion messages, documentation and commit
+messages. Test *data* may contain non-ASCII values on purpose (e.g. `'São Paulo'`, to
+exercise non-ASCII strings).
 
-| Aqui | Lá |
+---
+
+## Origin: extracted from delphi-api-infra-faa
+
+The core came out of `delphi-api-infra-faa` (`src/Db/*` + its dependencies in `src/Common`),
+at commit **`aa49f2b` (2026-08-25)**. The two repositories are **independent**: fixes made
+there after that commit (especially in the pool, the most active area) **do not flow here
+automatically**. If delphi-api-infra-faa starts consuming this library (an open decision),
+that divergence goes away; until then, check `git log aa49f2b..HEAD -- src/Db
+src/Common/Common.Optionals.pas` on that side before assuming both are in sync.
+
+| Here | There |
 |---|---|
 | `PascalDb.Interfaces` | `Db.Interfaces` |
 | `PascalDb.Pool` | `Db.Connection.Pool` |
 | `PascalDb.Migrations` | `Db.Migrations` |
 | `PascalDb.SqlLoader` / `SqlDialect` / `Registry` / `Mock` | `Db.SqlLoader` / `Db.SqlDialect` / `Db.Adapters.Registry` / `Db.Mock` |
-| `PascalDb.Optionals` / `ClockCache` / `SystemContext` / `SafeLog` | `Common.*` de mesmo nome |
-| `PascalDb.Threading` | — (novo: atomics + tick portáveis) |
+| `PascalDb.Optionals` / `ClockCache` / `SystemContext` / `SafeLog` | `Common.*` with the same name |
+| `PascalDb.Threading` | — (new: portable atomics + tick) |
 
-O prefixo `PascalDb.*` é obrigatório: `Db.*` colidiria com a unit `db` do FPC (base do
-SQLdb) e com as próprias units do delphi-api-infra-faa, se as duas libs estiverem no mesmo
-search path.
+The origin is in Portuguese (comments, messages, some test names); this repository was
+translated to English after the extraction, so identifiers and messages differ where they
+were Portuguese there.
+
+The `PascalDb.*` prefix is mandatory: `Db.*` would collide with FPC's `db` unit (the base of
+SQLdb) and with delphi-api-infra-faa's own units if both libraries were on the same search
+path.
 
 ---
 
-## Regras de código (valem para toda unit em `src/`)
+## Code rules (apply to every unit in `src/`)
 
-- **Toda unit inclui `{$I pascaldb.inc}` logo após `unit ...;`.** O `.inc` liga
-  `{$MODE DELPHI}{$H+}` no FPC e normaliza `PASCALDB_WINDOWS`.
-- **`uses` sem namespace** (`SysUtils`, `Generics.Collections`), nunca `System.SysUtils`. O
-  Delphi resolve pelo `DCC_Namespace` do projeto; o FPC 3.2.2 não tem as units com ponto.
-  Unit exclusiva do Delphi fica dentro de `{$IFNDEF FPC}` e com o nome completo
-  (`Winapi.Windows`).
-- **Nada de métodos anônimos** (`TThread.CreateAnonymousThread`, closures em
-  `TEqualityComparer.Construct`, etc.): o FPC 3.2.2 estável não tem. Use subclasse de
-  `TThread` ou função/método nomeado.
-- **Callback público é `PASCALDB_FUNCREFS`** (ver `pascaldb.inc`): o tipo é
-  `reference to` no Delphi e `of object` no FPC. O subconjunto portável é "passe um método":
-  compila nos dois. Quem é só Delphi continua podendo passar closure. Exemplo real:
+- **Every unit includes `{$I pascaldb.inc}` right after `unit ...;`.** The `.inc` turns on
+  `{$MODE DELPHI}{$H+}` on FPC and normalizes `PASCALDB_WINDOWS`.
+- **`uses` without namespaces** (`SysUtils`, `Generics.Collections`), never
+  `System.SysUtils`. Delphi resolves them through the project's `DCC_Namespace`; FPC 3.2.2
+  doesn't have the dotted units. A Delphi-only unit goes inside `{$IFNDEF FPC}` with its full
+  name (`Winapi.Windows`).
+- **No anonymous methods** (`TThread.CreateAnonymousThread`, closures in
+  `TEqualityComparer.Construct`, etc.): stable FPC 3.2.2 doesn't have them. Use a `TThread`
+  subclass or a named function/method.
+- **Public callbacks follow `PASCALDB_FUNCREFS`** (see `pascaldb.inc`): the type is
+  `reference to` in Delphi and `of object` in FPC. The portable subset is "pass a method": it
+  compiles on both. Delphi-only users can still pass a closure. Real examples:
   `TPoolEventProc`, `TMigrationEventProc`.
-- **Atomics e tempo monotônico só via `PascalDb.Threading`** (`PdbAtomicInc`,
-  `PdbAtomicInc64`, `PdbAtomicRead64`, `PdbTickMs`). `TInterlocked` e `TStopwatch` não existem
-  no FPC.
-- **Nunca `TDictionary.Create(AComparer)` com `AComparer` possivelmente `nil`** (ver
-  armadilha 1 abaixo).
-- **Comentário de topo em toda unit, programa e teste**, entre `unit X;` (+ `{$I
-  pascaldb.inc}`) e `interface`/`uses`:
+- **Atomics and monotonic time only through `PascalDb.Threading`** (`PdbAtomicInc`,
+  `PdbAtomicInc64`, `PdbAtomicRead64`, `PdbTickMs`). `TInterlocked` and `TStopwatch` don't
+  exist in FPC.
+- **Never `TDictionary.Create(AComparer)` with a possibly-`nil` `AComparer`** (see gotcha 1
+  below).
+- **Top-of-file comment in every unit, program and test**, between `unit X;` (+ `{$I
+  pascaldb.inc}`) and `interface`/`uses`:
 
   ```pascal
-  { Uma frase: o que a unit é.
+  { One sentence: what the unit is.
 
-    Parágrafos: por que existe, decisões, armadilhas Delphi × FPC relevantes. }
+    Paragraphs: why it exists, decisions, relevant Delphi × FPC gotchas. }
   ```
 
-  Prosa em português com acentos (os arquivos são UTF-8 com BOM, e comentário não passa
-  pelo console), sem banners (`****`, `----`) nem títulos em maiúsculas. Se o texto precisar
-  citar algo com `}` (sintaxe das tags de SQL, `{$DIRETIVA}`), use `(* ... *)`: um `}` dentro
-  de `{ }` fecha o comentário no meio. Nos testes, o cabeçalho diz o que a unit cobre e
-  termina com a nota de mestre/espelho; o espelho FPCUnit recebe em cima o aviso de "arquivo
-  gerado", vindo do gerador.
+  Plain prose, no banners (`****`, `----`) and no upper-case headings. If the text needs to
+  quote something containing `}` (the SQL tag syntax, a `{$DIRECTIVE}`), use `(* ... *)`: a
+  `}` inside `{ }` closes the comment early. In tests, the header says what the unit covers
+  and ends with the master/mirror note; the FPCUnit mirror gets the "generated file" note on
+  top, added by the generator.
 
 ---
 
-## Testes
+## Tests
 
-- Os mestres são os arquivos **DUnitX** em `tests/Unit/*Tests.pas`, escritos no **dialeto de
-  asserts do FPCUnit** (`TAssert.AssertEquals/AssertTrue/AssertFalse/Fail`). No Delphi quem
-  provê isso é `tests/Unit/PascalDb.DUnitXCompat.pas`.
-- **`tests/Unit/fpc/*Tests.pas` são gerados**: `python tools/gen_fpc_mirror.py`. Nunca edite
-  esses arquivos à mão. O gerador troca só a declaração das fixtures e o registro; o corpo
-  sai byte a byte igual. `--check` falha se algum espelho estiver desatualizado.
-- **Rodar no FPC:** `sh tools/test_fpc.sh` (regenera os espelhos, compila com `lazbuild` e
-  roda). **No Delphi:** abrir `PascalDb.groupproj` na IDE e rodar
-  `tests/Unit/PascalDb.UnitTests.dproj`. O Delphi Community Edition não compila por linha de
-  comando: `dcc32` imprime "This version of the product does not support command line
-  compiling." e **sai com código 0**. Não interprete isso como sucesso.
-- **Critério de aceite:** todos os testes verdes **e 0 leaks nos dois lados** (heaptrc no FPC,
-  `ReportMemoryLeaksOnShutdown` no Delphi).
-- Ponto flutuante **sempre com delta explícito** (`AssertEquals(E, A, 0)` para exato). Ver
-  armadilha 5.
+- The masters are the **DUnitX** files in `tests/Unit/*Tests.pas`, written in **FPCUnit's
+  assertion dialect** (`TAssert.AssertEquals/AssertTrue/AssertFalse/Fail`). On Delphi that is
+  provided by `tests/Unit/PascalDb.DUnitXCompat.pas`.
+- **`tests/Unit/fpc/*Tests.pas` are generated**: `python tools/gen_fpc_mirror.py`. Never edit
+  those files by hand. The generator swaps only the fixture declarations and the
+  registration; the body comes out byte-for-byte identical. `--check` fails if any mirror is
+  out of date.
+- **Run on FPC:** `sh tools/test_fpc.sh` (regenerates the mirrors, builds with `lazbuild` and
+  runs). **On Delphi:** open `PascalDb.groupproj` in the IDE and run
+  `tests/Unit/PascalDb.UnitTests.dproj`. Delphi Community Edition doesn't compile from the
+  command line: `dcc32` prints "This version of the product does not support command line
+  compiling." and **exits with code 0**. Don't read that as success.
+- **Acceptance criterion:** every test green **and 0 leaks on both sides** (heaptrc on FPC,
+  `ReportMemoryLeaksOnShutdown` on Delphi).
+- Floating point **always with an explicit delta** (`AssertEquals(E, A, 0)` for exact). See
+  gotcha 5.
 - `python ../skills/dual-compiler-delphi-lazarus/scripts/verify_test_mirrors.py --root .
-  --ignore-glob /lib/` é uma segunda checagem independente do gerador.
+  --ignore-glob /lib/` is a second check, independent of the generator.
 
 ---
 
-## Adapters (planejado)
+## Adapters (planned)
 
-O núcleo não conhece nenhum driver. Os adapters de referência, cada um no seu pacote:
+The core knows no driver. The reference adapters, each in its own package:
 
-| Adapter | Compilador | Status |
+| Adapter | Compiler | Status |
 |---|---|---|
-| FireDAC | só Delphi | a portar do `Db.Adapters.FireDAC` original |
-| Zeos | dual | a escrever (Zeos ainda não instalado nesta máquina) |
-| SQLdb | só Lazarus | a escrever |
+| FireDAC | Delphi only | to be ported from the original `Db.Adapters.FireDAC` |
+| Zeos | dual | to be written (Zeos not installed in the dev environment yet) |
+| SQLdb | Lazarus only | to be written |
 
-Um adapter de terceiros implementa `IDBComponentProvider`/`IDBFactory` e se registra em
-`TDBRegistry`: o núcleo nunca precisa mudar para aceitar um driver novo.
-
----
-
-## Pendências conhecidas
-
-- **`TSQLLoader` está preso a resource** (`FindResource`/`RT_RCDATA`, `.rc` compilado com
-  `brcc32`). Compila e funciona nos dois compiladores, mas o pipeline de build dos `.rc` é
-  diferente no FPC (`fpcres`/`windres`). Avaliar uma fonte de SQL plugável (resource ou
-  diretório de `.sql`) antes dos adapters, que são os primeiros a precisar de SQL real.
-- `TMockDBFactory.CreateSqlScript` devolve `nil` sem atribuir `Result` (herdado do original;
-  o FPC avisa "Function result does not seem to be set").
+A third-party adapter implements `IDBComponentProvider`/`IDBFactory` and registers itself in
+`TDBRegistry`: the core never has to change to accept a new driver.
 
 ---
 
-## Armadilhas encontradas (Delphi × FPC 3.2.2)
+## Known open items
 
-Formato: sintoma → causa → correção. Registradas também na skill: 1–4 em
-`references/rtl-gotchas.md` (seções "Generics / RTL collections", "Types" e "Resource
-files"); 5–6 no bullet do compat adapter em `SKILL.md` ("Mirrored tests"). Quando este repo
-for publicado, trocar lá as menções "`pascal-db-faa` (not yet public)" por link.
+- **`TSQLLoader` is tied to resources** (`FindResource`/`RT_RCDATA`, `.rc` compiled with
+  `brcc32`). It compiles and works on both compilers, but the `.rc` build pipeline differs on
+  FPC (`fpcres`/`windres`). Evaluate a pluggable SQL source (resource or a directory of
+  `.sql` files) before the adapters, which are the first to need real SQL.
+- FPC warns "Function result does not seem to be set" on `TMockDBFactory.CreateSqlScript`.
+  False positive: the method always raises (`ISqlScript` isn't supported by the mock).
 
-1. **`TDictionary.Create(nil)` dá Access Violation no FPC.** Sintoma: AV em
-   `FindBucketIndex` (`generics.dictionaries.inc`) no primeiro `Add`/`TryGetValue`: 30 dos 158
-   testes caíram por isso, todos via `TClockCache`. Causa: o Delphi troca um comparador `nil`
-   por `TEqualityComparer<T>.Default`; o `rtl-generics` do FPC guarda o `nil` e chama
-   `GetHashCode` nele. Correção: `if Assigned(AComparer) then TMap.Create(AComparer) else
+---
+
+## Gotchas found (Delphi × FPC 3.2.2)
+
+Format: symptom → cause → fix. Also recorded in the skill: 1–4 in
+`references/rtl-gotchas.md` (sections "Generics / RTL collections", "Types" and "Resource
+files"); 5–6 in the compat adapter bullet of `SKILL.md` ("Mirrored tests"). Once this repo is
+published, replace the "`pascal-db-faa` (not yet public)" mentions there with links.
+
+1. **`TDictionary.Create(nil)` raises an Access Violation on FPC.** Symptom: AV in
+   `FindBucketIndex` (`generics.dictionaries.inc`) on the first `Add`/`TryGetValue`: 30 of 158
+   tests failed because of it, all through `TClockCache`. Cause: Delphi replaces a `nil`
+   comparer with `TEqualityComparer<T>.Default`; FPC's `rtl-generics` stores the `nil` and
+   calls `GetHashCode` on it. Fix: `if Assigned(AComparer) then TMap.Create(AComparer) else
    TMap.Create` (`PascalDb.ClockCache`).
-2. **`IEqualityComparer<T>` tem assinatura diferente**: FPC usa `constref` e hash `UInt32`;
-   Delphi usa `const` e hash `Integer`. `TEqualityComparer<T>.Construct` aceita closure no
-   Delphi e só função comum / `of object` no FPC. Correção: função nomeada com a assinatura
-   sob `{$IFDEF FPC}`, que os dois aceitam (`SingleKeyEquals`/`SingleKeyHash` em
-   `PascalDb.Optionals`).
-3. **`TGuid.Empty` não existe no FPC 3.2.2** (é do `TGuidHelper` do Delphi). Correção:
-   constante tipada `EMPTY_GUID: TGUID = '{00000000-...}'`.
-4. **`RT_RCDATA` no FPC 3.2.2 só está no `system` em alvos não-Windows**; no Windows fica na
-   unit `Windows`. Correção: constante local `{$IFDEF FPC}PChar(10){$ELSE}RT_RCDATA{$ENDIF}`
-   (`MAKEINTRESOURCE(10)` em qualquer plataforma).
-5. **FPCUnit não tem `AssertEquals(Double, Double)` sem delta**, e o FPC resolve a chamada
-   para o overload `Currency` **sem avisar**. Sintoma: um teste comparando `TDateTime`
-   passava no FPC com precisão de 4 casas decimais, enquanto o original DUnitX comparava
-   `Double`. Correção: delta sempre explícito; o `PascalDb.DUnitXCompat` também não oferece
-   o overload sem delta, para o mestre não compilar diferente dos dois lados.
-6. **`Assert.AreEqual(string, string)` do DUnitX ignora maiúsculas por padrão.** O overload
-   sem `ignoreCase` usa `fIgnoreCaseDefault`, inicializado com `true`
-   (`source\DUnitX\DUnitX.Assert.pas`, linha 1355, no Delphi 12; configurável por
-   `Assert.IgnoreCaseDefault`). Já documentado no `Redis.DUnitXCompat`; aqui foi conferido no
-   fonte. O compat passa `False` explicitamente.
+2. **`IEqualityComparer<T>` has a different signature**: FPC uses `constref` and a `UInt32`
+   hash; Delphi uses `const` and an `Integer` hash. `TEqualityComparer<T>.Construct` accepts a
+   closure in Delphi and only a plain function / `of object` in FPC. Fix: a named function
+   with the signature under `{$IFDEF FPC}`, which both accept (`SingleKeyEquals`/
+   `SingleKeyHash` in `PascalDb.Optionals`).
+3. **`TGuid.Empty` doesn't exist in FPC 3.2.2** (it comes from Delphi's `TGuidHelper`). Fix: a
+   typed constant `EMPTY_GUID: TGUID = '{00000000-...}'`.
+4. **In FPC 3.2.2, `RT_RCDATA` is only in the `system` unit on non-Windows targets**; on
+   Windows it lives in the `Windows` unit. Fix: a local constant
+   `{$IFDEF FPC}PChar(10){$ELSE}RT_RCDATA{$ENDIF}` (`MAKEINTRESOURCE(10)` on any platform).
+5. **FPCUnit has no delta-less `AssertEquals(Double, Double)`**, and FPC resolves the call to
+   the `Currency` overload **without any warning**. Symptom: a test comparing `TDateTime`
+   passed on FPC at 4-decimal precision, while the original DUnitX test compared `Double`.
+   Fix: always an explicit delta; `PascalDb.DUnitXCompat` doesn't offer the delta-less
+   overload either, so the master can't compile differently on each side.
+6. **DUnitX's `Assert.AreEqual(string, string)` ignores case by default.** The overload
+   without `ignoreCase` uses `fIgnoreCaseDefault`, initialized to `true`
+   (`source\DUnitX\DUnitX.Assert.pas`, line 1355, in Delphi 12; configurable through
+   `Assert.IgnoreCaseDefault`). Already documented in `Redis.DUnitXCompat`; confirmed in the
+   source here. The compat adapter passes `False` explicitly.

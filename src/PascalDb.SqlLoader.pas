@@ -2,25 +2,26 @@
 
 {$I pascaldb.inc}
 
-(* SQL em arquivo, não no código: TSQLLoader carrega o texto de um resource
-  embutido no executável (nome SQL_<DIRETORIO>_<NOME>, com cache global
-  thread-safe), e TSQLResult processa o template antes da execução:
+(* SQL lives in files, not in code: TSQLLoader loads the text of a resource
+  embedded in the executable (named SQL_<DIRECTORY>_<NAME>, with a global
+  thread-safe cache), and TSQLResult processes the template before execution:
 
-  - [TAG {] ... [} TAG] — bloco mantido ou removido por ProcessTag(TAG, Keep);
-    a mesma tag pode aparecer em vários pontos e uma chamada decide todos;
-  - ${LITERAL} — substituído por ReplaceLiteral (ApplyOperator/ApplyFilter
-    são atalhos para o sufixo _OP);
-  - [COMMENTS {] ... [} COMMENTS] e tags não processadas são removidos ao
-    ler .SQL.
+  - [TAG {] ... [} TAG] — block kept or removed by ProcessTag(TAG, Keep); the
+    same tag may appear in several places and one call decides all of them;
+  - ${LITERAL} — replaced by ReplaceLiteral (ApplyOperator/ApplyFilter are
+    shortcuts for the _OP suffix);
+  - [COMMENTS {] ... [} COMMENTS] and unprocessed tags are removed when .SQL
+    is read.
 
-  Dual-compiler: FindResource/TResourceStream são portáveis, mas RT_RCDATA não
-  está no mesmo lugar nos dois RTLs (Winapi.Windows no Delphi; no FPC 3.2.2 só
-  no system de alvos não-Windows) — daí a constante local SQL_RESOURCE_TYPE.
-  Gerar o .res também difere (brcc32 no Delphi, fpcres/windres no FPC); essa
-  é uma pendência de desenho registrada no CLAUDE.md.
+  Dual-compiler: FindResource/TResourceStream are portable, but RT_RCDATA
+  doesn't live in the same place in both RTLs (Winapi.Windows in Delphi; in
+  FPC 3.2.2 only in the system unit of non-Windows targets) — hence the local
+  constant SQL_RESOURCE_TYPE. Producing the .res differs too (brcc32 in
+  Delphi, fpcres/windres in FPC); that is an open design item recorded in
+  CLAUDE.md.
 
-  Este comentário usa parêntese-asterisco em vez de chaves porque cita a
-  sintaxe das tags, que contém "}" e fecharia um comentário entre chaves. *)
+  This comment uses parenthesis-asterisk instead of braces because it quotes
+  the tag syntax, which contains "}" and would close a brace comment. *)
 
 interface
 
@@ -43,10 +44,11 @@ type
       [ENTITY_NAME {] AND ENTITY_NAME = :ENTITY_NAME [} ENTITY_NAME]
       [PK_FIELD {] AND PK_FIELD <= :PK_FIELD [} PK_FIELD]
 
-    [ENTITY_NAME {] --> TAG DE INICIO
-    [} ENTITY_NAME] --> TAG DE FIM
+    [ENTITY_NAME {] --> START TAG
+    [} ENTITY_NAME] --> END TAG
 
-    ProcessTag diz se mantém ou remove a condição entre as tags
+    ProcessTag decides whether the condition between the tags is kept or
+    removed
   *)
 
   TSQLCache = TDictionary<string, string>;
@@ -94,9 +96,9 @@ type
 implementation
 
 const
-  // RT_RCDATA vem de Winapi.Windows no Delphi; no FPC 3.2.2 ele so esta no
-  // system unit em alvos nao-Windows (no Windows, fica na unit Windows).
-  // MAKEINTRESOURCE(10) e' o mesmo valor em qualquer plataforma.
+  // RT_RCDATA comes from Winapi.Windows in Delphi; in FPC 3.2.2 it is only in
+  // the system unit on non-Windows targets (on Windows it lives in the
+  // Windows unit). MAKEINTRESOURCE(10) is the same value on every platform.
   SQL_RESOURCE_TYPE = {$IFDEF FPC}PChar(10){$ELSE}RT_RCDATA{$ENDIF};
 
 { TSQLResult }
@@ -241,7 +243,7 @@ class function TSQLLoader.Load(ASQLDirectory, AResourceName: string): TSQLResult
 begin
   if ASQLDirectory.IsEmpty or AResourceName.IsEmpty then
     raise ESQLLoaderException.Create(
-      'ASQLDirectory e AResourceName são obrigatórios'
+      'ASQLDirectory and AResourceName are required'
     );
 
   Result.FSQL := GetFromCacheOrResource(ASQLDirectory, AResourceName);
@@ -274,7 +276,7 @@ begin
 
   Result := GetInternal(ASQLDirectory, AResourceName);
 
-  // Double-checked locking: outra thread pode ter carregado enquanto chamávamos GetInternal
+  // Double-checked locking: another thread may have loaded it while we were in GetInternal
   FLock.Enter;
   try
     if FCache.TryGetValue(LKey, LValue) then
@@ -300,7 +302,7 @@ begin
 
   if FindResource(HInstance, PChar(RSName), SQL_RESOURCE_TYPE) = 0 then
     raise ESQLLoaderException.CreateFmt(
-      'SQL resource não encontrado: %s. Procurando por: %s',
+      'SQL resource not found: %s. Looked for: %s',
       [AResourceName, RSName]
     );
 

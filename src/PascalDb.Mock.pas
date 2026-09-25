@@ -2,58 +2,58 @@
 
 {$I pascaldb.inc}
 
-{ Mock em memória de IDBFactory (TMockDBFactory), para testar Repository e
-  Service sem banco de dados.
+{ In-memory mock of IDBFactory (TMockDBFactory), for testing repositories
+  and services without a database.
 
-  Fluxo de uso:
-    1. Criar TMockDBFactory.
-    2. Registrar respostas com AddResult('CHAVE.SQL', TMockQueryResult.Xyz).
-    3. Exercitar o repositório/serviço.
-    4. Inspecionar as execuções com LastExecution / ExecutionCount.
+  Usage flow:
+    1. Create a TMockDBFactory.
+    2. Register responses with AddResult('SQL.KEY', TMockQueryResult.Xyz).
+    3. Exercise the repository/service.
+    4. Inspect the executions with LastExecution / ExecutionCount.
 
-  Exemplo — testando TCidadeRepository.Insert:
+  Example — testing TCityRepository.Insert:
 
     var
       LFactory: TMockDBFactory;
-      LRepo: ICidadeRepository;
-      LDto: ICidadeInsertDTO;
+      LRepo: ICityRepository;
+      LDto: ICityInsertDTO;
     begin
       LFactory := TMockDBFactory.Create;
       try
-        LFactory.AddResult('CIDADE.INSERT', TMockQueryResult.Empty);
+        LFactory.AddResult('CITY.INSERT', TMockQueryResult.Empty);
 
-        LRepo := TCidadeRepository.Create(LFactory);
-        LDto  := TCidadeInsertDTO.Create;
-        LDto.CodIbge := '3550308';
-        LDto.Nome    := 'São Paulo';
-        LDto.Uf      := 'SP';
+        LRepo := TCityRepository.Create(LFactory);
+        LDto  := TCityInsertDTO.Create;
+        LDto.Code  := '3550308';
+        LDto.Name  := 'São Paulo';
+        LDto.State := 'SP';
         LRepo.Insert(LDto);
         LRepo := nil;
 
-        Assert.AreEqual('3550308',  LFactory.LastExecution('CIDADE.INSERT').AsString('COD_IBGE'));
-        Assert.AreEqual('São Paulo', LFactory.LastExecution('CIDADE.INSERT').AsString('NOME'));
+        Assert.AreEqual('3550308',   LFactory.LastExecution('CITY.INSERT').AsString('CODE'));
+        Assert.AreEqual('São Paulo', LFactory.LastExecution('CITY.INSERT').AsString('NAME'));
       finally
         LFactory.Free;
       end;
     end;
 
-  Exemplo — testando TCidadeRepository.Find:
+  Example — testing TCityRepository.Find:
 
-    LFactory.AddResult('CIDADE.FIND_COUNT',
+    LFactory.AddResult('CITY.FIND_COUNT',
       TMockQueryResult.SingleRow(['TOTAL'], [2]));
-    LFactory.AddResult('CIDADE.FIND',
+    LFactory.AddResult('CITY.FIND',
       TMockQueryResult.MultiRows(
-        ['COD_IBGE', 'NOME', 'UF'],
+        ['CODE', 'NAME', 'STATE'],
         [TArray<Variant>.Create('3550308', 'São Paulo', 'SP'),
          TArray<Variant>.Create('3304557', 'Rio de Janeiro', 'RJ')]));
 
-    LRepo   := TCidadeRepository.Create(LFactory);
+    LRepo   := TCityRepository.Create(LFactory);
     LResult := LRepo.Find(nil);
     Assert.AreEqual(2, LResult.Meta.Total);
     Assert.AreEqual(2, Length(LResult.Items));
 
-  Os exemplos usam o Assert do DUnitX; o mock não depende de framework de
-  teste nenhum. }
+  The examples use DUnitX's Assert; the mock itself doesn't depend on any
+  test framework. }
 
 interface
 
@@ -68,8 +68,8 @@ uses
 type
   TMockDBFactory = class; // forward
 
-  // Snapshot de parâmetros capturado no momento da execução (Open ou ExecSql).
-  // Use AsString/AsInteger/etc. para asserções de teste.
+  // Snapshot of the parameters captured at execution time (Open or ExecSql).
+  // Use AsString/AsInteger/etc. in test assertions.
   TMockExecution = class
   private
     FKey: string;
@@ -91,8 +91,8 @@ type
     property WasOpen: Boolean read FWasOpen;
   end;
 
-  // IQueryResult construído a partir de dados controlados.
-  // Use os class functions para montar os resultados esperados antes do teste.
+  // IQueryResult built from controlled data.
+  // Use the class functions to build the expected results before the test.
   TMockQueryResult = class(TInterfacedObject, IQueryResult)
   private
     FColumns: TArray<string>;
@@ -129,8 +129,8 @@ type
     function Eof: Boolean;
   end;
 
-  // IParams com armazenamento interno em Variant (chave em maiúsculas).
-  // Wrappers Optional/Nullable são desempacotados no Set e reempacotados no Get.
+  // IParams backed by an internal Variant store (keys upper-cased).
+  // Optional/Nullable wrappers are unpacked on Set and repacked on Get.
   TMockParams = class(TInterfacedObject, IParams)
   private
     FValues: TDictionary<string, Variant>;
@@ -140,7 +140,7 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure CopyTo(ADest: TDictionary<string, Variant>);
-    // IParams — getters simples
+    // IParams — plain getters
     function GetString(const AName: string): string;
     function GetBoolean(const AName: string): Boolean;
     function GetDateTime(const AName: string): TDateTime;
@@ -148,7 +148,7 @@ type
     function GetInt64(const AName: string): Int64;
     function GetDouble(const AName: string): Double;
     function GetCurrency(const AName: string): Currency;
-    // IParams — getters Opt
+    // IParams — Opt getters
     function GetOptString(const AName: string): IOptString;
     function GetOptBoolean(const AName: string): IOptBoolean;
     function GetOptDateTime(const AName: string): IOptDateTime;
@@ -156,7 +156,7 @@ type
     function GetOptInt64(const AName: string): IOptInt64;
     function GetOptDouble(const AName: string): IOptDouble;
     function GetOptCurrency(const AName: string): IOptCurrency;
-    // IParams — getters Null
+    // IParams — Null getters
     function GetNullString(const AName: string): INullString;
     function GetNullBoolean(const AName: string): INullBoolean;
     function GetNullDateTime(const AName: string): INullDateTime;
@@ -164,7 +164,7 @@ type
     function GetNullInt64(const AName: string): INullInt64;
     function GetNullDouble(const AName: string): INullDouble;
     function GetNullCurrency(const AName: string): INullCurrency;
-    // IParams — getters OptNull
+    // IParams — OptNull getters
     function GetOptNullString(const AName: string): IOptNullString;
     function GetOptNullBoolean(const AName: string): IOptNullBoolean;
     function GetOptNullDateTime(const AName: string): IOptNullDateTime;
@@ -172,7 +172,7 @@ type
     function GetOptNullInt64(const AName: string): IOptNullInt64;
     function GetOptNullDouble(const AName: string): IOptNullDouble;
     function GetOptNullCurrency(const AName: string): IOptNullCurrency;
-    // IParams — setters simples
+    // IParams — plain setters
     procedure SetString(const AName: string; AValue: string);
     procedure SetBoolean(const AName: string; AValue: Boolean);
     procedure SetDateTime(const AName: string; AValue: TDateTime);
@@ -180,7 +180,7 @@ type
     procedure SetInt64(const AName: string; AValue: Int64);
     procedure SetDouble(const AName: string; AValue: Double);
     procedure SetCurrency(const AName: string; AValue: Currency);
-    // IParams — setters Opt (undefined = não armazena)
+    // IParams — Opt setters (undefined = not stored)
     procedure SetOptString(const AName: string; AValue: IOptString);
     procedure SetOptBoolean(const AName: string; AValue: IOptBoolean);
     procedure SetOptDateTime(const AName: string; AValue: IOptDateTime);
@@ -188,7 +188,7 @@ type
     procedure SetOptInt64(const AName: string; AValue: IOptInt64);
     procedure SetOptDouble(const AName: string; AValue: IOptDouble);
     procedure SetOptCurrency(const AName: string; AValue: IOptCurrency);
-    // IParams — setters Null (null = armazena Null variant)
+    // IParams — Null setters (null = stores a Null variant)
     procedure SetNullString(const AName: string; AValue: INullString);
     procedure SetNullBoolean(const AName: string; AValue: INullBoolean);
     procedure SetNullDateTime(const AName: string; AValue: INullDateTime);
@@ -196,7 +196,7 @@ type
     procedure SetNullInt64(const AName: string; AValue: INullInt64);
     procedure SetNullDouble(const AName: string; AValue: INullDouble);
     procedure SetNullCurrency(const AName: string; AValue: INullCurrency);
-    // IParams — setters OptNull (undefined = não armazena; null = Null variant)
+    // IParams — OptNull setters (undefined = not stored; null = Null variant)
     procedure SetOptNullString(const AName: string; AValue: IOptNullString);
     procedure SetOptNullBoolean(const AName: string; AValue: IOptNullBoolean);
     procedure SetOptNullDateTime(const AName: string; AValue: IOptNullDateTime);
@@ -206,7 +206,7 @@ type
     procedure SetOptNullCurrency(const AName: string; AValue: IOptNullCurrency);
   end;
 
-  // IQuery que despacha Open/ExecSql para TMockDBFactory
+  // IQuery that dispatches Open/ExecSql to TMockDBFactory
   TMockQuery = class(TInterfacedObject, IQuery)
   private
     FOwner: TMockDBFactory;
@@ -224,7 +224,7 @@ type
     function GetTransaction: ITransaction;
   end;
 
-  // IScopeTransaction noop — StartTransaction/Commit/Rollback não fazem nada
+  // No-op IScopeTransaction — StartTransaction/Commit/Rollback do nothing
   TMockScopeTransaction = class(TInterfacedObject, IScopeTransaction)
   private
     FTransaction: ITransaction;
@@ -238,7 +238,7 @@ type
     function GetOriginalTransaction: ITransaction;
   end;
 
-  // IDBConnectionPool que cria TMockQuery no AcquireQuery
+  // IDBConnectionPool that creates a TMockQuery on AcquireQuery
   TMockConnectionPool = class(TInterfacedObject, IDBConnectionPool)
   private
     FOwner: TMockDBFactory;
@@ -253,7 +253,7 @@ type
     function GetSnapshot: TPoolSnapshot;
   end;
 
-  // IDBConnection mínimo — todas as operações são noop
+  // Minimal IDBConnection — every operation is a no-op
   TMockDBConnection = class(TInterfacedObject, IDBConnection)
   public
     function GetNativeConnection: TObject;
@@ -265,7 +265,7 @@ type
     function GetSQLDialect: ISQLDialect;
   end;
 
-  // ITransaction mínimo — todas as operações são noop
+  // Minimal ITransaction — every operation is a no-op
   TMockTransaction = class(TInterfacedObject, ITransaction)
   public
     procedure StartTransaction;
@@ -277,9 +277,9 @@ type
     procedure ExecSql(const ASql: string);
   end;
 
-  // TSQLLoader que bypassa o carregamento de recursos.
-  // GetSql retorna o próprio nome da chave como texto SQL, sem precisar de .res.
-  // ReplaceLiteral e ProcessTag operam sem efeito num nome de chave simples.
+  // TSQLLoader that bypasses resource loading.
+  // GetSql returns the key name itself as the SQL text, no .res needed.
+  // ReplaceLiteral and ProcessTag have no effect on a plain key name.
   TMockSQLLoader = class(TSQLLoader)
   protected
     function GetSql(const AResourceName: string): TSQLResult; override;
@@ -287,8 +287,8 @@ type
     constructor Create;
   end;
 
-  // Factory central do mock. Configure os resultados antes de usar o repo;
-  // inspecione as execuções com LastExecution / ExecutionCount.
+  // The mock's central factory. Configure the results before using the
+  // repository; inspect the executions with LastExecution / ExecutionCount.
   TMockDBFactory = class(TInterfacedObject, IDBFactory)
   private
     FPool: IDBConnectionPool;
@@ -299,17 +299,17 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    // Registra o IQueryResult a retornar quando ASqlKey for consultado via Open.
-    // Passe nil ou TMockQueryResult.Empty para chamadas que usam apenas ExecSql.
+    // Registers the IQueryResult to return when ASqlKey is queried via Open.
+    // Pass nil or TMockQueryResult.Empty for calls that only use ExecSql.
     procedure AddResult(const ASqlKey: string; AResult: IQueryResult);
 
-    // Retorna o último registro de execução para ASqlKey (Open ou ExecSql), ou nil.
+    // Returns the last execution record for ASqlKey (Open or ExecSql), or nil.
     function LastExecution(const ASqlKey: string): TMockExecution;
 
-    // Retorna quantas vezes ASqlKey foi executado (Open + ExecSql).
+    // Returns how many times ASqlKey was executed (Open + ExecSql).
     function ExecutionCount(const ASqlKey: string): Integer;
 
-    // Uso interno: chamado por TMockQuery
+    // Internal use: called by TMockQuery
     function GetResult(const ASqlKey: string): IQueryResult;
     procedure RecordExecution(const ASqlKey: string; AParams: TMockParams; AWasOpen: Boolean);
 
@@ -472,7 +472,7 @@ begin
   for I := 0 to High(FColumns) do
     if AnsiUpperCase(FColumns[I]) = LUpper then
       Exit(I);
-  raise Exception.CreateFmt('TMockQueryResult: coluna "%s" não encontrada', [AName]);
+  raise Exception.CreateFmt('TMockQueryResult: column "%s" not found', [AName]);
 end;
 
 function TMockQueryResult.CurrentVariant(const AName: string): Variant;
@@ -626,7 +626,7 @@ begin
     ADest.AddOrSetValue(LPair.Key, LPair.Value);
 end;
 
-{ TMockParams — getters simples }
+{ TMockParams — plain getters }
 
 function TMockParams.GetString(const AName: string): string;
 var V: Variant;
@@ -666,7 +666,7 @@ begin
   V := GetV(AName); Result := V;
 end;
 
-{ TMockParams — getters Opt }
+{ TMockParams — Opt getters }
 
 function TMockParams.GetOptString(const AName: string): IOptString;
 var V: Variant;
@@ -731,7 +731,7 @@ begin
   else Result := TOptNullDateTime.From(TDateTime(Double(V)));
 end;
 
-{ TMockParams — getters Null }
+{ TMockParams — Null getters }
 
 function TMockParams.GetNullString(const AName: string): INullString;
 var V: Variant;
@@ -789,7 +789,7 @@ begin
   else Result := TOptNullDateTime.From(TDateTime(Double(V)));
 end;
 
-{ TMockParams — getters OptNull }
+{ TMockParams — OptNull getters }
 
 function TMockParams.GetOptNullString(const AName: string): IOptNullString;
 var V: Variant;
@@ -854,7 +854,7 @@ begin
   else Result := TOptNullDateTime.From(TDateTime(Double(V)));
 end;
 
-{ TMockParams — setters simples }
+{ TMockParams — plain setters }
 
 procedure TMockParams.SetString(const AName: string; AValue: string);    begin PutV(AName, AValue);           end;
 procedure TMockParams.SetBoolean(const AName: string; AValue: Boolean);  begin PutV(AName, AValue);           end;
@@ -870,7 +870,7 @@ begin
   V := AValue; PutV(AName, V);
 end;
 
-{ TMockParams — setters Opt (undefined = não armazena) }
+{ TMockParams — Opt setters (undefined = not stored) }
 
 procedure TMockParams.SetOptString(const AName: string; AValue: IOptString);
 begin
@@ -908,7 +908,7 @@ begin
   if Assigned(AValue) and AValue.HasValue then PutV(AName, Double(AValue.Value));
 end;
 
-{ TMockParams — setters Null }
+{ TMockParams — Null setters }
 
 procedure TMockParams.SetNullString(const AName: string; AValue: INullString);
 begin
@@ -953,7 +953,7 @@ begin
   else PutV(AName, Double(AValue.Value));
 end;
 
-{ TMockParams — setters OptNull }
+{ TMockParams — OptNull setters }
 
 procedure TMockParams.SetOptNullString(const AName: string; AValue: IOptNullString);
 begin
@@ -1020,8 +1020,8 @@ begin
   Result := FOwner.GetResult(FSql);
   if not Assigned(Result) then
     raise Exception.CreateFmt(
-      'TMockDBFactory: nenhum resultado configurado para "%s". ' +
-      'Chame AddResult(''%s'', ...) antes de exercitar o repositório.',
+      'TMockDBFactory: no result configured for "%s". ' +
+      'Call AddResult(''%s'', ...) before exercising the repository.',
       [FSql, FSql]);
 end;
 
@@ -1201,7 +1201,7 @@ end;
 function TMockDBFactory.CreateSqlScript(AConn: IDBConnection;
   ATransaction: ITransaction): ISqlScript;
 begin
-  raise Exception.Create('PascalDb.Mock: ISqlScript não é suportado por TMockDBFactory');
+  raise Exception.Create('PascalDb.Mock: ISqlScript is not supported by TMockDBFactory');
 end;
 
 function TMockDBFactory.TestConnection(AConn: IDBConnection): Boolean;

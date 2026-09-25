@@ -1,11 +1,11 @@
-{ Diretivas de compilacao compartilhadas (dual Delphi / Free Pascal).
+{ Shared compiler directives (dual Delphi / Free Pascal).
 
-  Cada unit da lib inclui este arquivo logo apos o 'unit ...;'. No Delphi ele
-  nao tem efeito de modo; no FPC ativa o mode Delphi (strings longas, generics
-  estilo Delphi, advanced records).
+  Every unit of the library includes this file right after 'unit ...;'. On
+  Delphi it doesn't change the mode; on FPC it enables Delphi mode (long
+  strings, Delphi-style generics, advanced records).
 
-  PASCALDB_WINDOWS: definido quando o alvo e' Windows, em qualquer compilador
-  (Delphi define MSWINDOWS; FPC define WINDOWS). }
+  PASCALDB_WINDOWS: defined when the target is Windows, on either compiler
+  (Delphi defines MSWINDOWS; FPC defines WINDOWS). }
 
 {$IFDEF FPC}
   {$MODE DELPHI}
@@ -21,13 +21,13 @@
   {$ENDIF}
 {$ENDIF}
 
-{ PASCALDB_FUNCREFS: callbacks publicos da lib (eventos do pool, eventos de
-  migration) sao "reference to" — aceitam closure E metodo. Ligado sempre no
-  Delphi. No FPC 3.2.2 (estavel) nao existe "reference to", entao os mesmos
-  tipos viram "of object": o subconjunto portavel e' "passe um metodo".
-  Compilador FPC com function references (trunk/3.3+): defina
-  PASCALDB_FPC_FUNCREFS no projeto para ter a mesma API do Delphi — mesmo
-  padrao do HORSE_FPC_FUNCTIONREFERENCES do Horse. }
+{ PASCALDB_FUNCREFS: the library's public callbacks (pool events, migration
+  events) are "reference to" — they accept a closure OR a method. Always on
+  in Delphi. FPC 3.2.2 (stable) has no "reference to", so the same types
+  become "of object" there: the portable subset is "pass a method".
+  FPC compiler with function references (trunk/3.3+): define
+  PASCALDB_FPC_FUNCREFS in the project to get the same API as Delphi — same
+  pattern as Horse's HORSE_FPC_FUNCTIONREFERENCES. }
 {$IFNDEF FPC}
   {$DEFINE PASCALDB_FUNCREFS}
 {$ELSE}

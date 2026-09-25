@@ -1,13 +1,13 @@
 ﻿unit PascalDb.OptionalsTests;
 
-{ Testes dos tipos opcionais (PascalDb.Optionals): HasValue/IsNull de
-  Null/Undefined/From para cada tipo, TOptionals.Safe com nil, reaproveitamento
-  de instâncias (faixa fixa e cache dinâmico), chaves de precisão distintas
-  para Single/Double e acesso concorrente a From.
+{ Tests for the optional types (PascalDb.Optionals): HasValue/IsNull of
+  Null/Undefined/From for each type, TOptionals.Safe with nil, instance reuse
+  (fixed range and dynamic cache), distinct precision keys for Single/Double
+  and concurrent access to From.
 
-  Mestre DUnitX, escrito no dialeto de asserts do FPCUnit (TAssert.*, via
-  PascalDb.DUnitXCompat). O espelho em tests/Unit/fpc é gerado a partir do
-  mestre por tools/gen_fpc_mirror.py — edite só o mestre. }
+  DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
+  PascalDb.DUnitXCompat). The mirror in tests/Unit/fpc is generated from the
+  master by tools/gen_fpc_mirror.py — edit only the master. }
 
 interface
 
@@ -177,7 +177,7 @@ type
     [Test]
     procedure TestCurrency_Safe_WithNil_ReturnsNull;
 
-    // Novos testes de borda
+    // Edge-case tests
     [Test]
     procedure TestCache_HotItemProtection;
     [Test]
@@ -189,13 +189,13 @@ type
 implementation
 
 const
-  // TGuid.Empty (record helper do Delphi) nao existe no FPC 3.2.2.
+  // TGuid.Empty (a Delphi record helper) doesn't exist in FPC 3.2.2.
   EMPTY_GUID: TGUID = '{00000000-0000-0000-0000-000000000000}';
 
 type
-  { Thread que martela TOptNullString.From (cache global compartilhado).
-    Subclasse em vez de TThread.CreateAnonymousThread: o FPC 3.2.2 nao tem
-    metodos anonimos. }
+  { Thread that hammers TOptNullString.From (shared global cache).
+    A subclass instead of TThread.CreateAnonymousThread: FPC 3.2.2 has no
+    anonymous methods. }
   TStringFromWorker = class(TThread)
   protected
     procedure Execute; override;
@@ -245,12 +245,12 @@ end;
 
 procedure TOptionalTests.TestString_From_HasValue;
 begin
-  TAssert.AssertTrue(TOptNullString.From('teste').HasValue);
+  TAssert.AssertTrue(TOptNullString.From('test').HasValue);
 end;
 
 procedure TOptionalTests.TestString_From_IsNotNull;
 begin
-  TAssert.AssertFalse(TOptNullString.From('teste').IsNull);
+  TAssert.AssertFalse(TOptNullString.From('test').IsNull);
 end;
 
 procedure TOptionalTests.TestString_From_ReturnsCorrectValue;
@@ -290,7 +290,7 @@ end;
 
 procedure TOptionalTests.TestString_From_SameValueReturnsSameInstance;
 begin
-  TAssert.AssertTrue(TOptNullString.From('valor') = TOptNullString.From('valor'));
+  TAssert.AssertTrue(TOptNullString.From('value') = TOptNullString.From('value'));
 end;
 
 procedure TOptionalTests.TestString_From_DifferentValueReturnsDifferentInstance;
@@ -590,16 +590,16 @@ begin
   Cache.AdmissionPolicy := apProtectHotItems;
   try
     MyTest := TMyTest.Create; MyTest.Text := 'Hot';
-    Cache.Put('A', MyTest, 5); // Item muito quente
+    Cache.Put('A', MyTest, 5); // Very hot item
 
     MyTest := TMyTest.Create; MyTest.Text := 'Cold1';
     Cache.Put('B', MyTest, 1);
 
     MyTest := TMyTest.Create; MyTest.Text := 'Cold2';
-    Cache.Put('C', MyTest, 1); // Deve expulsar B, mantendo A
+    Cache.Put('C', MyTest, 1); // Must evict B, keeping A
 
-    TAssert.AssertTrue('Item quente deve ser protegido', Cache.Get('A', MyTest));
-    TAssert.AssertFalse('Item frio deve ser expulso', Cache.Get('B', MyTest));
+    TAssert.AssertTrue('The hot item must be protected', Cache.Get('A', MyTest));
+    TAssert.AssertFalse('The cold item must be evicted', Cache.Get('B', MyTest));
   finally
     Cache.Free;
   end;
@@ -623,9 +623,9 @@ begin
     Cache.Put(Key1, Val1);
     Cache.Put(Key2, Val2);
 
-    TAssert.AssertTrue('Deve encontrar a chave com precisão 2', Cache.Get(Key1, Temp));
-    TAssert.AssertTrue('Deve encontrar a chave com precisão 3', Cache.Get(Key2, Temp));
-    TAssert.AssertFalse('Não deve encontrar a chave com precisão 4 (nunca inserida)', Cache.Get(Key3, Temp));
+    TAssert.AssertTrue('Must find the key with precision 2', Cache.Get(Key1, Temp));
+    TAssert.AssertTrue('Must find the key with precision 3', Cache.Get(Key2, Temp));
+    TAssert.AssertFalse('Must not find the key with precision 4 (never inserted)', Cache.Get(Key3, Temp));
   finally
     Cache.Free;
   end;
@@ -645,11 +645,11 @@ begin
   try
     Cache.Put('A', 'V1');
     try
-      Cache.Put('B', 'V2'); // Isso deve disparar o callback e a exceção
+      Cache.Put('B', 'V2'); // This must fire the callback and the exception
     except
       on E: Exception do TAssert.AssertEquals('Boom', E.Message);
     end;
-    // O cache deve continuar íntegro e aceitar novos puts
+    // The cache must stay consistent and accept new puts
     Cache.Put('C', 'V3');
     TAssert.AssertTrue(True);
   finally

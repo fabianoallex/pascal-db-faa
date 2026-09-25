@@ -1,30 +1,31 @@
-"""Gera o espelho FPCUnit (tests/Unit/fpc/X.pas) a partir do teste DUnitX
+"""Generates the FPCUnit mirror (tests/Unit/fpc/X.pas) from the DUnitX test
 (tests/Unit/X.pas).
 
-Por que gerar em vez de manter os dois a mao: os corpos dos testes sao
-escritos no dialeto de asserts do FPCUnit (TAssert.AssertEquals/AssertTrue...)
-nos dois lados — no Delphi via PascalDb.DUnitXCompat. Com isso, a unica
-diferenca real entre as duas suites e' a declaracao das fixtures e o
-registro. Este script faz so' essa troca; o corpo sai byte a byte igual, e
-"esqueci de portar o teste novo para o outro lado" deixa de ser possivel.
+Why generate instead of maintaining both by hand: the test bodies are
+written in FPCUnit's assertion dialect (TAssert.AssertEquals/AssertTrue...)
+on both sides — on Delphi through PascalDb.DUnitXCompat. That leaves the
+fixture declarations and the registration as the only real difference
+between the two suites. This script swaps just that; the body comes out
+byte-for-byte identical, and "forgot to port the new test to the other side"
+stops being possible.
 
-O mestre e' SEMPRE o arquivo DUnitX. Nunca edite tests/Unit/fpc/*.pas a mao:
-edite o DUnitX e rode de novo.
+The master is ALWAYS the DUnitX file. Never edit tests/Unit/fpc/*.pas by
+hand: edit the DUnitX file and run this again.
 
-Transformacoes, so' dentro de classes marcadas com [TestFixture]:
+Transformations, only inside classes marked with [TestFixture]:
   [TestFixture] TX = class        -> TX = class(TTestCase)
   [Test] procedure Foo;           -> published: procedure Foo;
   [Setup] procedure Setup;        -> protected: procedure SetUp; override;
   [TearDown] procedure TearDown;  -> protected: procedure TearDown; override;
-  demais membros public           -> continuam public (no FPCUnit, TODO
-                                     metodo published vira teste)
-Fora das fixtures:
+  other public members            -> stay public (in FPCUnit, EVERY
+                                     published method becomes a test)
+Outside the fixtures:
   uses DUnitX.TestFramework, PascalDb.DUnitXCompat -> fpcunit, testregistry
   TDUnitX.RegisterTestFixture(TX)                  -> RegisterTest(TX)
 
-Uso: python tools/gen_fpc_mirror.py            (todos os tests/Unit/*Tests.pas)
-     python tools/gen_fpc_mirror.py --check    (falha se algum espelho estiver
-                                                desatualizado; nao escreve)
+Usage: python tools/gen_fpc_mirror.py          (every tests/Unit/*Tests.pas)
+       python tools/gen_fpc_mirror.py --check  (fails if any mirror is out of
+                                                date; writes nothing)
 """
 import re
 import sys
@@ -35,9 +36,9 @@ SRC_DIR = ROOT / 'tests' / 'Unit'
 DST_DIR = SRC_DIR / 'fpc'
 
 GENERATED_NOTE = (
-    '{ ARQUIVO GERADO por tools/gen_fpc_mirror.py a partir de\n'
-    '  tests/Unit/{name}.pas (DUnitX). Não edite à mão: edite o mestre DUnitX\n'
-    '  e rode o script de novo. }\n\n'
+    '{ GENERATED FILE — produced by tools/gen_fpc_mirror.py from\n'
+    '  tests/Unit/{name}.pas (DUnitX). Do not edit by hand: edit the DUnitX\n'
+    '  master and run the script again. }\n\n'
 )
 
 SECTION_RE = re.compile(r'^\s*(private|protected|public|published|strict private|strict protected)\s*$')
@@ -48,11 +49,11 @@ class MirrorError(Exception):
 
 
 def convert_fixture(lines):
-    """lines: linhas do corpo da classe (entre 'TX = class' e 'end;')."""
+    """lines: the class body lines (between 'TX = class' and 'end;')."""
     sections = {'private': [], 'protected': [], 'public': [], 'published': []}
-    current = 'public'  # default de visibilidade de classe sem secao
+    current = 'public'  # default visibility of a class with no section
     pending_attr = None
-    trivia = []  # comentarios/linhas vazias: acompanham o proximo membro
+    trivia = []  # comments/blank lines: they go with the next member
 
     def emit(section, text):
         sections[section].extend(trivia)
@@ -64,7 +65,7 @@ def convert_fixture(lines):
         if m:
             current = m.group(1).replace('strict ', '')
             if current == 'published':
-                raise MirrorError('fixture DUnitX com secao published: use public + [Test]')
+                raise MirrorError('DUnitX fixture with a published section: use public + [Test]')
             continue
         stripped = line.strip()
         if not pending_attr and (not stripped or stripped.startswith(('{', '//', '(*'))):
@@ -83,11 +84,11 @@ def convert_fixture(lines):
                 emit('published', indent + stripped)
             elif pending_attr == 'Setup':
                 if not re.match(r'procedure\s+Setup\s*;', stripped, re.I):
-                    raise MirrorError(f'[Setup] precisa se chamar SetUp no FPCUnit: {stripped}')
+                    raise MirrorError(f'[Setup] must be named SetUp for FPCUnit: {stripped}')
                 emit('protected', indent + 'procedure SetUp; override;')
             else:
                 if not re.match(r'procedure\s+TearDown\s*;', stripped, re.I):
-                    raise MirrorError(f'[TearDown] precisa se chamar TearDown no FPCUnit: {stripped}')
+                    raise MirrorError(f'[TearDown] must be named TearDown for FPCUnit: {stripped}')
                 emit('protected', indent + 'procedure TearDown; override;')
             pending_attr = None
             continue
@@ -113,7 +114,7 @@ def convert(text, name):
             decl = lines[i]
             m = re.match(r'^(\s*)(\w+)\s*=\s*class\s*$', decl)
             if not m:
-                raise MirrorError(f'{name}: fixture com heranca/interfaces nao suportada: {decl.strip()}')
+                raise MirrorError(f'{name}: fixture with inheritance/interfaces is not supported: {decl.strip()}')
             out.append(f'{m.group(1)}{m.group(2)} = class(TTestCase)')
             i += 1
             body = []
@@ -128,25 +129,25 @@ def convert(text, name):
         i += 1
     text = '\n'.join(out)
 
-    # uses: troca o framework
+    # uses: swap the framework
     text, n = re.subn(r'\bDUnitX\.TestFramework,\s*\n\s*PascalDb\.DUnitXCompat,', 'fpcunit, testregistry,', text, count=1)
     if n != 1:
-        raise MirrorError(f'{name}: uses sem "DUnitX.TestFramework, PascalDb.DUnitXCompat," em sequencia')
+        raise MirrorError(f'{name}: uses clause lacks "DUnitX.TestFramework, PascalDb.DUnitXCompat," in sequence')
     text = re.sub(r'TDUnitX\.RegisterTestFixture\((\w+)\);', r'RegisterTest(\1);', text)
-    # Qualquer uso de API DUnitX que sobrou (Assert.AreEqual, TDUnitX...) nao
-    # existe no FPCUnit: o mestre tem que usar so' o dialeto TAssert.*.
+    # Any DUnitX API left over (Assert.AreEqual, TDUnitX...) doesn't exist in
+    # FPCUnit: the master must use only the TAssert.* dialect.
     leftover = re.search(r'\b(TDUnitX|Assert\.[A-Z]\w*)\b', text)
     if leftover:
-        raise MirrorError(f'{name}: API DUnitX no corpo ({leftover.group(0)}); use TAssert.*')
+        raise MirrorError(f'{name}: DUnitX API in the body ({leftover.group(0)}); use TAssert.*')
 
-    # Logo apos "unit X;": modo do FPC e o aviso de arquivo gerado. O
-    # cabecalho do mestre vem em seguida, intacto.
+    # Right after "unit X;": the FPC mode and the generated-file note. The
+    # master's header follows, untouched.
     note = GENERATED_NOTE.replace('{name}', name)
     text, n = re.subn(r'^(unit [\w.]+;\n\n)',
                       lambda m: m.group(1) + '{$mode delphi}{$H+}\n\n' + note,
                       text, count=1, flags=re.M)
     if n != 1:
-        raise MirrorError(f'{name}: "unit X;" seguido de linha em branco nao encontrado')
+        raise MirrorError(f'{name}: "unit X;" followed by a blank line not found')
     return text
 
 
@@ -164,10 +165,10 @@ def main():
             if not check:
                 dst.write_text(mirror, encoding='utf-8-sig', newline='\n')
     if check and stale:
-        print('Espelhos FPCUnit desatualizados:', ', '.join(stale))
-        print('Rode: python tools/gen_fpc_mirror.py')
+        print('Out-of-date FPCUnit mirrors:', ', '.join(stale))
+        print('Run: python tools/gen_fpc_mirror.py')
         sys.exit(1)
-    print(('Desatualizados: ' if check else 'Gerados/atualizados: ') + (', '.join(stale) or 'nenhum'))
+    print(('Out of date: ' if check else 'Generated/updated: ') + (', '.join(stale) or 'none'))
 
 
 if __name__ == '__main__':

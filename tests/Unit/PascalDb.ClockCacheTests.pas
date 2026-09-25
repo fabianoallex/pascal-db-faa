@@ -1,13 +1,13 @@
 ﻿unit PascalDb.ClockCacheTests;
 
-{ Testes do TClockCache (PascalDb.ClockCache): Put/Get, evicção por vidas
-  com as duas políticas de admissão, limite de vidas, callback de remoção,
-  giro completo do ponteiro, contagem de referência dos valores (sem leak) e
-  estresse multithread de leitura e escrita.
+{ Tests for TClockCache (PascalDb.ClockCache): Put/Get, eviction by lives
+  under both admission policies, lives cap, removal callback, full wrap-around
+  of the hand, reference counting of the values (no leaks) and multithreaded
+  read/write stress.
 
-  Mestre DUnitX, escrito no dialeto de asserts do FPCUnit (TAssert.*, via
-  PascalDb.DUnitXCompat). O espelho em tests/Unit/fpc é gerado a partir do
-  mestre por tools/gen_fpc_mirror.py — edite só o mestre. }
+  DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
+  PascalDb.DUnitXCompat). The mirror in tests/Unit/fpc is generated from the
+  master by tools/gen_fpc_mirror.py — edit only the master. }
 
 interface
 
@@ -109,7 +109,7 @@ type
     [Test]
     procedure TestCacheHitRate_TracksHitsAndMisses;
 
-    // Novos testes propostos
+    // Additional tests
     [Test]
     procedure TestClockCache_HeavyConcurrency_ReadWrite;
     [Test]
@@ -179,12 +179,12 @@ begin
   begin
     Key := FKeys[Random(Length(FKeys))];
 
-    // Simula uma carga mista de leitura e escrita
-    if Random(100) < 70 then // 70% Leituras
+    // Simulates a mixed read/write load
+    if Random(100) < 70 then // 70% reads
     begin
       FCache.Get(Key, MyTest);
     end
-    else // 30% Escritas
+    else // 30% writes
     begin
       MyTest := TMyTest.Create;
       MyTest.Text := 'Update ' + IntToStr(I);
@@ -199,7 +199,7 @@ begin
   FCache := ACache;
   FIterations := AIterations;
 
-  // Usa um conjunto menor de chaves para forçar colisão e contenção
+  // Uses a smaller key set to force collisions and contention
   FKeys := ['K1', 'K2', 'K3', 'K4', 'K5'];
 
   FreeOnTerminate := False;
@@ -249,34 +249,34 @@ begin
   Cache := TCacheTest.Create(3);
   try
     BooleanResult := Cache.Get('A', MyTest);
-    TAssert.AssertFalse('BooleanResult deveria ser False', BooleanResult);
+    TAssert.AssertFalse('BooleanResult should be False', BooleanResult);
 
     MyTest := TMyTest.Create;
     MyTest.Text := '444';
     Cache.Put('A', MyTest);
     BooleanResult := Cache.Get('A', MyTest);
-    TAssert.AssertTrue('BooleanResult deveria ser True', BooleanResult);
-    TAssert.AssertEquals('MyTest.Text diferente do esperado', '444', MyTest.Text);
+    TAssert.AssertTrue('BooleanResult should be True', BooleanResult);
+    TAssert.AssertEquals('MyTest.Text differs from the expected value', '444', MyTest.Text);
 
     BooleanResult := Cache.Get('B', MyTest);
-    TAssert.AssertFalse('BooleanResult deveria ser False', BooleanResult);
+    TAssert.AssertFalse('BooleanResult should be False', BooleanResult);
 
     MyTest := TMyTest.Create;
     MyTest.Text := '555';
     Cache.Put('B', MyTest);
     BooleanResult := Cache.Get('B', MyTest);
-    TAssert.AssertTrue('BooleanResult deveria ser True', BooleanResult);
-    TAssert.AssertEquals('MyTest.Text diferente do esperado', '555', MyTest.Text);
+    TAssert.AssertTrue('BooleanResult should be True', BooleanResult);
+    TAssert.AssertEquals('MyTest.Text differs from the expected value', '555', MyTest.Text);
 
-    // tenta novamente o A
+    // try A again
     BooleanResult := Cache.Get('A', MyTest);
-    TAssert.AssertTrue('BooleanResult deveria ser True', BooleanResult);
-    TAssert.AssertEquals('MyTest.Text diferente do esperado', '444', MyTest.Text);
+    TAssert.AssertTrue('BooleanResult should be True', BooleanResult);
+    TAssert.AssertEquals('MyTest.Text differs from the expected value', '444', MyTest.Text);
 
-    // tenta novamente o B
+    // try B again
     BooleanResult := Cache.Get('B', MyTest);
-    TAssert.AssertTrue('BooleanResult deveria ser True', BooleanResult);
-    TAssert.AssertEquals('MyTest.Text diferente do esperado', '555', MyTest.Text);
+    TAssert.AssertTrue('BooleanResult should be True', BooleanResult);
+    TAssert.AssertEquals('MyTest.Text differs from the expected value', '555', MyTest.Text);
 
   finally
     Cache.Free;
@@ -298,39 +298,39 @@ begin
     Cache.Put('A', MyTest);
 
     BooleanResult := Cache.Get('A', MyTest);
-    TAssert.AssertTrue('BooleanResult A deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult A should be True', BooleanResult);
 
     MyTest := TMyTest.Create;
     MyTest.Text := 'BBB';
     Cache.Put('B', MyTest);
 
     BooleanResult := Cache.Get('B', MyTest);
-    TAssert.AssertTrue('BooleanResult B deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult B should be True', BooleanResult);
 
     MyTest := TMyTest.Create;
     MyTest.Text := 'CCC';
     Cache.Put('C', MyTest);
 
     BooleanResult := Cache.Get('C', MyTest);
-    TAssert.AssertTrue('BooleanResult C deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult C should be True', BooleanResult);
 
     MyTest := TMyTest.Create;
     MyTest.Text := 'DDD';
-    Cache.Put('D', MyTest);         // deve remover A do cache
+    Cache.Put('D', MyTest);         // must remove A from the cache
 
     //--------------
 
     BooleanResult := Cache.Get('A', MyTest);
-    TAssert.AssertFalse('BooleanResult A deveria ser False', BooleanResult);
+    TAssert.AssertFalse('BooleanResult A should be False', BooleanResult);
 
     BooleanResult := Cache.Get('B', MyTest);
-    TAssert.AssertTrue('BooleanResult B deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult B should be True', BooleanResult);
 
     BooleanResult := Cache.Get('C', MyTest);
-    TAssert.AssertTrue('BooleanResult C deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult C should be True', BooleanResult);
 
     BooleanResult := Cache.Get('D', MyTest);
-    TAssert.AssertTrue('BooleanResult D deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult D should be True', BooleanResult);
   finally
     Cache.Free;
   end;
@@ -352,7 +352,7 @@ begin
   try
     for I := 0 to AElementsCount - 1 do
     begin
-      Key := Chr(65 + I); // Gera 'A', 'B', 'C', 'D'...
+      Key := Chr(65 + I); // Produces 'A', 'B', 'C', 'D'...
       MyTest := TMyTest.Create;
       MyTest.Text := 'Content ' + Key;
       Cache.Put(Key, MyTest, ALives[I]);
@@ -361,7 +361,7 @@ begin
     for I := 0 to AElementsCount - 1 do
     begin
       Key := Chr(65 + I);
-      TAssert.AssertEquals(ATestName + '. ' + Format('Erro de expectativa para a chave %s', [Key]), AExpectedInCache[I], Cache.Get(Key, MyTest));
+      TAssert.AssertEquals(ATestName + '. ' + Format('Unexpected result for key %s', [Key]), AExpectedInCache[I], Cache.Get(Key, MyTest));
     end;
   finally
     Cache.Free;
@@ -380,46 +380,46 @@ begin
   try
     MyTest := TMyTest.Create;
     MyTest.Text := 'AAA';
-    Cache.Put('A', MyTest);  // 'A' Lives vai para 1
+    Cache.Put('A', MyTest);  // 'A' Lives goes to 1
 
     MyTest := TMyTest.Create;
     MyTest.Text := 'AAA';
-    Cache.Put('A', MyTest);  // 'A' Lives vai para 2
+    Cache.Put('A', MyTest);  // 'A' Lives goes to 2
 
     BooleanResult := Cache.Get('A', MyTest);
-    TAssert.AssertTrue('BooleanResult A deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult A should be True', BooleanResult);
 
     MyTest := TMyTest.Create;
     MyTest.Text := 'BBB';
-    Cache.Put('B', MyTest);  // 'B' Lives vai para 1
+    Cache.Put('B', MyTest);  // 'B' Lives goes to 1
 
     BooleanResult := Cache.Get('B', MyTest);
-    TAssert.AssertTrue('BooleanResult B deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult B should be True', BooleanResult);
 
     MyTest := TMyTest.Create;
     MyTest.Text := 'CCC';
-    Cache.Put('C', MyTest);  // 'C' Lives vai para 1
+    Cache.Put('C', MyTest);  // 'C' Lives goes to 1
 
     BooleanResult := Cache.Get('C', MyTest);
-    TAssert.AssertTrue('BooleanResult C deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult C should be True', BooleanResult);
 
     MyTest := TMyTest.Create;
     MyTest.Text := 'DDD';
-    Cache.Put('D', MyTest);         // deve remover B do cache, pois A tem uma vida a mais
+    Cache.Put('D', MyTest);         // must remove B from the cache, since A has one more life
 
     //--------------
 
     BooleanResult := Cache.Get('A', MyTest);
-    TAssert.AssertTrue('BooleanResult A deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult A should be True', BooleanResult);
 
     BooleanResult := Cache.Get('B', MyTest);
-    TAssert.AssertFalse('BooleanResult B deveria ser False', BooleanResult);
+    TAssert.AssertFalse('BooleanResult B should be False', BooleanResult);
 
     BooleanResult := Cache.Get('C', MyTest);
-    TAssert.AssertTrue('BooleanResult C deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult C should be True', BooleanResult);
 
     BooleanResult := Cache.Get('D', MyTest);
-    TAssert.AssertTrue('BooleanResult D deveria ser True', BooleanResult);
+    TAssert.AssertTrue('BooleanResult D should be True', BooleanResult);
   finally
     Cache.Free;
   end;
@@ -467,7 +467,7 @@ begin
     end;
     Cache.CacheHitRate.Stop;
 
-    TAssert.AssertTrue('O mapa não deveria estar vazio', Cache.CacheHitRate.Hits + Cache.CacheHitRate.Misses > 0);
+    TAssert.AssertTrue('The map should not be empty', Cache.CacheHitRate.Hits + Cache.CacheHitRate.Misses > 0);
   finally
     Cache.Free;
   end;
@@ -489,13 +489,13 @@ begin
     MyTest := TMyTest.Create; MyTest.Text := 'BBB';
     Cache.Put('B', MyTest);
 
-    TAssert.AssertEquals('Sem eviction ainda', 0, FRemovedCount);
+    TAssert.AssertEquals('No eviction yet', 0, FRemovedCount);
 
     MyTest := TMyTest.Create; MyTest.Text := 'CCC';
     Cache.Put('C', MyTest);
 
-    TAssert.AssertEquals('OnRemoveItem deve ter sido chamado 1 vez', 1, FRemovedCount);
-    TAssert.AssertEquals('Item expulso deve ser AAA', 'AAA', FLastRemovedText);
+    TAssert.AssertEquals('OnRemoveItem must have been called once', 1, FRemovedCount);
+    TAssert.AssertEquals('The evicted item must be AAA', 'AAA', FLastRemovedText);
   finally
     Cache.Free;
   end;
@@ -522,9 +522,9 @@ begin
     MyTest := TMyTest.Create; MyTest.Text := 'D';
     Cache.Put('D', MyTest, 1);
 
-    TAssert.AssertFalse('B deve ter sido expulso na 1ª rodada', Cache.Get('B', MyTest));
-    TAssert.AssertFalse('A deve ter sido expulso na 2ª rodada (cap funcionou)', Cache.Get('A', MyTest));
-    TAssert.AssertTrue('D deve estar no cache', Cache.Get('D', MyTest));
+    TAssert.AssertFalse('B must have been evicted in the 1st round', Cache.Get('B', MyTest));
+    TAssert.AssertFalse('A must have been evicted in the 2nd round (the cap worked)', Cache.Get('A', MyTest));
+    TAssert.AssertTrue('D must be in the cache', Cache.Get('D', MyTest));
   finally
     Cache.Free;
   end;
@@ -539,14 +539,14 @@ var
 begin
   Cache := TCacheTest.Create(3, 5);
   try
-    MyTest := TMyTest.Create; MyTest.Text := 'versão 1';
+    MyTest := TMyTest.Create; MyTest.Text := 'version 1';
     Cache.Put('A', MyTest, 1);
 
-    MyTest := TMyTest.Create; MyTest.Text := 'versão 2';
+    MyTest := TMyTest.Create; MyTest.Text := 'version 2';
     Cache.Put('A', MyTest, 2);
 
-    TAssert.AssertTrue('A deve estar no cache', Cache.Get('A', MyTest));
-    TAssert.AssertEquals('Valor deve ser a versão 2', 'versão 2', MyTest.Text);
+    TAssert.AssertTrue('A must be in the cache', Cache.Get('A', MyTest));
+    TAssert.AssertEquals('The value must be version 2', 'version 2', MyTest.Text);
 
     MyTest := TMyTest.Create; MyTest.Text := 'B';
     Cache.Put('B', MyTest, 1);
@@ -556,8 +556,8 @@ begin
     MyTest := TMyTest.Create; MyTest.Text := 'D';
     Cache.Put('D', MyTest, 1);
 
-    TAssert.AssertTrue('A deve sobreviver', Cache.Get('A', MyTest));
-    TAssert.AssertFalse('B deve ter sido expulso', Cache.Get('B', MyTest));
+    TAssert.AssertTrue('A must survive', Cache.Get('A', MyTest));
+    TAssert.AssertFalse('B must have been evicted', Cache.Get('B', MyTest));
   finally
     Cache.Free;
   end;
@@ -587,9 +587,9 @@ begin
     Cache.CacheHitRate.Stop;
     Stats := Cache.CacheHitRate.GetCacheStats;
 
-    TAssert.AssertEquals('Hits devem ser 4', Int64(4), Stats.Hits);
-    TAssert.AssertEquals('Misses devem ser 3', Int64(3), Stats.Misses);
-    TAssert.AssertTrue('Efficiency deve ser > 50%', Stats.Efficiency > 50);
+    TAssert.AssertEquals('Hits must be 4', Int64(4), Stats.Hits);
+    TAssert.AssertEquals('Misses must be 3', Int64(3), Stats.Misses);
+    TAssert.AssertTrue('Efficiency must be > 50%', Stats.Efficiency > 50);
   finally
     Cache.Free;
   end;
@@ -606,7 +606,7 @@ var
   I: Integer;
   Cache: TCache;
 begin
-  Cache := TCache.Create(10, 3); // Cache pequeno para forçar contenção
+  Cache := TCache.Create(10, 3); // Small cache to force contention
   try
     for I := 1 to THREAD_COUNT do
       Threads[I] := TReadWriteStressThread.Create(Cache, ITERATIONS_PER_THREAD);
@@ -617,7 +617,7 @@ begin
       Threads[I].Free;
     end;
 
-    // Se chegou aqui sem deadlock ou AV, passou na concorrência pesada
+    // Reaching this point without a deadlock or AV means it passed the heavy concurrency
     TAssert.AssertTrue(True);
   finally
     Cache.Free;
@@ -632,22 +632,22 @@ var
   Obj: IInterface;
   I: Integer;
 begin
-  // Garante que começamos do zero
-  TAssert.AssertEquals('Deveria haver 0 instâncias no início', 0, TLeakTestObject.InstanceCount);
+  // Make sure we start from zero
+  TAssert.AssertEquals('There should be 0 instances at the start', 0, TLeakTestObject.InstanceCount);
 
   Cache := TCache.Create(5);
   try
-    // Preenche o cache com objetos de teste
+    // Fill the cache with test objects
     for I := 1 to 5 do
     begin
       Obj := TLeakTestObject.Create;
       Cache.Put(IntToStr(I), Obj, 1);
-      Obj := nil; // Libera a referência local
+      Obj := nil; // Release the local reference
     end;
 
-    TAssert.AssertEquals('Deveria haver 5 instâncias no cache', 5, TLeakTestObject.InstanceCount);
+    TAssert.AssertEquals('There should be 5 instances in the cache', 5, TLeakTestObject.InstanceCount);
 
-    // Força a expulsão de todos os itens inserindo novos chaves
+    // Force eviction of every item by inserting new keys
     for I := 6 to 10 do
     begin
       Obj := TLeakTestObject.Create;
@@ -655,15 +655,15 @@ begin
       Obj := nil;
     end;
 
-    // Após a expulsão, as instâncias antigas devem ter sido destruídas (se foram zeradas no array)
-    TAssert.AssertEquals('Deveria haver apenas as 5 novas instâncias', 5, TLeakTestObject.InstanceCount);
+    // After eviction, the old instances must have been destroyed (if they were cleared in the array)
+    TAssert.AssertEquals('There should be only the 5 new instances', 5, TLeakTestObject.InstanceCount);
 
   finally
     Cache.Free;
   end;
 
-  // Após liberar o cache, todas as instâncias devem cair para zero
-  TAssert.AssertEquals('Deveria haver 0 instâncias após liberar o cache', 0, TLeakTestObject.InstanceCount);
+  // After freeing the cache, every instance count must drop to zero
+  TAssert.AssertEquals('There should be 0 instances after freeing the cache', 0, TLeakTestObject.InstanceCount);
 end;
 
 procedure TClockCacheTests.TestClockCache_FullCycle_HandWrapAround;
@@ -674,28 +674,28 @@ var
   I: Integer;
   Value: string;
 begin
-  Cache := TCache.Create(3, 1); // Capacidade 3, max lives 1
+  Cache := TCache.Create(3, 1); // Capacity 3, max lives 1
   try
-    // Inserção 1, 2, 3 -> Cache cheio, Hand em 0
+    // Inserts 1, 2, 3 -> cache full, Hand at 0
     Cache.Put('1', 'V1');
     Cache.Put('2', 'V2');
     Cache.Put('3', 'V3');
 
-    // Inserção 4: Expulsa '1' (Hand=0), insere '4', Hand vai para 1
+    // Insert 4: evicts '1' (Hand=0), inserts '4', Hand goes to 1
     Cache.Put('4', 'V4');
-    TAssert.AssertFalse('1 deveria ter sido expulso', Cache.Get('1', Value));
+    TAssert.AssertFalse('1 should have been evicted', Cache.Get('1', Value));
 
-    // Inserção 5: Expulsa '2' (Hand=1), insere '5', Hand vai para 2
+    // Insert 5: evicts '2' (Hand=1), inserts '5', Hand goes to 2
     Cache.Put('5', 'V5');
-    TAssert.AssertFalse('2 deveria ter sido expulso', Cache.Get('2', Value));
+    TAssert.AssertFalse('2 should have been evicted', Cache.Get('2', Value));
 
-    // Inserção 6: Expulsa '3' (Hand=2), insere '6', Hand vai para 0 (Wrap Around!)
+    // Insert 6: evicts '3' (Hand=2), inserts '6', Hand goes to 0 (wrap-around!)
     Cache.Put('6', 'V6');
-    TAssert.AssertFalse('3 deveria ter sido expulso', Cache.Get('3', Value));
+    TAssert.AssertFalse('3 should have been evicted', Cache.Get('3', Value));
 
-    // Inserção 7: Expulsa '4' (Hand=0 novamente)
+    // Insert 7: evicts '4' (Hand=0 again)
     Cache.Put('7', 'V7');
-    TAssert.AssertFalse('4 deveria ter sido expulso', Cache.Get('4', Value));
+    TAssert.AssertFalse('4 should have been evicted', Cache.Get('4', Value));
 
     TAssert.AssertTrue(Cache.Get('7', Value));
     TAssert.AssertTrue(Cache.Get('5', Value));

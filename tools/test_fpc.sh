@@ -1,12 +1,12 @@
 #!/bin/sh
-# Regenera os espelhos FPCUnit a partir dos mestres DUnitX, compila e roda a
-# suite unitaria no FPC. Criterio de aceite: 0 errors, 0 failures e
+# Regenerates the FPCUnit mirrors from the DUnitX masters, then builds and
+# runs the unit suite on FPC. Acceptance criterion: 0 errors, 0 failures and
 # "0 unfreed memory blocks" (heaptrc).
 #
-# O lado Delphi nao tem equivalente por linha de comando: o Delphi Community
-# Edition nao compila fora da IDE (dcc32 imprime "This version of the product
-# does not support command line compiling." e sai com codigo 0). Rode
-# tests\Unit\PascalDb.UnitTests.dproj pela IDE.
+# The Delphi side has no command-line equivalent: Delphi Community Edition
+# doesn't compile outside the IDE (dcc32 prints "This version of the product
+# does not support command line compiling." and exits with code 0). Run
+# tests\Unit\PascalDb.UnitTests.dproj from the IDE.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LAZBUILD="${LAZBUILD:-lazbuild}"

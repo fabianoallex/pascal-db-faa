@@ -2,19 +2,19 @@
 
 {$mode delphi}{$H+}
 
-{ ARQUIVO GERADO por tools/gen_fpc_mirror.py a partir de
-  tests/Unit/PascalDb.MockTests.pas (DUnitX). Não edite à mão: edite o mestre DUnitX
-  e rode o script de novo. }
+{ GENERATED FILE — produced by tools/gen_fpc_mirror.py from
+  tests/Unit/PascalDb.MockTests.pas (DUnitX). Do not edit by hand: edit the DUnitX
+  master and run the script again. }
 
-{ Testes do mock de banco (PascalDb.Mock): TMockQueryResult (linhas, colunas,
-  nulos, coluna inexistente), TMockParams (todos os tipos, inclusive
-  IOptXxx/INullXxx/IOptNullXxx), TMockSQLLoader e TMockDBFactory (respostas
-  registradas por chave, execuções gravadas, erro descritivo para chave sem
-  resposta).
+{ Tests for the database mock (PascalDb.Mock): TMockQueryResult (rows,
+  columns, nulls, unknown column), TMockParams (every type, including
+  IOptXxx/INullXxx/IOptNullXxx), TMockSQLLoader and TMockDBFactory (responses
+  registered by key, recorded executions, descriptive error for a key with no
+  response).
 
-  Mestre DUnitX, escrito no dialeto de asserts do FPCUnit (TAssert.*, via
-  PascalDb.DUnitXCompat). O espelho em tests/Unit/fpc é gerado a partir do
-  mestre por tools/gen_fpc_mirror.py — edite só o mestre. }
+  DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
+  PascalDb.DUnitXCompat). The mirror in tests/Unit/fpc is generated from the
+  master by tools/gen_fpc_mirror.py — edit only the master. }
 
 interface
 
@@ -90,12 +90,12 @@ implementation
 
 procedure TMockQueryResultTests.Empty_IsEmpty_True;
 begin
-  TAssert.AssertTrue('Empty deve ser IsEmpty=True', TMockQueryResult.Empty.IsEmpty);
+  TAssert.AssertTrue('Empty must be IsEmpty=True', TMockQueryResult.Empty.IsEmpty);
 end;
 
 procedure TMockQueryResultTests.Empty_Eof_True;
 begin
-  TAssert.AssertTrue('Empty deve ser Eof=True imediatamente', TMockQueryResult.Empty.Eof);
+  TAssert.AssertTrue('Empty must be Eof=True immediately', TMockQueryResult.Empty.Eof);
 end;
 
 procedure TMockQueryResultTests.SingleRow_IsEmpty_False;
@@ -103,24 +103,24 @@ var
   R: IQueryResult;
 begin
   R := TMockQueryResult.SingleRow(['ID'], [42]);
-  TAssert.AssertFalse('SingleRow não deve ser IsEmpty', R.IsEmpty);
+  TAssert.AssertFalse('SingleRow must not be IsEmpty', R.IsEmpty);
 end;
 
 procedure TMockQueryResultTests.SingleRow_FieldCount;
 var
   R: IQueryResult;
 begin
-  R := TMockQueryResult.SingleRow(['ID', 'NOME', 'ATIVO'], [1, 'Teste', True]);
-  TAssert.AssertEquals('FieldCount deve ser 3', 3, R.FieldCount);
+  R := TMockQueryResult.SingleRow(['ID', 'NAME', 'ACTIVE'], [1, 'Test', True]);
+  TAssert.AssertEquals('FieldCount must be 3', 3, R.FieldCount);
 end;
 
 procedure TMockQueryResultTests.SingleRow_ReadValues;
 var
   R: IQueryResult;
 begin
-  R := TMockQueryResult.SingleRow(['ID', 'NOME'], [7, 'São Paulo']);
-  TAssert.AssertEquals('ID deve ser 7', 7, R.GetAsInteger('ID'));
-  TAssert.AssertEquals('NOME deve ser São Paulo', 'São Paulo', R.GetAsString('NOME'));
+  R := TMockQueryResult.SingleRow(['ID', 'NAME'], [7, 'São Paulo']);
+  TAssert.AssertEquals('ID must be 7', 7, R.GetAsInteger('ID'));
+  TAssert.AssertEquals('NAME must be São Paulo', 'São Paulo', R.GetAsString('NAME'));
 end;
 
 procedure TMockQueryResultTests.SingleRow_Eof_AfterNext;
@@ -128,9 +128,9 @@ var
   R: IQueryResult;
 begin
   R := TMockQueryResult.SingleRow(['ID'], [1]);
-  TAssert.AssertFalse('Não deve ser Eof antes de Next', R.Eof);
+  TAssert.AssertFalse('Must not be Eof before Next', R.Eof);
   R.Next;
-  TAssert.AssertTrue('Deve ser Eof após Next na única linha', R.Eof);
+  TAssert.AssertTrue('Must be Eof after Next on the only row', R.Eof);
 end;
 
 procedure TMockQueryResultTests.MultiRows_RecordCount;
@@ -138,11 +138,11 @@ var
   R: IQueryResult;
 begin
   R := TMockQueryResult.MultiRows(
-    ['ID', 'NOME'],
+    ['ID', 'NAME'],
     [TArray<Variant>.Create(1, 'Alpha'),
      TArray<Variant>.Create(2, 'Beta'),
      TArray<Variant>.Create(3, 'Gamma')]);
-  TAssert.AssertEquals('RecordCount deve ser 3', 3, R.RecordCount);
+  TAssert.AssertEquals('RecordCount must be 3', 3, R.RecordCount);
 end;
 
 procedure TMockQueryResultTests.MultiRows_CursorNavigation;
@@ -153,11 +153,11 @@ begin
     ['ID'],
     [TArray<Variant>.Create(10),
      TArray<Variant>.Create(20)]);
-  TAssert.AssertEquals('Cursor na linha 0 deve retornar 10', 10, R.GetAsInteger('ID'));
+  TAssert.AssertEquals('Cursor on row 0 must return 10', 10, R.GetAsInteger('ID'));
   R.Next;
-  TAssert.AssertEquals('Cursor na linha 1 deve retornar 20', 20, R.GetAsInteger('ID'));
+  TAssert.AssertEquals('Cursor on row 1 must return 20', 20, R.GetAsInteger('ID'));
   R.Next;
-  TAssert.AssertTrue('Após 2 nexts deve ser Eof', R.Eof);
+  TAssert.AssertTrue('Must be Eof after 2 Next calls', R.Eof);
 end;
 
 procedure TMockQueryResultTests.MultiRows_GetNullableString_Null;
@@ -165,18 +165,18 @@ var
   R: IQueryResult;
   V: INullString;
 begin
-  R := TMockQueryResult.SingleRow(['NOME'], [Null]);
-  V := R.GetNullableString('NOME');
-  TAssert.AssertTrue('Variant Null deve retornar INullString.IsNull=True', V.IsNull);
+  R := TMockQueryResult.SingleRow(['NAME'], [Null]);
+  V := R.GetNullableString('NAME');
+  TAssert.AssertTrue('A Null variant must return INullString.IsNull=True', V.IsNull);
 end;
 
 procedure TMockQueryResultTests.MultiRows_ColumnNameCaseInsensitive;
 var
   R: IQueryResult;
 begin
-  R := TMockQueryResult.SingleRow(['nome'], ['Valor']);
-  TAssert.AssertEquals('Coluna deve ser acessível em maiúsculas', 'Valor', R.GetAsString('NOME'));
-  TAssert.AssertEquals('Coluna deve ser acessível em minúsculas', 'Valor', R.GetAsString('nome'));
+  R := TMockQueryResult.SingleRow(['name'], ['Value']);
+  TAssert.AssertEquals('The column must be accessible in upper case', 'Value', R.GetAsString('NAME'));
+  TAssert.AssertEquals('The column must be accessible in lower case', 'Value', R.GetAsString('name'));
 end;
 
 procedure TMockQueryResultTests.UnknownColumn_Raises;
@@ -192,7 +192,7 @@ begin
     on E: Exception do
       LRaised := True;
   end;
-  TAssert.AssertTrue('Coluna inexistente deve lançar exceção', LRaised);
+  TAssert.AssertTrue('An unknown column must raise an exception', LRaised);
 end;
 
 { TMockParamsTests }
@@ -202,8 +202,8 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetString('NOME', 'Fabiano');
-  TAssert.AssertEquals('Fabiano', P.GetString('NOME'));
+  P.SetString('NAME', 'Fabiano');
+  TAssert.AssertEquals('Fabiano', P.GetString('NAME'));
 end;
 
 procedure TMockParamsTests.SetGetInteger;
@@ -229,8 +229,8 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetBoolean('ATIVO', True);
-  TAssert.AssertTrue(P.GetBoolean('ATIVO'));
+  P.SetBoolean('ACTIVE', True);
+  TAssert.AssertTrue(P.GetBoolean('ACTIVE'));
 end;
 
 procedure TMockParamsTests.SetGetCurrency;
@@ -239,9 +239,9 @@ var
   V: Currency;
 begin
   P := TMockParams.Create;
-  P.SetCurrency('PRECO', 19.99);
-  V := P.GetCurrency('PRECO');
-  TAssert.AssertEquals('Valor Currency deve ser preservado', Currency(19.99), V);
+  P.SetCurrency('PRICE', 19.99);
+  V := P.GetCurrency('PRICE');
+  TAssert.AssertEquals('The Currency value must be preserved', Currency(19.99), V);
 end;
 
 procedure TMockParamsTests.SetGetDateTime;
@@ -252,7 +252,7 @@ begin
   P := TMockParams.Create;
   D := EncodeDate(2025, 5, 26);
   P.SetDateTime('DT', D);
-  TAssert.AssertEquals('TDateTime deve ser preservado', D, P.GetDateTime('DT'), 0);
+  TAssert.AssertEquals('The TDateTime must be preserved', D, P.GetDateTime('DT'), 0);
 end;
 
 procedure TMockParamsTests.SetOptString_HasValue_Stores;
@@ -260,8 +260,8 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetOptString('CAMPO', TOptNullString.From('ok'));
-  TAssert.AssertEquals('ok', P.GetOptString('CAMPO').Value);
+  P.SetOptString('FIELD', TOptNullString.From('ok'));
+  TAssert.AssertEquals('ok', P.GetOptString('FIELD').Value);
 end;
 
 procedure TMockParamsTests.SetOptString_Undefined_DoesNotStore;
@@ -269,8 +269,8 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetOptString('CAMPO', TOptNullString.Undefined);
-  TAssert.AssertFalse('Undefined não deve ser armazenado', P.GetOptString('CAMPO').HasValue);
+  P.SetOptString('FIELD', TOptNullString.Undefined);
+  TAssert.AssertFalse('Undefined must not be stored', P.GetOptString('FIELD').HasValue);
 end;
 
 procedure TMockParamsTests.SetNullString_Null_StoresNull;
@@ -278,8 +278,8 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetNullString('CAMPO', TOptNullString.Null);
-  TAssert.AssertTrue('Null deve ser armazenado como IsNull=True', P.GetNullString('CAMPO').IsNull);
+  P.SetNullString('FIELD', TOptNullString.Null);
+  TAssert.AssertTrue('Null must be stored as IsNull=True', P.GetNullString('FIELD').IsNull);
 end;
 
 procedure TMockParamsTests.SetNullString_WithValue_Stores;
@@ -287,8 +287,8 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetNullString('CAMPO', TOptNullString.From('texto'));
-  TAssert.AssertEquals('texto', P.GetNullString('CAMPO').Value);
+  P.SetNullString('FIELD', TOptNullString.From('text'));
+  TAssert.AssertEquals('text', P.GetNullString('FIELD').Value);
 end;
 
 procedure TMockParamsTests.SetOptNullString_Undefined_DoesNotStore;
@@ -296,8 +296,8 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetOptNullString('CAMPO', TOptNullString.Undefined);
-  TAssert.AssertFalse('Undefined não deve ser armazenado', P.GetOptNullString('CAMPO').HasValue);
+  P.SetOptNullString('FIELD', TOptNullString.Undefined);
+  TAssert.AssertFalse('Undefined must not be stored', P.GetOptNullString('FIELD').HasValue);
 end;
 
 procedure TMockParamsTests.SetOptNullString_Null_StoresNull;
@@ -305,8 +305,8 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetOptNullString('CAMPO', TOptNullString.Null);
-  TAssert.AssertTrue('OptNull Null deve ser armazenado', P.GetOptNullString('CAMPO').IsNull);
+  P.SetOptNullString('FIELD', TOptNullString.Null);
+  TAssert.AssertTrue('OptNull Null must be stored', P.GetOptNullString('FIELD').IsNull);
 end;
 
 procedure TMockParamsTests.SetOptNullString_WithValue_Stores;
@@ -314,8 +314,8 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetOptNullString('CAMPO', TOptNullString.From('valor'));
-  TAssert.AssertEquals('valor', P.GetOptNullString('CAMPO').Value);
+  P.SetOptNullString('FIELD', TOptNullString.From('value'));
+  TAssert.AssertEquals('value', P.GetOptNullString('FIELD').Value);
 end;
 
 procedure TMockParamsTests.KeyNormalization_CaseInsensitive;
@@ -323,9 +323,9 @@ var
   P: IParams;
 begin
   P := TMockParams.Create;
-  P.SetString('nome', 'x');
-  TAssert.AssertEquals('Chave deve ser case-insensitive', 'x', P.GetString('NOME'));
-  TAssert.AssertEquals('Chave deve ser case-insensitive', 'x', P.GetString('Nome'));
+  P.SetString('name', 'x');
+  TAssert.AssertEquals('The key must be case-insensitive', 'x', P.GetString('NAME'));
+  TAssert.AssertEquals('The key must be case-insensitive', 'x', P.GetString('Name'));
 end;
 
 { TMockSQLLoaderTests }
@@ -337,8 +337,8 @@ var
 begin
   L := TMockSQLLoader.Create;
   try
-    S := L.Sql['PEDIDO.FIND'];
-    TAssert.AssertEquals('TMockSQLLoader deve retornar o nome da chave como SQL', 'PEDIDO.FIND', S.SQL);
+    S := L.Sql['ORDER.FIND'];
+    TAssert.AssertEquals('TMockSQLLoader must return the key name as the SQL', 'ORDER.FIND', S.SQL);
   finally
     L.Free;
   end;
@@ -351,8 +351,8 @@ var
 begin
   L := TMockSQLLoader.Create;
   try
-    S := L.Sql['PEDIDO.FIND'].ReplaceLiteral('LIMIT', '20').SQL;
-    TAssert.AssertEquals('ReplaceLiteral sem ${...} no nome da chave não deve alterar nada', 'PEDIDO.FIND', S);
+    S := L.Sql['ORDER.FIND'].ReplaceLiteral('LIMIT', '20').SQL;
+    TAssert.AssertEquals('ReplaceLiteral without ${...} in the key name must not change anything', 'ORDER.FIND', S);
   finally
     L.Free;
   end;
@@ -365,8 +365,8 @@ var
 begin
   L := TMockSQLLoader.Create;
   try
-    S := L.Sql['PEDIDO.FIND'].ProcessTag('SEARCH', True).SQL;
-    TAssert.AssertEquals('ProcessTag sem tags no nome da chave não deve alterar nada', 'PEDIDO.FIND', S);
+    S := L.Sql['ORDER.FIND'].ProcessTag('SEARCH', True).SQL;
+    TAssert.AssertEquals('ProcessTag without tags in the key name must not change anything', 'ORDER.FIND', S);
   finally
     L.Free;
   end;
@@ -383,11 +383,11 @@ var
 begin
   F := TMockDBFactory.Create;
   try
-    F.AddResult('CIDADE.FIND', TMockQueryResult.SingleRow(['TOTAL'], [5]));
+    F.AddResult('CITY.FIND', TMockQueryResult.SingleRow(['TOTAL'], [5]));
     Scope := F.GetPool.AcquireQuery(Q);
-    Q.SetSql('CIDADE.FIND');
+    Q.SetSql('CITY.FIND');
     R := Q.Open;
-    TAssert.AssertTrue('Open deve retornar IQueryResult configurado', Assigned(R));
+    TAssert.AssertTrue('Open must return the configured IQueryResult', Assigned(R));
     TAssert.AssertEquals(5, R.GetAsInteger('TOTAL'));
   finally
     F.Free;
@@ -412,7 +412,7 @@ begin
       on E: Exception do
         LRaised := True;
     end;
-    TAssert.AssertTrue('Open sem AddResult deve lançar exceção descritiva', LRaised);
+    TAssert.AssertTrue('Open without AddResult must raise a descriptive exception', LRaised);
   finally
     F.Free;
   end;
@@ -427,11 +427,11 @@ begin
   F := TMockDBFactory.Create;
   try
     Scope := F.GetPool.AcquireQuery(Q);
-    Q.SetSql('CIDADE.INSERT');
-    Q.Params.SetString('NOME', 'Curitiba');
+    Q.SetSql('CITY.INSERT');
+    Q.Params.SetString('NAME', 'Curitiba');
     Q.ExecSql;
-    TAssert.AssertEquals('ExecSql deve registrar 1 execução', 1, F.ExecutionCount('CIDADE.INSERT'));
-    TAssert.AssertEquals('Curitiba', F.LastExecution('CIDADE.INSERT').AsString('NOME'));
+    TAssert.AssertEquals('ExecSql must record 1 execution', 1, F.ExecutionCount('CITY.INSERT'));
+    TAssert.AssertEquals('Curitiba', F.LastExecution('CITY.INSERT').AsString('NAME'));
   finally
     F.Free;
   end;
@@ -449,7 +449,7 @@ begin
     Scope := F.GetPool.AcquireQuery(Q);
     Q.SetSql('X.FIND');
     Q.Open;
-    TAssert.AssertTrue('Open deve registrar WasOpen=True', F.LastExecution('X.FIND').WasOpen);
+    TAssert.AssertTrue('Open must record WasOpen=True', F.LastExecution('X.FIND').WasOpen);
   finally
     F.Free;
   end;
@@ -466,7 +466,7 @@ begin
     Scope := F.GetPool.AcquireQuery(Q);
     Q.SetSql('X.DEL');
     Q.ExecSql;
-    TAssert.AssertFalse('ExecSql deve registrar WasOpen=False', F.LastExecution('X.DEL').WasOpen);
+    TAssert.AssertFalse('ExecSql must record WasOpen=False', F.LastExecution('X.DEL').WasOpen);
   finally
     F.Free;
   end;
@@ -488,8 +488,8 @@ begin
       Q.SetSql('X.FIND');
       Q.Open;
     end;
-    TAssert.AssertEquals('Deve contar 3 execuções', 3, F.ExecutionCount('X.FIND'));
-    TAssert.AssertEquals('Chave diferente deve ser 0', 0, F.ExecutionCount('OUTRO'));
+    TAssert.AssertEquals('Must count 3 executions', 3, F.ExecutionCount('X.FIND'));
+    TAssert.AssertEquals('A different key must be 0', 0, F.ExecutionCount('OTHER'));
   finally
     F.Free;
   end;
@@ -504,10 +504,10 @@ begin
   F := TMockDBFactory.Create;
   try
     Scope := F.GetPool.AcquireQuery(Q);
-    Q.SetSql('X.UPD'); Q.Params.SetString('NOME', 'Primeiro'); Q.ExecSql;
+    Q.SetSql('X.UPD'); Q.Params.SetString('NAME', 'First'); Q.ExecSql;
     Scope := F.GetPool.AcquireQuery(Q);
-    Q.SetSql('X.UPD'); Q.Params.SetString('NOME', 'Ultimo');   Q.ExecSql;
-    TAssert.AssertEquals('LastExecution deve retornar a execução mais recente', 'Ultimo', F.LastExecution('X.UPD').AsString('NOME'));
+    Q.SetSql('X.UPD'); Q.Params.SetString('NAME', 'Last');   Q.ExecSql;
+    TAssert.AssertEquals('LastExecution must return the most recent execution', 'Last', F.LastExecution('X.UPD').AsString('NAME'));
   finally
     F.Free;
   end;
@@ -519,7 +519,7 @@ var
 begin
   F := TMockDBFactory.Create;
   try
-    TAssert.AssertTrue('Chave inexistente deve retornar nil', not Assigned(F.LastExecution('NUNCA.EXECUTADO')));
+    TAssert.AssertTrue('An unknown key must return nil', not Assigned(F.LastExecution('NEVER.EXECUTED')));
   finally
     F.Free;
   end;
@@ -536,19 +536,19 @@ begin
   try
     Scope := F.GetPool.AcquireQuery(Q);
     Q.SetSql('PRODUTO.INSERT');
-    Q.Params.SetString('NOME',   'Caneta');
-    Q.Params.SetInteger('QTD',   10);
-    Q.Params.SetCurrency('PRECO', 2.50);
+    Q.Params.SetString('NAME',   'Pen');
+    Q.Params.SetInteger('QTY',   10);
+    Q.Params.SetCurrency('PRICE', 2.50);
     Q.ExecSql;
 
     Ex := F.LastExecution('PRODUTO.INSERT');
     TAssert.AssertTrue(Assigned(Ex));
-    TAssert.AssertTrue('Snapshot deve ter NOME', Ex.HasParam('NOME'));
-    TAssert.AssertTrue('Snapshot deve ter QTD', Ex.HasParam('QTD'));
-    TAssert.AssertTrue('Snapshot deve ter PRECO', Ex.HasParam('PRECO'));
-    TAssert.AssertEquals('Caneta', Ex.AsString('NOME'));
-    TAssert.AssertEquals(10, Ex.AsInteger('QTD'));
-    TAssert.AssertEquals('Preço deve ser preservado', Currency(2.50), Ex.AsCurrency('PRECO'));
+    TAssert.AssertTrue('The snapshot must have NAME', Ex.HasParam('NAME'));
+    TAssert.AssertTrue('The snapshot must have QTY', Ex.HasParam('QTY'));
+    TAssert.AssertTrue('The snapshot must have PRICE', Ex.HasParam('PRICE'));
+    TAssert.AssertEquals('Pen', Ex.AsString('NAME'));
+    TAssert.AssertEquals(10, Ex.AsInteger('QTY'));
+    TAssert.AssertEquals('The price must be preserved', Currency(2.50), Ex.AsCurrency('PRICE'));
   finally
     F.Free;
   end;
@@ -562,8 +562,8 @@ begin
   F := TMockDBFactory.Create;
   try
     L := F.SqlLoader;
-    TAssert.AssertTrue('SqlLoader não deve retornar nil', Assigned(L));
-    TAssert.AssertTrue('SqlLoader deve ser TMockSQLLoader', L is TMockSQLLoader);
+    TAssert.AssertTrue('SqlLoader must not return nil', Assigned(L));
+    TAssert.AssertTrue('SqlLoader must be a TMockSQLLoader', L is TMockSQLLoader);
   finally
     F.Free;
   end;
@@ -575,7 +575,7 @@ var
 begin
   F := TMockDBFactory.Create;
   try
-    TAssert.AssertTrue('TestConnection no mock deve retornar True', F.TestConnection(nil));
+    TAssert.AssertTrue('TestConnection on the mock must return True', F.TestConnection(nil));
   finally
     F.Free;
   end;
@@ -590,9 +590,9 @@ begin
   F := TMockDBFactory.Create;
   try
     Scope := F.GetPool.AcquireQuery(Q);
-    TAssert.AssertTrue('AcquireQuery deve retornar IQuery', Assigned(Q));
-    TAssert.AssertTrue('AcquireQuery deve retornar IScopeTransaction', Assigned(Scope));
-    TAssert.AssertTrue('IQuery.Params não deve ser nil', Assigned(Q.Params));
+    TAssert.AssertTrue('AcquireQuery must return an IQuery', Assigned(Q));
+    TAssert.AssertTrue('AcquireQuery must return an IScopeTransaction', Assigned(Scope));
+    TAssert.AssertTrue('IQuery.Params must not be nil', Assigned(Q.Params));
   finally
     F.Free;
   end;

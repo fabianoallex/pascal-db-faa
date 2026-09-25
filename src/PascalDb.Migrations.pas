@@ -2,16 +2,16 @@
 
 {$I pascaldb.inc}
 
-{ Motor de migrations versionadas (TDBMigrationEngine): aplica, em ordem, os
-  scripts de uma lista de TMigrationItem ainda não registrados na tabela
-  SCHEMA_MIGRATIONS, e emite eventos de progresso (TMigrationEventProc).
+{ Versioned migrations engine (TDBMigrationEngine): applies, in order, the
+  scripts from a list of TMigrationItem not yet recorded in the
+  SCHEMA_MIGRATIONS table, and emits progress events (TMigrationEventProc).
 
-  Padrão append-only: script publicado nunca é alterado; mudança nova é
-  sempre um script novo, adicionado ao final da lista, para manter a ordem
-  cronológica.
+  Append-only pattern: a published script is never changed; a new change is
+  always a new script, added at the end of the list, to keep chronological
+  order.
 
-  Primeira migration: o motor NÃO cria SCHEMA_MIGRATIONS sozinho. O script
-  MIG.0001 do projeto cria a tabela com esta estrutura mínima:
+  First migration: the engine does NOT create SCHEMA_MIGRATIONS itself. The
+  project's MIG.0001 script creates the table with this minimal structure:
 
     -- Firebird:
     CREATE TABLE SCHEMA_MIGRATIONS (
@@ -27,24 +27,25 @@
       CONSTRAINT pk_schema_migrations PRIMARY KEY (version)
     );
 
-  Baseline (squashing): consolide scripts antigos num baseline quando o volume
-  deixar o deploy lento ou numa versão major. Antes de remover os scripts
-  anteriores, garanta que nenhum banco em produção esteja abaixo da versão do
-  baseline.
+  Baseline (squashing): consolidate old scripts into a baseline when their
+  volume makes deploys slow, or at a major version. Before removing the
+  earlier scripts, make sure no production database is below the baseline
+  version.
 
-  IsDDL em cada TMigrationItem:
-  - False (padrão, DML): script + INSERT da versão na MESMA transação —
-    atomicidade completa. Para INSERT de seed, UPDATE/DELETE de dados.
-  - True (DDL): script em T1 (commit) e INSERT da versão numa T2 separada.
-    Para CREATE/ALTER/DROP, CREATE INDEX etc. Motivo: no Firebird, DDL faz
-    commit implícito da transação ativa; no PostgreSQL DDL é transacional, mas
-    duas transações são seguras nos dois bancos, então IsDDL=True é portável.
-  Esquecer IsDDL=True num script DDL provoca "Table unknown" no INSERT da
-  versão — o erro que motivou o flag.
+  IsDDL on each TMigrationItem:
+  - False (default, DML): script + version INSERT in the SAME transaction —
+    fully atomic. For seed INSERTs, data UPDATE/DELETE.
+  - True (DDL): script in T1 (commit), then the version INSERT in a separate
+    T2. For CREATE/ALTER/DROP, CREATE INDEX etc. Reason: in Firebird, DDL
+    implicitly commits the active transaction; in PostgreSQL DDL is
+    transactional, but two transactions are safe on both databases, so
+    IsDDL=True is portable.
+  Forgetting IsDDL=True on a DDL script causes "Table unknown" on the version
+  INSERT — the error that motivated the flag.
 
-  Sem AOnEvent, os eventos viram uma linha de texto via SafeWriteln
-  (PascalDb.SafeLog). O callback segue PASCALDB_FUNCREFS (pascaldb.inc):
-  closure ou método no Delphi, método no FPC 3.2.2. }
+  Without AOnEvent, events become a line of text through SafeWriteln
+  (PascalDb.SafeLog). The callback follows PASCALDB_FUNCREFS (pascaldb.inc):
+  closure or method in Delphi, method in FPC 3.2.2. }
 
 interface
 
@@ -64,31 +65,31 @@ type
     IsDDL: Boolean;
   end;
 
-  // Cada etapa do Execute dispara um TMigrationEvent — o engine não formata
-  // texto nem decide destino de log; o chamador tem os dados estruturados
-  // da migration em andamento e escolhe como/onde registrar (console,
-  // Common.FileLog, métricas, etc.).
+  // Each step of Execute fires a TMigrationEvent — the engine neither formats
+  // text nor chooses a log destination; the caller gets structured data about
+  // the migration in progress and decides how/where to record it (console,
+  // log file, metrics, etc.).
   TMigrationEventKind = (
-    mekCheck,      // início do Execute: SchemaVersion = versão antes de aplicar qualquer coisa
-    mekApplying,   // uma migration pendente está prestes a rodar
-    mekApplied,    // a migration rodou e a versão já foi registrada
-    mekFailed,     // a migration falhou (ErrorMessage preenchido); Execute vai propagar a exceção em seguida
-    mekCompleted   // fim do Execute: AppliedCount e SchemaVersion refletem o resultado final
+    mekCheck,      // start of Execute: SchemaVersion = version before applying anything
+    mekApplying,   // a pending migration is about to run
+    mekApplied,    // the migration ran and its version has been recorded
+    mekFailed,     // the migration failed (ErrorMessage set); Execute re-raises the exception next
+    mekCompleted   // end of Execute: AppliedCount and SchemaVersion reflect the final result
   );
 
   TMigrationEvent = record
     Kind: TMigrationEventKind;
-    Version: Integer;        // versão da migration em processamento (mekApplying/mekApplied/mekFailed); 0 nos demais
-    ScriptName: string;      // nome do script (mekApplying/mekApplied/mekFailed); '' nos demais
-    IsDDL: Boolean;          // TMigrationItem.IsDDL da migration em processamento
-    SchemaVersion: Integer;  // versão do schema: baseline em mekCheck, versão final em mekCompleted
-    AppliedCount: Integer;   // quantas migrations já foram aplicadas nesta execução (mekCompleted)
-    ErrorMessage: string;    // mensagem da exceção (mekFailed)
+    Version: Integer;        // version of the migration being processed (mekApplying/mekApplied/mekFailed); 0 otherwise
+    ScriptName: string;      // script name (mekApplying/mekApplied/mekFailed); '' otherwise
+    IsDDL: Boolean;          // TMigrationItem.IsDDL of the migration being processed
+    SchemaVersion: Integer;  // schema version: baseline on mekCheck, final version on mekCompleted
+    AppliedCount: Integer;   // how many migrations were applied in this run (mekCompleted)
+    ErrorMessage: string;    // exception message (mekFailed)
   end;
 
-  // Ver PASCALDB_FUNCREFS em pascaldb.inc: "reference to" no Delphi (aceita
-  // closure e metodo), "of object" no FPC 3.2.2 — passar um metodo compila
-  // nos dois.
+  // See PASCALDB_FUNCREFS in pascaldb.inc: "reference to" in Delphi (accepts
+  // a closure or a method), "of object" in FPC 3.2.2 — passing a method
+  // compiles on both.
   TMigrationEventProc = {$IFDEF PASCALDB_FUNCREFS}reference to procedure(const AEvent: TMigrationEvent)
     {$ELSE}procedure(const AEvent: TMigrationEvent) of object{$ENDIF};
 
@@ -106,24 +107,25 @@ type
     procedure InsertVersionRecord(AVersion: Integer; AMigDialect: IMigrationDialect;
       ATransaction: ITransaction = nil);
   public
-    // AOnEvent é opcional — sem ele, os eventos viram uma linha de texto no
-    // console via SafeWriteln (mesmo fallback de TLoggerMiddleware.New).
-    // Passe um callback para acessar os dados da migration em andamento e
-    // registrá-los do jeito que convier:
+    // AOnEvent is optional — without it, events become a line of text on
+    // the console through SafeWriteln. Pass a callback to get the data of
+    // the migration in progress and record it however suits you:
     //
     //   TDBMigrationEngine.Create(LFactory,
     //     procedure(const AEvent: TMigrationEvent)
     //     begin
     //       case AEvent.Kind of
-    //         mekApplying: FileLog('migrations', 'Aplicando %d (%s)', [AEvent.Version, AEvent.ScriptName]);
-    //         mekFailed:   FileLog('migrations', 'Falhou %d: %s', [AEvent.Version, AEvent.ErrorMessage]);
+    //         mekApplying: MyLog('Applying %d (%s)', [AEvent.Version, AEvent.ScriptName]);
+    //         mekFailed:   MyLog('Failed %d: %s', [AEvent.Version, AEvent.ErrorMessage]);
     //       end;
     //     end);
+    //
+    // (A closure like this is Delphi-only; on FPC 3.2.2 pass a method.)
     constructor Create(AFactory: IDBFactory; AOnEvent: TMigrationEventProc = nil);
-    // Versão atual do schema (última migration aplicada). Útil no startup da
-    // aplicação para logar/expor o estado do banco antes de decidir se roda
-    // Execute — resolve o dialeto e consulta SCHEMA_MIGRATIONS diretamente,
-    // sem depender de uma chamada prévia a Execute.
+    // Current schema version (last applied migration). Useful at application
+    // startup to log/expose the database state before deciding whether to
+    // run Execute — it resolves the dialect and queries SCHEMA_MIGRATIONS
+    // directly, without needing a prior call to Execute.
     function CurrentVersion: Integer;
     procedure Execute(const AMigrations: array of TMigrationItem);
   end;
@@ -145,19 +147,19 @@ function TDBMigrationEngine.DescribeEvent(const AEvent: TMigrationEvent): string
 begin
   case AEvent.Kind of
     mekCheck:
-      Result := Format('Verificando migrations. Versão atual: %d', [AEvent.SchemaVersion]);
+      Result := Format('Checking migrations. Current version: %d', [AEvent.SchemaVersion]);
     mekApplying:
-      Result := Format('Aplicando migration %d (%s)...', [AEvent.Version, AEvent.ScriptName]);
+      Result := Format('Applying migration %d (%s)...', [AEvent.Version, AEvent.ScriptName]);
     mekApplied:
-      Result := Format('Migration %d (%s) aplicada com sucesso.', [AEvent.Version, AEvent.ScriptName]);
+      Result := Format('Migration %d (%s) applied successfully.', [AEvent.Version, AEvent.ScriptName]);
     mekFailed:
-      Result := Format('Falha ao aplicar migration %d (%s): %s',
+      Result := Format('Failed to apply migration %d (%s): %s',
         [AEvent.Version, AEvent.ScriptName, AEvent.ErrorMessage]);
     mekCompleted:
       if AEvent.AppliedCount = 0 then
-        Result := Format('Nenhuma migration pendente. Versão atual: %d', [AEvent.SchemaVersion])
+        Result := Format('No pending migrations. Current version: %d', [AEvent.SchemaVersion])
       else
-        Result := Format('Migrations concluídas: %d aplicada(s). Versão final: %d',
+        Result := Format('Migrations finished: %d applied. Final version: %d',
           [AEvent.AppliedCount, AEvent.SchemaVersion]);
   else
     Result := '';
@@ -186,10 +188,10 @@ begin
   try
     if not Supports(LConn.GetSQLDialect, IMigrationDialect, Result) then
       raise Exception.Create(
-        'O dialeto configurado não implementa IMigrationDialect. ' +
-        'Verifique se TFirebirdDialect ou TPostgreSQLDialect está em uso.');
+        'The configured dialect does not implement IMigrationDialect. ' +
+        'Check that TFirebirdDialect or TPostgreSQLDialect is in use.');
   finally
-    LConn := nil; // devolve ao pool
+    LConn := nil; // returns it to the pool
   end;
 end;
 
@@ -200,7 +202,7 @@ var
   LResult: IQueryResult;
   LTableExists: Boolean;
 begin
-  // Verifica existência da tabela de controle
+  // Check that the control table exists
   LScope := FFactory.GetPool.AcquireQuery(LQuery);
   LScope.StartTransaction;
   try
@@ -219,7 +221,7 @@ begin
     Exit;
   end;
 
-  // Lê a versão atual
+  // Read the current version
   LScope := FFactory.GetPool.AcquireQuery(LQuery);
   LScope.StartTransaction;
   try
@@ -247,7 +249,7 @@ begin
       AMigration.ParamReplaceProc(LScript);
 
     if Trim(LScript.Text) = '' then
-      raise Exception.CreateFmt('Script vazio: %s', [AMigration.ScriptName]);
+      raise Exception.CreateFmt('Empty script: %s', [AMigration.ScriptName]);
 
     LSqlScript := FFactory.CreateSqlScript(ATransaction.GetConnection, ATransaction);
     LSqlScript.Script := LScript;
@@ -265,8 +267,8 @@ var
 begin
   if Assigned(ATransaction) then
   begin
-    // DML: INSERT na mesma transação do script para garantir atomicidade.
-    // Usa CreateQuery diretamente para não interferir com o IScopeTransaction do chamador.
+    // DML: INSERT in the script's own transaction to guarantee atomicity.
+    // Uses CreateQuery directly so it doesn't interfere with the caller's IScopeTransaction.
     LQuery := FFactory.CreateQuery(ATransaction.GetConnection, ATransaction);
     LQuery.Sql := AMigDialect.GetMigrationInsertVersionSQL;
     LQuery.Params.Integers['VERSION'] := AVersion;
@@ -274,8 +276,8 @@ begin
   end
   else
   begin
-    // DDL: Firebird auto-commita DDL; precisamos de transação nova
-    // para enxergar a tabela criada pelo script anterior.
+    // DDL: Firebird auto-commits DDL; we need a new transaction to see the
+    // table created by the previous script.
     LScope := FFactory.GetPool.AcquireQuery(LQuery);
     LScope.StartTransaction;
     try
@@ -326,7 +328,7 @@ begin
     try
       if LMigration.IsDDL then
       begin
-        // T1: executa o DDL e commita (Firebird auto-commita; PostgreSQL commita aqui)
+        // T1: run the DDL and commit (Firebird auto-commits; PostgreSQL commits here)
         LScope := FFactory.GetPool.AcquireQuery(LQuery);
         LScope.StartTransaction;
         try
@@ -337,12 +339,12 @@ begin
           raise;
         end;
 
-        // T2: registra versão — transação nova enxerga a tabela criada acima
+        // T2: record the version — a new transaction sees the table created above
         InsertVersionRecord(LMigration.Version, LMigDialect, nil);
       end
       else
       begin
-        // DML: script + versão em uma única transação (atômica)
+        // DML: script + version in a single (atomic) transaction
         LScope := FFactory.GetPool.AcquireQuery(LQuery);
         LScope.StartTransaction;
         try

@@ -2,27 +2,27 @@
 
 {$I pascaldb.inc}
 
-{ Tipos opcionais e nuláveis usados em parâmetros, DTOs e leitura de colunas:
-  IOptXxx ("foi informado?" — HasValue), INullXxx ("é nulo?" — IsNull) e
-  IOptNullXxx (as duas coisas), para String, Integer, Int64, Single, Double,
-  Currency, TDateTime, Boolean e TGUID. Uma única classe por tipo
-  (TOptNullXxx) implementa as três interfaces.
+{ Optional and nullable types used in parameters, DTOs and column reads:
+  IOptXxx ("was it provided?" — HasValue), INullXxx ("is it null?" —
+  IsNull) and IOptNullXxx (both), for String, Integer, Int64, Single, Double,
+  Currency, TDateTime, Boolean and TGUID. A single class per type
+  (TOptNullXxx) implements all three interfaces.
 
-  TOptionals.Safe(X) nunca devolve nil: com X = nil devolve Undefined
-  (HasValue = False) para IOptXxx/IOptNullXxx e Null (IsNull = True) para
-  INullXxx. É a blindagem que permite ao código consumidor testar só
-  .HasValue/.IsNull, sem Assigned campo a campo.
+  TOptionals.Safe(X) never returns nil: with X = nil it returns Undefined
+  (HasValue = False) for IOptXxx/IOptNullXxx and Null (IsNull = True) for
+  INullXxx. That is the guard that lets consuming code test just
+  .HasValue/.IsNull, without Assigned checks field by field.
 
-  Instâncias são imutáveis e compartilhadas: Null/Undefined são singletons, e
-  From(Valor) reaproveita instâncias via cache global por tipo (faixa fixa
-  para inteiros pequenos + TClockCache para o resto), com lock próprio — por
-  isso From é seguro sob concorrência.
+  Instances are immutable and shared: Null/Undefined are singletons, and
+  From(Value) reuses instances through a global per-type cache (a fixed range
+  for small integers + TClockCache for the rest), with its own lock — which
+  is why From is safe under concurrency.
 
-  Dual-compiler: os comparadores das chaves de cache de Single/Double são
-  funções nomeadas (TEqualityComparer<T>.Construct não aceita closure no FPC
-  3.2.2, e a assinatura de IEqualityComparer<T> difere — constref/UInt32 no
-  FPC), e o GUID vazio é uma constante local (TGuid.Empty é helper do
-  Delphi). }
+  Dual-compiler: the cache-key comparers for Single/Double are named
+  functions (TEqualityComparer<T>.Construct doesn't accept a closure on FPC
+  3.2.2, and the IEqualityComparer<T> signature differs — constref/UInt32 on
+  FPC), and the empty GUID is a local constant (TGuid.Empty is a Delphi
+  helper). }
 
 interface
 
@@ -525,18 +525,18 @@ type
 implementation
 
 const
-  // TGuid.Empty e' do record helper TGuidHelper do Delphi, que nao existe
-  // no FPC 3.2.2 — constante tipada funciona nos dois.
+  // TGuid.Empty comes from Delphi's TGuidHelper record helper, which doesn't
+  // exist in FPC 3.2.2 — a typed constant works on both.
   EMPTY_GUID: TGUID = '{00000000-0000-0000-0000-000000000000}';
 
-{ Comparadores das chaves de cache de TOptNullSingle/TOptNullDouble.
+{ Comparers for the TOptNullSingle/TOptNullDouble cache keys.
 
-  Funcoes nomeadas em vez de closures: TEqualityComparer<T>.Construct aceita
-  "reference to function" no Delphi, mas no FPC 3.2.2 so aceita ponteiro de
-  funcao comum ou "of object" (nao ha funcoes anonimas no compilador estavel).
-  Uma funcao nomeada e' aceita pelos dois. A assinatura tambem diverge: o
-  rtl-generics do FPC declara IEqualityComparer<T> com "constref" e hash
-  UInt32; o Delphi usa "const" e hash Integer. }
+  Named functions instead of closures: TEqualityComparer<T>.Construct accepts
+  "reference to function" in Delphi, but FPC 3.2.2 only accepts a plain
+  function pointer or "of object" (there are no anonymous functions in the
+  stable compiler). A named function is accepted by both. The signature
+  differs too: FPC's rtl-generics declares IEqualityComparer<T> with
+  "constref" and a UInt32 hash; Delphi uses "const" and an Integer hash. }
 
 function SingleKeyEquals({$IFDEF FPC}constref{$ELSE}const{$ENDIF} L, R: TOptNullSingle.TCacheKey): Boolean;
 begin
@@ -1229,7 +1229,7 @@ var
 begin
   OnlyDate := Trunc(AValue);
 
-  // estratégia de cache separadas para apenas data ou data e hora
+  // separate cache strategies for date-only and date-and-time values
   if OnlyDate = AValue then
     Result := GetFromCache(FGlobalCacheDate, FLockCacheDate)
   else

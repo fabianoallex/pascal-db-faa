@@ -2,16 +2,16 @@
 
 {$I pascaldb.inc}
 
-{ Primitivas de concorrência compartilhadas entre Delphi e Free Pascal:
-  operações atômicas (PdbAtomicXxx) e milissegundos monotônicos (PdbTickMs).
+{ Concurrency primitives shared between Delphi and Free Pascal: atomic
+  operations (PdbAtomicXxx) and monotonic milliseconds (PdbTickMs).
 
-  A lib não usa TInterlocked nem TStopwatch porque nenhum dos dois existe no
-  FPC. Em vez disso, wrappers finos sobre os intrinsics de cada compilador
-  (AtomicXxx no Delphi, InterLockedXxx no FPC) — mesmo padrão de
-  Redis.Threading/AMQP.Threading nas libs irmãs.
+  The library doesn't use TInterlocked or TStopwatch because neither exists
+  in FPC. Instead, thin wrappers over each compiler's intrinsics (AtomicXxx in
+  Delphi, InterLockedXxx in FPC) — same pattern as Redis.Threading and
+  AMQP.Threading in the sibling libraries.
 
-  Os de 64 bits importam no Win32/Linux-32: um load/store cru de 64 bits pode
-  ser "torn" (lido pela metade enquanto outra thread escreve). }
+  The 64-bit ones matter on Win32/Linux-32: a raw 64-bit load/store can be
+  "torn" (read halfway while another thread writes it). }
 
 interface
 
@@ -20,9 +20,9 @@ function PdbAtomicDec(var ATarget: Integer): Integer;
 function PdbAtomicInc64(var ATarget: Int64): Int64;
 function PdbAtomicRead64(var ATarget: Int64): Int64;
 
-/// Milissegundos monotonicos (GetTickCount64), para medir duracao sem
-/// depender de relogio de parede. TStopwatch (System.Diagnostics) e'
-/// exclusivo do Delphi.
+/// Monotonic milliseconds (GetTickCount64), for measuring durations without
+/// depending on the wall clock. TStopwatch (System.Diagnostics) is
+/// Delphi-only.
 function PdbTickMs: UInt64;
 
 implementation
