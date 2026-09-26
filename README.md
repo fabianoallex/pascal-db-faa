@@ -23,6 +23,35 @@ transactions and savepoints, scripts, parameter semantics, TDataSet-based querie
 for Firebird, PostgreSQL and SQLite.
 Any other driver plugs in by implementing `IDBComponentProvider`.
 
+## A quick look
+
+```pascal
+LScope := LFactory.GetPool.AcquireQuery(LQuery);   // pooled connection + its transaction
+LScope.StartTransaction;
+try
+  LQuery.Sql := LFactory.SqlLoader['CITY.BY_STATE'].SQL;   // SQL by key, one version per database
+  LQuery.Params.Strings['STATE'] := 'SP';
+  LResult := LQuery.Open;
+  while not LResult.Eof do
+  begin
+    Writeln(LResult.Strings['NAME']);
+    LResult.Next;
+  end;
+  LScope.Commit;
+except
+  LScope.Rollback;
+  raise;
+end;  // the connection goes back to the pool when LQuery and LScope are released
+```
+
+## Documentation
+
+- [**Guides**](docs/README.md): getting started, SQL by key and templates, optional and
+  nullable values, migrations, testing with the mock, errors, the pool, adapters and databases.
+- [**Samples**](samples/README.md): five console programs, each one source for both compilers.
+
+No version has been tagged yet: the API isn't frozen.
+
 ## Status
 
 Extracted from the database core of `delphi-api-infra-faa` (commit `aa49f2b`). The core
@@ -36,7 +65,7 @@ Windows and Linux, and on FireDAC and Zeos with Delphi (Win32 and Win64). CI run
 suites on every push; the Delphi side is run in the IDE.
 
 FPC programs must run with a UTF-8 default code page and, on Unix, include `cwstring`
-— see "Runtime requirements for FPC applications" in `CLAUDE.md`.
+— see [what a Free Pascal program must do](docs/adapters.md#what-a-free-pascal-program-must-do).
 
 ## Layout
 
@@ -52,6 +81,7 @@ tests/Integration/fpc-zeos/  FPCUnit runner on Zeos (same mirror)
 adapters/sqldb/         SQLdb adapter (package pascal_db_faa_sqldb.lpk)
 adapters/firedac/       FireDAC adapter (Delphi)
 adapters/zeos/          Zeos adapter (both; package pascal_db_faa_zeos.lpk)
+docs/                   usage guides (start at docs/README.md)
 samples/                console samples, one source for both compilers (see samples/README.md)
 tools/                  gen_fpc_mirror.py, build_sql_res.py, test_*.sh, ci-test.sh
 PascalDb.groupproj      Delphi project group

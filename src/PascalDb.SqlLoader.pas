@@ -12,8 +12,9 @@
     same tag may appear in several places and one call decides all of them;
   - ${LITERAL} — replaced by ReplaceLiteral (ApplyOperator/ApplyFilter are
     shortcuts for the _OP suffix);
-  - [COMMENTS {] ... [} COMMENTS] and unprocessed tags are removed when .SQL
-    is read.
+  - [COMMENTS {] ... [} COMMENTS] blocks are removed when .SQL is read; a
+    tag nobody processed loses only its markers, and its content STAYS in the
+    SQL (a forgotten ProcessTag leaves, e.g., a :PARAM nobody binds).
 
   The text is returned exactly as stored (original line endings, no trailing
   line break added); a leading UTF-8 BOM is dropped.

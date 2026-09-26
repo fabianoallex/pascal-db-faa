@@ -206,7 +206,8 @@ The FPCUnit runner does both.
 ## Adapters
 
 The core knows no driver. Everything that isn't driver-specific lives in the core, so an
-adapter only wraps its driver's connection, transaction and query (~250 lines):
+adapter only wraps its driver's connection, transaction and query (500-600 lines each, most of
+them the driver's quirks):
 
 - `PascalDb.Adapter.Base` (no Data.DB): `TDatabaseConfig`, `TTransactionBase` (routes every
   native failure through `BuildDatabaseException`), `TScopeTransaction` (savepoints for nested

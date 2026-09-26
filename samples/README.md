@@ -2,7 +2,8 @@
 
 Console programs showing how to use pascal-db-faa. Each sample is **one source file for
 both compilers**: open the `.dproj` in Delphi or the `.lpi` in Lazarus (they're also in
-`PascalDb.groupproj` and `PascalDb.lpg`).
+`PascalDb.groupproj` and `PascalDb.lpg`). The [guides](../docs/README.md) explain the
+concepts each one shows.
 
 | Sample | Shows | Needs a database |
 |---|---|---|

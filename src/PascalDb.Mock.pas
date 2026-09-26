@@ -11,49 +11,48 @@
     3. Exercise the repository/service.
     4. Inspect the executions with LastExecution / ExecutionCount.
 
-  Example — testing TCityRepository.Insert:
+  Lifetime: TMockDBFactory is reference-counted (TInterfacedObject), and a
+  repository keeps the factory it receives as an IDBFactory. Hold the mock in
+  an IDBFactory variable as well and never call Free: with only a class
+  variable, releasing the repository drops the last reference and frees the
+  mock, so the next LastExecution reads freed memory.
+
+  Example — testing TCityRepository.Insert (samples/common):
 
     var
-      LFactory: TMockDBFactory;
-      LRepo: ICityRepository;
-      LDto: ICityInsertDTO;
+      LMock: TMockDBFactory;
+      LFactory: IDBFactory;  // keeps the mock alive
+      LRepo: TCityRepository;
     begin
-      LFactory := TMockDBFactory.Create;
+      LMock := TMockDBFactory.Create;
+      LFactory := LMock;
+      LRepo := TCityRepository.Create(LFactory);
       try
-        LFactory.AddResult('CITY.INSERT', TMockQueryResult.Empty);
+        LRepo.Insert(City('3550308', 'São Paulo', 'sp'));
 
-        LRepo := TCityRepository.Create(LFactory);
-        LDto  := TCityInsertDTO.Create;
-        LDto.Code  := '3550308';
-        LDto.Name  := 'São Paulo';
-        LDto.State := 'SP';
-        LRepo.Insert(LDto);
-        LRepo := nil;
-
-        Assert.AreEqual('3550308',   LFactory.LastExecution('CITY.INSERT').AsString('CODE'));
-        Assert.AreEqual('São Paulo', LFactory.LastExecution('CITY.INSERT').AsString('NAME'));
+        Assert.AreEqual('3550308',   LMock.LastExecution('CITY.INSERT').AsString('CODE'));
+        Assert.AreEqual('São Paulo', LMock.LastExecution('CITY.INSERT').AsString('NAME'));
+        Assert.AreEqual('SP',        LMock.LastExecution('CITY.INSERT').AsString('STATE'));
       finally
-        LFactory.Free;
+        LRepo.Free;
       end;
-    end;
+    end;  // LFactory goes out of scope: the mock is freed here
 
-  Example — testing TCityRepository.Find:
+  Example — testing TCityRepository.FindByState:
 
-    LFactory.AddResult('CITY.FIND_COUNT',
-      TMockQueryResult.SingleRow(['TOTAL'], [2]));
-    LFactory.AddResult('CITY.FIND',
+    LMock.AddResult('CITY.BY_STATE',
       TMockQueryResult.MultiRows(
         ['CODE', 'NAME', 'STATE'],
-        [TArray<Variant>.Create('3550308', 'São Paulo', 'SP'),
-         TArray<Variant>.Create('3304557', 'Rio de Janeiro', 'RJ')]));
+        [TArray<Variant>.Create('3509502', 'Campinas', 'SP'),
+         TArray<Variant>.Create('3550308', 'São Paulo', 'SP')]));
 
-    LRepo   := TCityRepository.Create(LFactory);
-    LResult := LRepo.Find(nil);
-    Assert.AreEqual(2, LResult.Meta.Total);
-    Assert.AreEqual(2, Length(LResult.Items));
+    LCities := LRepo.FindByState('SP');
+    Assert.AreEqual(2, Length(LCities));
 
-  The examples use DUnitX's Assert; the mock itself doesn't depend on any
-  test framework. }
+  AddResult is needed for every key the code under test Opens (Open raises
+  when none was registered); ExecSql needs none. The examples use DUnitX's Assert; the mock itself
+  doesn't depend on any test framework (samples/01-mock-repository checks
+  with plain code). }
 
 interface
 
