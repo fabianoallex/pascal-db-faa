@@ -81,6 +81,10 @@ type
     [Test] procedure SqlLoader_ReturnsMockLoader;
     [Test] procedure TestConnection_ReturnsTrue;
     [Test] procedure AcquireQuery_ReturnsQuery;
+    [Test] procedure Open_SameKeyAgain_ReadsFromFirstRow;
+    [Test] procedure AddFailure_ExecSql_RaisesAndRecords;
+    [Test] procedure AddFailure_Open_Raises;
+    [Test] procedure AddFailure_IsUsedOnce_OtherKeysUnaffected;
   end;
 
 implementation
@@ -592,6 +596,119 @@ begin
     TAssert.AssertTrue('AcquireQuery must return an IQuery', Assigned(Q));
     TAssert.AssertTrue('AcquireQuery must return an IScopeTransaction', Assigned(Scope));
     TAssert.AssertTrue('IQuery.Params must not be nil', Assigned(Q.Params));
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TMockDBFactoryTests.Open_SameKeyAgain_ReadsFromFirstRow;
+var
+  F: TMockDBFactory;
+  Q: IQuery;
+  Scope: IScopeTransaction;
+  R: IQueryResult;
+begin
+  F := TMockDBFactory.Create;
+  try
+    F.AddResult('CITY.LIST', TMockQueryResult.MultiRows(['NAME'],
+      [TArray<Variant>.Create('Curitiba'), TArray<Variant>.Create('Londrina')]));
+    Scope := F.GetPool.AcquireQuery(Q);
+    Q.SetSql('CITY.LIST');
+    R := Q.Open;
+    while not R.Eof do
+      R.Next;
+    // A second Open of the same key, as a repository called twice does.
+    R := Q.Open;
+    TAssert.AssertFalse('A new Open must not start at Eof', R.Eof);
+    TAssert.AssertEquals('A new Open must start at the first row', 'Curitiba', R.GetAsString('NAME'));
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TMockDBFactoryTests.AddFailure_ExecSql_RaisesAndRecords;
+var
+  F: TMockDBFactory;
+  Q: IQuery;
+  Scope: IScopeTransaction;
+  LRaised: Boolean;
+begin
+  F := TMockDBFactory.Create;
+  try
+    F.AddFailure('CITY.INSERT', EConvertError, 'unique constraint violated');
+    Scope := F.GetPool.AcquireQuery(Q);
+    Q.SetSql('CITY.INSERT');
+    Q.Params.SetString('NAME', 'Curitiba');
+    LRaised := False;
+    try
+      Q.ExecSql;
+    except
+      on E: EConvertError do
+      begin
+        LRaised := True;
+        TAssert.AssertEquals('unique constraint violated', E.Message);
+      end;
+    end;
+    TAssert.AssertTrue('ExecSql must raise the registered exception class', LRaised);
+    TAssert.AssertEquals('The failed execution must still be recorded', 1, F.ExecutionCount('CITY.INSERT'));
+    TAssert.AssertEquals('Curitiba', F.LastExecution('CITY.INSERT').AsString('NAME'));
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TMockDBFactoryTests.AddFailure_Open_Raises;
+var
+  F: TMockDBFactory;
+  Q: IQuery;
+  Scope: IScopeTransaction;
+  LRaised: Boolean;
+begin
+  F := TMockDBFactory.Create;
+  try
+    F.AddResult('CITY.FIND', TMockQueryResult.SingleRow(['TOTAL'], [5]));
+    F.AddFailure('CITY.FIND', EConvertError, 'connection reset');
+    Scope := F.GetPool.AcquireQuery(Q);
+    Q.SetSql('CITY.FIND');
+    LRaised := False;
+    try
+      Q.Open;
+    except
+      on EConvertError do
+        LRaised := True;
+    end;
+    TAssert.AssertTrue('Open must raise the registered failure before returning the result', LRaised);
+    TAssert.AssertEquals('The next Open returns the result again', 5, Q.Open.GetAsInteger('TOTAL'));
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TMockDBFactoryTests.AddFailure_IsUsedOnce_OtherKeysUnaffected;
+var
+  F: TMockDBFactory;
+  Q: IQuery;
+  Scope: IScopeTransaction;
+  LFailures: Integer;
+  I: Integer;
+begin
+  F := TMockDBFactory.Create;
+  try
+    F.AddFailure('CITY.INSERT', EConvertError, 'first');
+    Scope := F.GetPool.AcquireQuery(Q);
+    Q.SetSql('CITY.DELETE');
+    Q.ExecSql; // another key: must not consume or raise the failure
+    LFailures := 0;
+    Q.SetSql('CITY.INSERT');
+    for I := 1 to 3 do
+      try
+        Q.ExecSql;
+      except
+        on EConvertError do
+          Inc(LFailures);
+      end;
+    TAssert.AssertEquals('A failure is used by exactly one execution', 1, LFailures);
+    TAssert.AssertEquals(3, F.ExecutionCount('CITY.INSERT'));
   finally
     F.Free;
   end;

@@ -90,12 +90,40 @@ LMock.AddResult('CITY.NONE', TMockQueryResult.Empty);
 ```
 
 The result supports the same getters as a real one, `Nullable...` included (a `Null` variant
-reads as NULL).
+reads as NULL). Every `Open` of a key reads its result from the first row, so a method called
+twice sees the same rows twice. Register a different result before the second call when the
+test needs one.
+
+## Simulating a database error
+
+`AddFailure(Key, ExceptionClass, Message)` makes the **next** execution of that key, `Open` or
+`ExecSql`, raise `ExceptionClass.Create(Message)`, as a database rejecting the statement would.
+The execution is still recorded, and each `AddFailure` is used once (call it again for more
+failures, used in order). The exception class stands in for the driver's, which the code under
+test shouldn't depend on anyway.
+
+A test for the duplicate-key pattern in [guide 6](errors.md#turning-a-duplicate-key-into-your-own-exception):
+
+```pascal
+LMock.AddFailure('PRODUCT.INSERT', EDatabaseError, 'UNIQUE constraint failed');
+LMock.AddResult('PRODUCT.EXISTS', TMockQueryResult.SingleRow(['TOTAL'], [1]));
+try
+  LRepo.Insert(Product('CAF-001', 'Café torrado', 32.90));
+  Check(False, 'EProductAlreadyExists expected');
+except
+  on EProductAlreadyExists do
+    Check(True, 'a duplicate code becomes EProductAlreadyExists');
+end;
+Check(LMock.ExecutionCount('PRODUCT.INSERT') = 1, 'the INSERT was tried once');
+```
+
+(`EDatabaseError` is in the `DB` unit; any exception class works.)
 
 ## What the mock doesn't do
 
 - It runs no SQL: template tags, parameter names that don't exist in the statement and SQL
-  errors all go unnoticed. The integration tests on a real database cover those.
+  errors all go unnoticed. The integration tests on a real database cover those. SQL errors
+  can be simulated with `AddFailure`.
 - Transactions only pretend: nothing is rolled back.
 - `CreateSqlScript` isn't supported (it raises), so code that runs migrations isn't testable
   with it.

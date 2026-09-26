@@ -7,7 +7,10 @@
 
   Usage flow:
     1. Create a TMockDBFactory.
-    2. Register responses with AddResult('SQL.KEY', TMockQueryResult.Xyz).
+    2. Register responses with AddResult('SQL.KEY', TMockQueryResult.Xyz)
+       (every Open of a key reads its result from the first row), and
+       database errors with AddFailure('SQL.KEY', EClass, 'message') (the next
+       execution of the key raises it).
     3. Exercise the repository/service.
     4. Inspect the executions with LastExecution / ExecutionCount.
 
@@ -90,15 +93,24 @@ type
     property WasOpen: Boolean read FWasOpen;
   end;
 
+  // Internal: lets TMockQuery.Open put a registered result back on its first
+  // row, so every Open of a key reads the rows from the start, as a new query
+  // on a database would.
+  IMockRewindable = interface
+    ['{9BE5F64A-CC50-48C8-8D50-E41086FE25CC}']
+    procedure Rewind;
+  end;
+
   // IQueryResult built from controlled data.
   // Use the class functions to build the expected results before the test.
-  TMockQueryResult = class(TInterfacedObject, IQueryResult)
+  TMockQueryResult = class(TInterfacedObject, IQueryResult, IMockRewindable)
   private
     FColumns: TArray<string>;
     FRows: TArray<TArray<Variant>>;
     FCursor: Integer;
     function ColIndex(const AName: string): Integer;
     function CurrentVariant(const AName: string): Variant;
+    procedure Rewind;
   public
     constructor Create(const AColumns: TArray<string>; const ARows: TArray<TArray<Variant>>);
 
@@ -288,19 +300,39 @@ type
 
   // The mock's central factory. Configure the results before using the
   // repository; inspect the executions with LastExecution / ExecutionCount.
+  TMockFailure = record
+    Key: string;
+    ExceptionClass: ExceptClass;
+    Message: string;
+  end;
+
   TMockDBFactory = class(TInterfacedObject, IDBFactory)
   private
     FPool: IDBConnectionPool;
     FSqlLoader: TMockSQLLoader;
     FResults: TDictionary<string, IQueryResult>;
     FExecutions: TObjectList<TMockExecution>;
+    FFailures: TList<TMockFailure>;
   public
     constructor Create;
     destructor Destroy; override;
 
     // Registers the IQueryResult to return when ASqlKey is queried via Open.
+    // Every Open of the key reads it from the first row.
     // Pass nil or TMockQueryResult.Empty for calls that only use ExecSql.
     procedure AddResult(const ASqlKey: string; AResult: IQueryResult);
+
+    // Makes the NEXT execution of ASqlKey (Open or ExecSql) raise
+    // AExceptionClass.Create(AMessage), as a database rejecting the statement
+    // would (a constraint violation, say). The execution is still recorded
+    // (LastExecution/ExecutionCount), then the exception is raised. Each call
+    // is used once; call it again for more failures, which are used in order.
+    procedure AddFailure(const ASqlKey: string; AExceptionClass: ExceptClass;
+      const AMessage: string);
+
+    // Internal use: called by TMockQuery. Raises the pending failure for
+    // ASqlKey, if any.
+    procedure RaisePendingFailure(const ASqlKey: string);
 
     // Returns the last execution record for ASqlKey (Open or ExecSql), or nil.
     function LastExecution(const ASqlKey: string): TMockExecution;
@@ -574,6 +606,11 @@ end;
 procedure TMockQueryResult.Next;
 begin
   Inc(FCursor);
+end;
+
+procedure TMockQueryResult.Rewind;
+begin
+  FCursor := 0;
 end;
 
 function TMockQueryResult.FieldCount: Integer;
@@ -1014,19 +1051,26 @@ function TMockQuery.GetConnection: IDBConnection; begin Result := nil; end;
 function TMockQuery.GetTransaction: ITransaction; begin Result := nil; end;
 
 function TMockQuery.Open: IQueryResult;
+var
+  LRewindable: IMockRewindable;
 begin
   FOwner.RecordExecution(FSql, FParams as TMockParams, True);
+  FOwner.RaisePendingFailure(FSql);
   Result := FOwner.GetResult(FSql);
   if not Assigned(Result) then
     raise Exception.CreateFmt(
       'TMockDBFactory: no result configured for "%s". ' +
       'Call AddResult(''%s'', ...) before exercising the repository.',
       [FSql, FSql]);
+  // The same registered result serves every Open of the key: start it over.
+  if Supports(Result, IMockRewindable, LRewindable) then
+    LRewindable.Rewind;
 end;
 
 procedure TMockQuery.ExecSql;
 begin
   FOwner.RecordExecution(FSql, FParams as TMockParams, False);
+  FOwner.RaisePendingFailure(FSql);
 end;
 
 { TMockScopeTransaction }
@@ -1113,6 +1157,7 @@ begin
   FSqlLoader  := TMockSQLLoader.Create;
   FResults    := TDictionary<string, IQueryResult>.Create;
   FExecutions := TObjectList<TMockExecution>.Create(True);
+  FFailures   := TList<TMockFailure>.Create;
 end;
 
 destructor TMockDBFactory.Destroy;
@@ -1120,12 +1165,38 @@ begin
   FSqlLoader.Free;
   FResults.Free;
   FExecutions.Free;
+  FFailures.Free;
   inherited;
 end;
 
 procedure TMockDBFactory.AddResult(const ASqlKey: string; AResult: IQueryResult);
 begin
   FResults.AddOrSetValue(AnsiUpperCase(ASqlKey), AResult);
+end;
+
+procedure TMockDBFactory.AddFailure(const ASqlKey: string; AExceptionClass: ExceptClass;
+  const AMessage: string);
+var
+  LFailure: TMockFailure;
+begin
+  LFailure.Key := ASqlKey;
+  LFailure.ExceptionClass := AExceptionClass;
+  LFailure.Message := AMessage;
+  FFailures.Add(LFailure);
+end;
+
+procedure TMockDBFactory.RaisePendingFailure(const ASqlKey: string);
+var
+  I: Integer;
+  LFailure: TMockFailure;
+begin
+  for I := 0 to FFailures.Count - 1 do
+    if SameText(FFailures[I].Key, ASqlKey) then
+    begin
+      LFailure := FFailures[I];
+      FFailures.Delete(I);
+      raise LFailure.ExceptionClass.Create(LFailure.Message);
+    end;
 end;
 
 function TMockDBFactory.GetResult(const ASqlKey: string): IQueryResult;

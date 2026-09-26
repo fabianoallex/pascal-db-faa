@@ -76,6 +76,54 @@ In [sample 02](../samples/02-quickstart/Quickstart.dpr), a batch whose second in
 primary key raises the driver's exception and the rollback leaves none of the batch in the
 table.
 
+## Turning a duplicate key into your own exception
+
+A constraint violation arrives as the driver's exception, whose class and error code differ
+for every driver and database, so matching on them ties the repository to one driver. A
+portable way: let the database enforce the key, and when the `INSERT` fails, ask, in a new
+transaction, whether the key exists now.
+
+```pascal
+procedure TProductRepository.Insert(const AProduct: TProduct);
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+begin
+  try
+    LScope := FFactory.GetPool.AcquireQuery(LQuery);
+    LScope.StartTransaction;
+    try
+      LQuery.Sql := FFactory.SqlLoader['PRODUCT.INSERT'].SQL;
+      // ... bind the parameters ...
+      LQuery.ExecSql;
+      LScope.Commit;
+    except
+      LScope.Rollback;
+      raise;
+    end;
+  except
+    on E: Exception do
+    begin
+      LQuery := nil;  // give the connection back before Exists takes one
+      LScope := nil;
+      // Not EDatabaseUnavailableException: a lost connection is not a duplicate.
+      if not (E is EDatabaseUnavailableException) and Exists(AProduct.Code) then
+        raise EProductAlreadyExists.CreateFmt('Product %s already exists', [AProduct.Code]);
+      raise;
+    end;
+  end;
+end;
+```
+
+`Exists` is a plain `SELECT` by key in its own scope. Checking *before* the insert instead would
+leave a gap in which another connection inserts the same key; the database's constraint is what
+actually decides. Where every target database supports it, `INSERT ... ON CONFLICT DO NOTHING
+RETURNING ...` (PostgreSQL, SQLite) opened with `Open` answers in one statement, but Firebird has
+no `ON CONFLICT`.
+
+To test this without a database, make the mock fail the `INSERT` with `AddFailure` and answer
+the existence check with `AddResult` ([guide 5](testing-with-the-mock.md#simulating-a-database-error)).
+
 ## Pool timeouts
 
 `EPoolTimeoutException` means every connection stayed busy for the whole wait

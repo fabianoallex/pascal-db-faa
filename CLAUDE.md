@@ -496,3 +496,21 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     isolated. `LockingMode=Normal` is set from FireDAC's documentation, never tried with
     `Exclusive`. The Community Edition ships no source for the SQLite driver, so these came
     from measurement, not from reading the driver.
+26. **SQLdb reads a backslash as an escape when finding parameters, on the SQLite3 and PostgreSQL
+    connectors.** `... LIKE :A ESCAPE '\' AND PRICE >= :B AND CATEGORY = :C` gives a `TSQLQuery`
+    with one parameter (`A`): `\'` is taken as an escaped quote, the rest of the text as part of a
+    string literal, and `:B`/`:C` silently disappear, to fail later with `Parameter "B" not
+    found`. With `ESCAPE '!'` all three are found. Measured with FPC 3.2.2 on Linux, parameter
+    list only (no server needed): SQLite3 and PostgreSQL 1 of 3, Firebird 3 of 3. Found by an
+    agent writing a consumer program (a prefix search with escaped wildcards). Fix: use an
+    escape character other than a backslash (`docs/sql.md`). Not measured: FireDAC and Zeos.
+27. **On Linux, SQLdb's default client library names don't match what the runtime packages
+    install, for SQLite and Firebird.** Measured on Debian bookworm with only the runtime
+    packages (`libsqlite3-0`, `libpq5`, `libfbclient2`), FPC 3.2.2: SQLite3 looks for
+    `libsqlite3.so` (only the `-dev` package creates it) and fails with `Can not load SQLite
+    client library "libsqlite3.so"`; Firebird looks for `libfbclient.so.2.5.1`, `libgds.so` or
+    `libfbembed.so.2.5` and fails with bookworm's `libfbclient.so.2` (a 3.0 client); PostgreSQL
+    finds `libpq.so.5` by itself. With `ClientLibrary` set to `libsqlite3.so.0` /
+    `libfbclient.so.2` both load. The test scripts always pass the full path, which is why the
+    suites never showed it; three agents writing a consumer program all hit the SQLite one. Not
+    measured: Zeos's default names.

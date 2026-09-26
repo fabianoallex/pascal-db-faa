@@ -55,6 +55,14 @@ SQLite needs `sqlite3` on SQLdb and Zeos, while FireDAC links SQLite into the pr
   opens a SQLdb connection directly before the factory's first connection, the default library
   is loaded and the configured one then fails. Call `PdbSQLdbUseClientLibrary` before any such
   direct use. On FireDAC, `VendorLib` is applied once per process through the driver link.
+- **On Linux, give SQLdb the versioned file name for SQLite and Firebird.** The runtime packages
+  install versioned names (`libsqlite3.so.0`, `libfbclient.so.2`); the unversioned
+  `libsqlite3.so` that SQLdb looks for by default comes only with the `-dev` package, and its
+  default Firebird names are those of a 2.5 client. Without the setting, the first connection
+  fails with `Can not load SQLite client library "libsqlite3.so"` (or `Can not load default
+  Firebird clients`). Set `ClientLibrary=libsqlite3.so.0` or `ClientLibrary=libfbclient.so.2`;
+  PostgreSQL's `libpq.so.5` is found without it. Measured on Debian bookworm (gotcha 27); Zeos's
+  default names weren't measured.
 - **SQLite on Windows (SQLdb, Zeos):** the DLL must export the column-metadata functions, such
   as the official one from sqlite.org. Other builds (e.g. the one shipped with Python) make every
   query fail with an access violation at `$0` (gotcha 23 in [`CLAUDE.md`](../CLAUDE.md)).

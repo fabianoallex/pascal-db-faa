@@ -120,6 +120,25 @@ Three rules that aren't obvious from the syntax:
 - `TSQLResult` is a record whose operations change it and return it, so they chain. Applied
   to a variable (`LSql.ProcessTag(...)`), they change that variable.
 
+## Prefix searches and `LIKE ... ESCAPE`
+
+A prefix typed by a user can contain `%` or `_`, which `LIKE` treats as wildcards. Escape them
+in code and name the escape character in the SQL, **choosing one that isn't a backslash**:
+
+```sql
+[PREFIX {] AND DESCRIPTION LIKE :PREFIX ESCAPE '!' [} PREFIX]
+```
+
+```pascal
+// '100%' -> '100!%%': the typed % is literal, the final one is the wildcard
+LPattern := StringReplace(StringReplace(StringReplace(AText,
+  '!', '!!', [rfReplaceAll]), '%', '!%', [rfReplaceAll]), '_', '!_', [rfReplaceAll]) + '%';
+```
+
+With `ESCAPE '\'`, SQLdb's SQLite and PostgreSQL connectors read `\'` as an escaped quote while
+looking for parameters, and every parameter after it disappears without an error, until
+binding fails with `Parameter "..." not found` (gotcha 26 in [`CLAUDE.md`](../CLAUDE.md)).
+
 ## Next
 
 [Guide 3](optionals.md): the optional and nullable types that decide which blocks to keep and
