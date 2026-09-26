@@ -269,6 +269,16 @@ Package Manager under "zeos").
 
 - FPC warns "Function result does not seem to be set" on `TMockDBFactory.CreateSqlScript`.
   False positive: the method always raises (`ISqlScript` isn't supported by the mock).
+- **Rare failures with concurrent connections on Zeos + Firebird (Linux), cause unknown.** Sample
+  05 (worker threads, pool growing from 1 to 3) failed once in GitHub CI (run 36235419745): a
+  phase-1 worker got `EAccessViolation` while two connections were being created at the same
+  time; locally, the same sample once ended with 26 unfreed blocks. Probably related to the
+  earlier one-off in the Zeos + Firebird Docker run (missing-client message, then an AV at `$0`).
+  Not reproduced since: 80 more runs of the sample (60 with `--cpus=2`) and 200 rounds of a stress
+  program (concurrent connects, full worker cycle, 1-2 CPUs, a fresh process per round), all
+  clean. The contract suite is single-threaded, so it never exercised this. On a failure, the
+  sample now prints the backtrace (FPC) and `test_samples_docker.sh` prints heaptrc's report on
+  a leak; that is the evidence to start from.
 
 ---
 

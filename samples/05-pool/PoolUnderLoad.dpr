@@ -164,6 +164,9 @@ procedure TWorker.Execute;
 var
   LQuery: IQuery;
   LScope: IScopeTransaction;
+  {$IFDEF FPC}
+  I: Integer;
+  {$ENDIF}
 begin
   try
     // Waits (up to the pool's limit) when all connections are in use.
@@ -186,6 +189,14 @@ begin
     begin
       FOutcome := ocFailed;
       FError := E.ClassName + ': ' + E.Message;
+      {$IFDEF FPC}
+      // Where it happened (with line numbers when built with -gl): kept to
+      // diagnose a rare access violation seen once on Zeos + Firebird under
+      // this load (CLAUDE.md, "Known open items").
+      FError := FError + LineEnding + BackTraceStrFunc(ExceptAddr);
+      for I := 0 to ExceptFrameCount - 1 do
+        FError := FError + LineEnding + BackTraceStrFunc(ExceptFrames[I]);
+      {$ENDIF}
     end;
   end;
   // LQuery and LScope are released here: the connection goes back to the pool.
