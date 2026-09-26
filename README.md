@@ -20,7 +20,7 @@ A database access layer for **Delphi and Lazarus/FPC from the same source code**
 Drivers live in thin adapters on top of a shared, driver-agnostic base (configuration,
 transactions and savepoints, scripts, parameter semantics, TDataSet-based queries). Available:
 **SQLdb** (Lazarus/FPC), **FireDAC** (Delphi) and **Zeos** (ZeosLib 8, both compilers), each
-for Firebird and PostgreSQL.
+for Firebird, PostgreSQL and SQLite.
 Any other driver plugs in by implementing `IDBComponentProvider`.
 
 ## Status
@@ -31,8 +31,9 @@ of them (FastMM / heaptrc). The same integration contract suite passes on the SQ
 (Firebird 2.5 on Windows, Firebird 5 on Linux, PostgreSQL 17 on Windows and Linux), on the
 FireDAC adapter (Firebird 2.5, Delphi Win32; PostgreSQL 17, Delphi Win64) and on the Zeos
 adapter (Firebird 2.5, FPC Win64 and Delphi Win32/Win64; Firebird 5 on Linux; PostgreSQL 17,
-FPC and Delphi Win64 and FPC on Linux). CI runs the Linux FPC suites on every push; the Delphi
-side is run in the IDE.
+FPC and Delphi Win64 and FPC on Linux). On SQLite it passes on SQLdb and Zeos with FPC on
+Windows and Linux, and on FireDAC and Zeos with Delphi (Win32 and Win64). CI runs the Linux FPC
+suites on every push; the Delphi side is run in the IDE.
 
 FPC programs must run with a UTF-8 default code page and, on Unix, include `cwstring`
 — see "Runtime requirements for FPC applications" in `CLAUDE.md`.
@@ -61,12 +62,15 @@ PascalDb.lpg            Lazarus project group
 
 - FPC (Windows): `sh tools/test_fpc.sh`
 - FPC (Linux, via Docker): `sh tools/test_fpc_docker.sh`
-- Integration, Linux (Docker): `sh tools/test_integration_docker.sh` (Firebird 5) or
-  `ENGINE=postgresql sh tools/test_integration_docker.sh` (PostgreSQL 17); `ADAPTER=zeos`
+- Integration, Linux (Docker): `sh tools/test_integration_docker.sh` (Firebird 5),
+  `ENGINE=postgresql sh tools/test_integration_docker.sh` (PostgreSQL 17) or `ENGINE=sqlite`
+  (no server); `ADAPTER=zeos`
   (with `ZEOSDBO` set to the ZeosLib folder) runs it on the Zeos adapter
 - Everything CI runs, locally: `sh tools/ci-test.sh` (unit suite, then the integration suite and
-  the samples on both Linux adapters and both databases; downloads ZeosLib 8.0.0 when `ZEOSDBO` isn't set)
-- Integration, Windows (local Firebird, or PostgreSQL with `PASCALDB_IT_ENGINE=postgresql` — see
+  the samples on both Linux adapters and all three databases; downloads ZeosLib 8.0.0 when
+  `ZEOSDBO` isn't set)
+- Integration, Windows (local Firebird, PostgreSQL with `PASCALDB_IT_ENGINE=postgresql`, or
+  SQLite with `PASCALDB_IT_ENGINE=sqlite` — see
   `CLAUDE.md`): `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi`
   (SQLdb), `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos),
   `tests/Integration/PascalDb.IntegrationTests.dproj` (FireDAC) and

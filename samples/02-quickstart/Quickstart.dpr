@@ -10,9 +10,9 @@
   a failing batch roll back as a whole.
 
   The SQL lives in a TMemorySqlSource to keep the sample in one file; each
-  script is registered under the engine's SQL directory (PG or FB), so the
-  one statement that differs between PostgreSQL and Firebird (the CREATE
-  TABLE) has one version per database under the same key. A real program
+  script is registered under the engine's SQL directory (PG, FB or SQLITE), so the
+  one statement that differs between the databases (the CREATE TABLE) has
+  one version per database under the same key. A real program
   would usually embed .sql files as resources instead (TResourceSqlSource,
   the default; see tools/build_sql_res.py).
 
@@ -55,8 +55,11 @@ var
 begin
   LSource := TMemorySqlSource.Create;
   Result := LSource;
-  // PostgreSQL: the database encoding applies to every column.
+  // PostgreSQL: the database encoding applies to every column. SQLite: text
+  // is UTF-8.
   LSource.Add(SQL_DIR_POSTGRESQL, 'SCHEMA.CREATE',
+    'CREATE TABLE IF NOT EXISTS SAMPLE_CITIES ' + Format(TABLE_COLUMNS, ['']));
+  LSource.Add(SQL_DIR_SQLITE, 'SCHEMA.CREATE',
     'CREATE TABLE IF NOT EXISTS SAMPLE_CITIES ' + Format(TABLE_COLUMNS, ['']));
   // Firebird has no CREATE TABLE IF NOT EXISTS; RECREATE drops and creates.
   // Text columns declare UTF8 because a database's default character set
@@ -64,7 +67,7 @@ begin
   LSource.Add(SQL_DIR_FIREBIRD, 'SCHEMA.CREATE',
     'RECREATE TABLE SAMPLE_CITIES ' + Format(TABLE_COLUMNS, [' CHARACTER SET UTF8']));
   // The rest is standard SQL: the same text for both.
-  for LDir in TArray<string>.Create(SQL_DIR_POSTGRESQL, SQL_DIR_FIREBIRD) do
+  for LDir in TArray<string>.Create(SQL_DIR_POSTGRESQL, SQL_DIR_FIREBIRD, SQL_DIR_SQLITE) do
     LSource
       .Add(LDir, 'CITY.DELETE_ALL', 'DELETE FROM SAMPLE_CITIES')
       .Add(LDir, 'CITY.INSERT', 'INSERT INTO SAMPLE_CITIES (CODE, NAME, STATE) VALUES (:CODE, :NAME, :STATE)')

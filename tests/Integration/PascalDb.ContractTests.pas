@@ -8,8 +8,9 @@
   library's own engine), a round trip of every parameter type, typed NULLs,
   optional columns through SQL tags, INSERT ... RETURNING, UTF-8 text,
   commit/rollback, nested scopes with savepoints, a constraint violation
-  that must not discard the connection, scripts, row counts, and
-  parameters after the same SQL text is assigned again.
+  that must not discard the connection, scripts, row counts, parameters
+  after the same SQL text is assigned again, and concurrent writers (SQLite
+  allows one at a time: the others must wait for the lock, not fail).
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
   PascalDb.DUnitXCompat). The mirror in tests/Integration/fpc is generated
@@ -56,9 +57,57 @@ type
     [Test] procedure SqlScript_RunsEveryStatement;
     [Test] procedure RecordCount_CountsEveryRow;
     [Test] procedure SameSqlReassigned_ParamsStillBind;
+    [Test] procedure ConcurrentWriters_AllCommit;
   end;
 
 implementation
+
+type
+  // One writer of ConcurrentWriters_AllCommit: inserts a row and keeps its
+  // transaction (and, on SQLite, the database's write lock) open for a while.
+  TContractWriter = class(TThread)
+  private
+    FFactory: IDBFactory;
+    FId: Integer;
+    FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const AFactory: IDBFactory; AId: Integer);
+    property Error: string read FError;
+  end;
+
+constructor TContractWriter.Create(const AFactory: IDBFactory; AId: Integer);
+begin
+  FFactory := AFactory;
+  FId := AId;
+  inherited Create(False);
+end;
+
+procedure TContractWriter.Execute;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+begin
+  try
+    LScope := FFactory.GetPool.AcquireQuery(LQuery);
+    LScope.StartTransaction;
+    try
+      LQuery.Sql := 'INSERT INTO LOG_LINES (ID, TXT) VALUES (:ID, :TXT)';
+      LQuery.Params.Integers['ID'] := FId;
+      LQuery.Params.Strings['TXT'] := 'writer ' + IntToStr(FId);
+      LQuery.ExecSql;
+      Sleep(150);
+      LScope.Commit;
+    except
+      LScope.Rollback;
+      raise;
+    end;
+  except
+    on E: Exception do
+      FError := E.ClassName + ': ' + E.Message;
+  end;
+end;
 
 { TContractTests }
 
@@ -490,6 +539,37 @@ begin
       LQuery.Params.Integers['ID'] := 200 + I;
       TAssert.AssertEquals('again ' + IntToStr(I), LQuery.Open.Strings['NAME']);
     end;
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+procedure TContractTests.ConcurrentWriters_AllCommit;
+var
+  LWriters: array[1..4] of TContractWriter;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LErrors: string;
+  I: Integer;
+begin
+  for I := 1 to 4 do
+    LWriters[I] := TContractWriter.Create(FFactory, 300 + I);
+  LErrors := '';
+  for I := 1 to 4 do
+  begin
+    LWriters[I].WaitFor;
+    if LWriters[I].Error <> '' then
+      LErrors := LErrors + ' ' + LWriters[I].Error;
+    LWriters[I].Free;
+  end;
+  TAssert.AssertEquals('Every writer must commit (waiting for the lock if needed):' + LErrors, '', LErrors);
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := 'SELECT COUNT(*) AS TOTAL FROM LOG_LINES WHERE ID BETWEEN 301 AND 304';
+    TAssert.AssertEquals(4, LQuery.Open.Integers['TOTAL']);
     LScope.Commit;
   except
     LScope.Rollback;

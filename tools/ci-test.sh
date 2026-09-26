@@ -1,8 +1,8 @@
 #!/bin/sh
 # Everything CI runs (.github/workflows/ci.yml), also runnable locally with
 # Docker: the unit suite, then the integration (contract) suite and the
-# samples for the SQLdb and Zeos adapters on Firebird 5 and PostgreSQL 17, all
-# on Linux FPC 3.2.2.
+# samples for the SQLdb and Zeos adapters on Firebird 5, PostgreSQL 17 and
+# SQLite, all on Linux FPC 3.2.2.
 # Delphi Community Edition can't build headless, so the Delphi side is still
 # validated in the IDE (see CLAUDE.md, "Tests").
 #
@@ -42,13 +42,13 @@ export ZEOSDBO
 echo "== unit suite"
 sh tools/test_fpc_docker.sh
 for ADAPTER in sqldb zeos; do
-  for ENGINE in firebird postgresql; do
+  for ENGINE in firebird postgresql sqlite; do
     echo "== integration: $ADAPTER on $ENGINE"
     ADAPTER=$ADAPTER ENGINE=$ENGINE sh tools/test_integration_docker.sh
   done
 done
 for ADAPTER in sqldb zeos; do
-  for ENGINE in firebird postgresql; do
+  for ENGINE in firebird postgresql sqlite; do
     echo "== samples: $ADAPTER on $ENGINE"
     ADAPTER=$ADAPTER ENGINE=$ENGINE sh tools/test_samples_docker.sh
   done

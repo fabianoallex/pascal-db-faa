@@ -5,8 +5,9 @@
 { SQL differences between databases that the library itself has to generate:
   savepoints (create, roll back to, release) via ISQLDialect, and the queries
   on the migrations control table via IMigrationDialect. Implementations for
-  PostgreSQL and Firebird, registered in this unit's initialization section
-  under the names 'PostgreSQL' and 'Firebird'; adapters resolve the dialect
+  PostgreSQL, Firebird and SQLite, registered in this unit's initialization
+  section under the names 'PostgreSQL', 'Firebird' and 'SQLite'; adapters
+  resolve the dialect
   with TSQLDialectFactory.GetDialect(Config.SQLDialect). New database:
   RegisterDialect(Name, Class) in the application's composition root.
 
@@ -53,6 +54,23 @@ type
   { TFirebirdDialect }
 
   TFirebirdDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
+  public
+    function GetReleaseSavepointSQL(const AName: string): string;
+    function GetRollbackToSavepointSQL(const AName: string): string;
+    function GetSavepointSQL(const AName: string): string;
+    function SupportsRelease: Boolean;
+    function GetPingSQL: string;
+    function GetMigrationTableExistsSQL: string;
+    function GetMigrationLastVersionSQL: string;
+    function GetMigrationInsertVersionSQL: string;
+  end;
+
+  { TSQLiteDialect
+    SQLite has savepoints (SAVEPOINT / ROLLBACK TO / RELEASE) and keeps table
+    names as written, so the control table is looked up case-insensitively
+    in sqlite_master. }
+
+  TSQLiteDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -189,8 +207,56 @@ begin
     'VALUES (:VERSION, CURRENT_TIMESTAMP)';
 end;
 
+{ TSQLiteDialect }
+
+function TSQLiteDialect.GetReleaseSavepointSQL(const AName: string): string;
+begin
+  Result := Format('RELEASE SAVEPOINT %s;', [AName]);
+end;
+
+function TSQLiteDialect.GetRollbackToSavepointSQL(const AName: string): string;
+begin
+  Result := Format('ROLLBACK TO SAVEPOINT %s;', [AName]);
+end;
+
+function TSQLiteDialect.GetSavepointSQL(const AName: string): string;
+begin
+  Result := Format('SAVEPOINT %s;', [AName]);
+end;
+
+function TSQLiteDialect.SupportsRelease: Boolean;
+begin
+  Result := True;
+end;
+
+function TSQLiteDialect.GetPingSQL: string;
+begin
+  Result := 'SELECT 1';
+end;
+
+function TSQLiteDialect.GetMigrationTableExistsSQL: string;
+begin
+  Result :=
+    'SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END AS "EXISTS" ' +
+    'FROM sqlite_master ' +
+    'WHERE type = ''table'' AND LOWER(name) = ''schema_migrations''';
+end;
+
+function TSQLiteDialect.GetMigrationLastVersionSQL: string;
+begin
+  Result := 'SELECT COALESCE(MAX(VERSION), 0) AS VERSION FROM SCHEMA_MIGRATIONS';
+end;
+
+function TSQLiteDialect.GetMigrationInsertVersionSQL: string;
+begin
+  Result :=
+    'INSERT INTO SCHEMA_MIGRATIONS (VERSION, APPLIED_AT) ' +
+    'VALUES (:VERSION, CURRENT_TIMESTAMP)';
+end;
+
 initialization
   TSQLDialectFactory.RegisterDialect('PostgreSQL', TPostgreSQLDialect);
   TSQLDialectFactory.RegisterDialect('Firebird', TFirebirdDialect);
+  TSQLDialectFactory.RegisterDialect('SQLite', TSQLiteDialect);
 
 end.

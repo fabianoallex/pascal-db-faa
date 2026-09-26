@@ -79,6 +79,9 @@ type
     function SqlLines: TStrings; virtual; abstract;
     /// Executes a statement that returns no rows (the driver's ExecSQL).
     procedure DoExecSql; virtual; abstract;
+    /// Opens the dataset (DataSet.Open); an adapter overrides it to handle a
+    /// driver-specific failure (e.g. retrying once).
+    procedure DoOpen; virtual;
     /// Drops the parameters of the previous SQL before new SQL is set.
     procedure DoClearParams; virtual; abstract;
     /// The IParams over the query's parameters; called once, lazily.
@@ -284,8 +287,13 @@ begin
     FTransaction.StartTransaction;
   if DataSet.Active then
     DataSet.Close;
-  DataSet.Open;
+  DoOpen;
   Result := Self;
+end;
+
+procedure TDataSetQueryBase.DoOpen;
+begin
+  DataSet.Open;
 end;
 
 procedure TDataSetQueryBase.Close;

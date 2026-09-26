@@ -1,12 +1,13 @@
 #!/bin/sh
 # Runs the integration (contract) suite on Linux, SQLdb or Zeos adapter: a
-# database server container plus an FPC container on a private Docker network. The FPC
-# container installs the client library from Debian (libfbclient2 or libpq5),
-# builds the suite with plain fpc and runs it with heaptrc. Everything is
-# removed at the end, even on failure. Acceptance: 0 errors, 0 failures,
-# 0 unfreed blocks.
+# database server container plus an FPC container on a private Docker network
+# (SQLite needs no server: its database is a file inside the FPC container).
+# The FPC container installs the client library from Debian (libfbclient2,
+# libpq5 or libsqlite3-0), builds the suite with plain fpc and runs it with
+# heaptrc. Everything is removed at the end, even on failure. Acceptance:
+# 0 errors, 0 failures, 0 unfreed blocks.
 #
-# ENGINE:    firebird (default) or postgresql
+# ENGINE:    firebird (default), postgresql or sqlite
 # ADAPTER:   sqldb (default) or zeos
 # ZEOSDBO:   ADAPTER=zeos only: the ZeosLib 8 folder (the one containing
 #            src/core, src/dbc, ...), mounted read-only into the FPC container
@@ -34,7 +35,11 @@ case "$ENGINE" in
     SERVER_IMAGE="$PG_IMAGE"; SERVER_ENV="POSTGRES_PASSWORD=postgres"
     CLIENT_PKG=libpq5; CLIENT_GLOB='/usr/lib/*/libpq.so.5'; DB_PORT=5432
     IT_DATABASE=pascaldb_it; IT_PASSWORD=postgres ;;
-  *) echo "ENGINE must be firebird or postgresql" >&2; exit 2 ;;
+  sqlite)
+    SERVER_IMAGE=""; SERVER_ENV=""
+    CLIENT_PKG=libsqlite3-0; CLIENT_GLOB='/usr/lib/*/libsqlite3.so.0'; DB_PORT=""
+    IT_DATABASE=/t/pascaldb_it.sqlite; IT_PASSWORD="" ;;
+  *) echo "ENGINE must be firebird, postgresql or sqlite" >&2; exit 2 ;;
 esac
 
 ZEOS_MOUNT=""
@@ -64,7 +69,7 @@ cd "$ROOT"
 python tools/gen_fpc_mirror.py --check
 
 docker network create "$NET" >/dev/null
-docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" "$SERVER_IMAGE" >/dev/null
+[ -z "$SERVER_IMAGE" ] || docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" "$SERVER_IMAGE" >/dev/null
 
 # $ZEOS_MOUNT is unquoted on purpose: empty (no option) or "-v <dir>:/zeos:ro".
 MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MOUNT \
@@ -85,7 +90,9 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   cd /t/tests/Integration/$RUNNER_DIR
   fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src $ADAPTER_OPTS -Fu.. -FU/t/u -gh -gl -o/t/runner \
     $RUNNER > /t/build.log 2>&1 || { grep -iE "error|fatal" /t/build.log | head -30; exit 1; }
-  for i in $(seq 1 60); do (echo > /dev/tcp/$PASCALDB_IT_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
+  if [ -n "$DB_PORT" ]; then
+    for i in $(seq 1 60); do (echo > /dev/tcp/$PASCALDB_IT_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
+  fi
   cd /t
   HEAPTRC="log=/t/heap.txt" ./runner --all --format=plain > /t/run.log 2>&1 || true
   grep -E "^Number of" /t/run.log

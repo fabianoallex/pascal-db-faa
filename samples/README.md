@@ -13,7 +13,7 @@ both compilers**: open the `.dproj` in Delphi or the `.lpi` in Lazarus (they're 
 | [05-pool](05-pool/PoolUnderLoad.dpr) | The connection pool under concurrent load (worker threads): growth up to the limit, callers waiting their turn, `EPoolTimeoutException` when the wait runs out, the idle sweep; observed through its events (thread-safe handler) and `GetSnapshot` | Yes |
 
 01 and 02 share `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
-and against PostgreSQL or Firebird in 02.
+and against PostgreSQL, Firebird or SQLite in 02.
 
 ## Running samples 02 to 05
 
@@ -22,6 +22,12 @@ They connect to a local PostgreSQL by default:
 ```
 docker run -d --name pascaldb-sample-pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:17
 ```
+
+Or, with no server at all, `PASCALDB_SAMPLE_ENGINE=sqlite`: the database is the file
+`pascaldb_samples.sqlite` in the current folder (or `PASCALDB_SAMPLE_DATABASE`). FireDAC
+(Delphi) has SQLite built in; SQLdb and Zeos load `sqlite3.dll` / `libsqlite3.so.0`, and on
+Windows it must be a build with the column-metadata functions, such as the official one from
+sqlite.org (see gotcha 23 in `CLAUDE.md`).
 
 Settings come from environment variables (`PASCALDB_SAMPLE_ENGINE`, `_HOST`, `_PORT`,
 `_DATABASE`, `_USER`, `_PASSWORD`, `_CLIENT`); `common/Samples.Env.pas` documents them.
@@ -36,7 +42,7 @@ On PostgreSQL, from the second run on, the client library prints
 
 ## Sample 03: SQL files
 
-The `.sql` files under `03-migrations/sql/PG` and `sql/FB` are linked into the program
+The `.sql` files under `03-migrations/sql/PG`, `sql/FB` and `sql/SQLITE` are linked into the program
 through `sql/MigrationsSql.res`. After editing one, rebuild the `.res` (the test script
 checks it's up to date):
 
@@ -66,5 +72,6 @@ UTF-8.
 ## Testing the samples
 
 `sh tools/test_samples_docker.sh` builds the samples on Linux FPC and runs them against
-a PostgreSQL container (`ENGINE=firebird` for Firebird 5, `ADAPTER=zeos` with `ZEOSDBO`
-for Zeos); each must exit with 0 and report 0 unfreed blocks.
+a PostgreSQL container (`ENGINE=firebird` for Firebird 5, `ENGINE=sqlite` for SQLite with no
+server, `ADAPTER=zeos` with `ZEOSDBO` for Zeos); each must exit with 0 and report 0 unfreed
+blocks.

@@ -28,6 +28,15 @@ automatically**. If delphi-api-infra-faa starts consuming this library (an open 
 that divergence goes away; until then, check `git log aa49f2b..HEAD -- src/Db
 src/Common/Common.Optionals.pas` on that side before assuming both are in sync.
 
+The other direction too: fixed here after the extraction, probably still present there
+(not checked on that side):
+- `TDataSetQueryBase.SetSql` losing the parameters when the same SQL text is assigned again
+  on Zeos (gotcha 17).
+- The pool's snapshot counters (`TotalTimeouts`, `TotalCreated`, `TotalDiscarded`,
+  `TotalIdleSwept`) were incremented with a plain `Inc`, some outside the pool's lock, so
+  concurrent events lost counts: sample 05 had 3 timeouts at the same moment and the snapshot
+  said 2. They now use `PdbAtomicInc64`/`PdbAtomicAdd64` and are read with `PdbAtomicRead64`.
+
 | Here | There |
 |---|---|
 | `PascalDb.Interfaces` | `Db.Interfaces` |
@@ -153,18 +162,19 @@ The FPCUnit runner does both.
   `IDBFactory`/`IQuery`/`IParams`/`IQueryResult`, so the same bodies validate every adapter;
   `tests/Integration/PascalDb.IntegrationEnv.pas` is the only adapter-specific part (which
   factory, how to create/drop the database) and documents its `PASCALDB_IT_*` environment
-  variables. `PASCALDB_IT_ENGINE` picks the database: `firebird` (default) or `postgresql`.
+  variables. `PASCALDB_IT_ENGINE` picks the database: `firebird` (default), `postgresql` or
+  `sqlite` (a file next to the runner; no server).
   Each run creates a fresh database, migrates it with `TDBMigrationEngine` (SQL from a
   `TMemorySqlSource`) and drops it at the end. FPC on Windows: build
   `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi` (SQLdb) or
   `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos) and run it with
   `--all --format=plain`. The Zeos runners (FPC and Delphi) define `PASCALDB_IT_ZEOS` and
-  reuse the same fixtures. Linux: `sh tools/test_integration_docker.sh` (`ENGINE=firebird` or
-  `postgresql`; `ADAPTER=sqldb` (default) or `zeos`, the latter with `ZEOSDBO` pointing at the
+  reuse the same fixtures. Linux: `sh tools/test_integration_docker.sh` (`ENGINE=firebird`,
+  `postgresql` or `sqlite`; `ADAPTER=sqldb` (default) or `zeos`, the latter with `ZEOSDBO` pointing at the
   ZeosLib folder, mounted into the container; server container + FPC container on a private
   network). **CI:** `.github/workflows/ci.yml` only calls `sh tools/ci-test.sh`, which runs the
-  unit suite, then all four Linux integration combinations (SQLdb/Zeos × Firebird/PostgreSQL)
-  and the samples on the same four (`tools/test_samples_docker.sh`);
+  unit suite, then all six Linux integration combinations (SQLdb/Zeos ×
+  Firebird/PostgreSQL/SQLite) and the samples on the same six (`tools/test_samples_docker.sh`);
   it builds its FPC image (`pascaldb-fpc322`, Debian bookworm's fpc) and, without `ZEOSDBO`,
   downloads ZeosLib 8.0.0 into `.ci/` and checks its pinned SHA-256. Run it locally before
   pushing a change to the scripts.
@@ -173,7 +183,11 @@ The FPCUnit runner does both.
   and `PASCALDB_IT_PORT=55432` (user/password default to postgres/postgres). The client is
   the 64-bit `libpq.dll` of a local PostgreSQL install (found under
   `C:\Program Files\PostgreSQL`, or `PASCALDB_IT_CLIENT`); PostgreSQL ships no 32-bit Windows
-  client, so the Delphi runners must be built for **Win64** to test PostgreSQL. **On Delphi:** open
+  client, so the Delphi runners must be built for **Win64** to test PostgreSQL.
+- **SQLite on Windows:** `PASCALDB_IT_ENGINE=sqlite`. SQLdb and Zeos load `sqlite3.dll`
+  (`PASCALDB_IT_CLIENT`, or the default search), and it must be one with the column-metadata
+  functions — the official build from sqlite.org has them, Python's doesn't (see gotcha 23).
+  FireDAC links SQLite into the program and needs no DLL. **On Delphi:** open
   `PascalDb.groupproj` in the IDE and run
   `tests/Unit/PascalDb.UnitTests.dproj`, `tests/Integration/PascalDb.IntegrationTests.dproj`
   (FireDAC) and `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` (Zeos; needs
@@ -206,9 +220,9 @@ adapter only wraps its driver's connection, transaction and query (~250 lines):
 
 | Adapter | Compiler | Package / unit | Status |
 |---|---|---|---|
-| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux) |
-| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32) and PostgreSQL 17 (Win64) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
-| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32 and Win64), PostgreSQL 17 with FPC and Delphi (Win64), Firebird 5 and PostgreSQL 17 with FPC on Linux — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
+| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux), SQLite (Windows with sqlite.org's 3.53.4 DLL, Linux with Debian bookworm's libsqlite3) |
+| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32 and Win64), PostgreSQL 17 (Win64) and SQLite (Win32 and Win64, engine linked in) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
+| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32 and Win64), PostgreSQL 17 with FPC and Delphi (Win64), Firebird 5 and PostgreSQL 17 with FPC on Linux, SQLite with FPC on Windows and Linux and Delphi (Win32 and Win64) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
 
 A third-party adapter implements `IDBComponentProvider` (usually on top of the two units
 above), and `TDBFactory` does the rest: the core never has to change for a new driver.
@@ -257,6 +271,25 @@ on Linux against a Firebird 5 container: the `.fdb` is gone after the run). The 
 because `isc_drop_database` zeroes the handle and Zeos's `Disconnect` then skips the detach;
 the Firebird 3+ API's `IAttachment.dropDatabase` would free the attachment Zeos still holds.
 
+**SQLite specifics:** the core registers a `SQLite` dialect (savepoints; the migrations table
+is looked up in `sqlite_master`). Connection settings: SQLdb `ConnectorType=SQLite3`, Zeos
+`Protocol=sqlite`, FireDAC `DriverID=SQLite`; the database is a file, created on the first
+connect. What the adapters add, all measured on FPC (SQLdb, Zeos) unless noted:
+- a busy timeout on every connection (SQLdb `PRAGMA busy_timeout`, `BusyTimeout` setting;
+  Zeos `busytimeout`; both 5000 ms by default): SQLite has one writer at a time, and without it
+  a second writer fails at once with "database is locked" (gotcha 24). FireDAC has its own
+  `BusyTimeout` setting;
+- SQLdb retries a statement once on `SQLITE_SCHEMA` (gotcha 21);
+- Zeos sends a `Currency` parameter as a `Double` (gotcha 22);
+- FireDAC (Delphi 12 CE): `FireDAC.Phys.SQLite` + `FireDAC.Phys.SQLiteWrapper.Stat` (the engine
+  is linked in, no `VendorLib`), and, unless the settings say otherwise, `LockingMode=Normal`,
+  `SharedCache=False`, `StringFormat=Unicode`, `BusyTimeout=5000` and
+  `UpdateOptions.LockWait = True` (gotcha 25).
+SQLite's types are loose: a `NUMERIC(15,2)` is stored as `REAL`, so money keeps a `Double`'s
+precision, not an exact decimal. `CREATE TABLE IF NOT EXISTS`, `RETURNING` and transactional
+DDL all work (the contract suite passes unchanged). `:memory:` gives each pooled connection its
+own empty database: use a file.
+
 **Zeos on Delphi is compiled from source:** the Delphi Zeos runner finds ZeosLib through the
 `ZEOSDBO` environment variable (the folder containing `src\core`, `src\dbc`, ...), set in
 the IDE (Tools > Options > IDE > Environment Variables) or in the OS. On Lazarus, install
@@ -288,7 +321,7 @@ Format: symptom → cause → fix. Also recorded in the skill: 1–4, 7 in
 `references/rtl-gotchas.md` ("Generics / RTL collections", "Types", "Resource files"), 18
 in "Types", 19 in "Resource files" and 20 in "Threading / interop"; 5–6 in
 the compat adapter bullet of `SKILL.md` ("Mirrored tests"); 8 in "Encoding"; 9 in the
-`lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14 and 16 in "Database access"; 12
+`lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14, 16 and 21–24 in "Database access"; 12
 and 15 in the tests section (`TearDown`, `finalization`). The skill links to this repository
 (https://github.com/fabianoallex/pascal-db-faa) from each of them.
 
@@ -416,3 +449,39 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     it; win64, 0 in both. Fix: `Flush(Output)` inside the lock, after `Writeln`
     (`samples/05-pool/PoolUnderLoad.dpr`, `Say`). Not measured: Delphi, and an interactive
     terminal on Linux.
+21. **SQLdb + SQLite: "database schema has changed" on a pooled connection after migrations.**
+    The contract suite's migrations failed on Linux with `TSQLite3Connection : database schema
+    has changed` (`SQLITE_SCHEMA`, 17): the DDL ran on one pooled connection and the version
+    record on another, opened before. FPC 3.2.2's `sqlite3conn` prepares with the legacy
+    `sqlite3_prepare` (`sqlite3conn.pp`, line 262), which returns `SQLITE_SCHEMA` instead of
+    preparing again as `sqlite3_prepare_v2` does. Fix: the SQLdb adapter prepares and runs the
+    statement once more on that error (query `Open`/`ExecSql` and the transaction's `ExecSql`);
+    the suite then passed on Linux and Windows.
+22. **Zeos 8 + SQLite stores a `Currency` parameter ×10000.** `Params_EveryType_RoundTrip`
+    read `123400` for `12.34`. A probe showed the stored value was the integer `123400` for the
+    parameter and the real `12.34` for a literal: `TZSQLiteCAPIPreparedStatement.SetCurrency`
+    binds `sqlite3_bind_int64` over an `Int64 absolute` the Currency (`ZDbcSqLiteStatement.pas`).
+    Fix: the Zeos adapter sends `Currency` to SQLite as a `Double`. Measured with FPC 3.2.2 on
+    Linux; the code path doesn't depend on the compiler, but Delphi wasn't run.
+23. **A `sqlite3.dll` without the column-metadata functions makes SQLdb and Zeos fail with an
+    access violation at `$0`.** With Python 3.12's `DLLs\sqlite3.dll` (SQLite 3.45.3, 64-bit),
+    every test of both FPC Windows runners failed in `SetUp` with an AV at address 0; that
+    DLL doesn't export `sqlite3_column_table_name` and its siblings (built without
+    `SQLITE_ENABLE_COLUMN_METADATA`), and the drivers call them. With the official DLL from
+    sqlite.org (3.53.4, which exports them) both suites passed. Debian's `libsqlite3-0` has them.
+24. **SQLite without a busy timeout: concurrent writers fail at once with "database is
+    locked".** A probe with 4 threads each inserting in its own transaction held 200 ms: 3 of 4
+    failed within 4 ms, on SQLdb and on Zeos (FPC 3.2.2, Linux). Neither driver sets a busy
+    timeout by default. Fix: 5000 ms on every SQLite connection (see "SQLite specifics"); the
+    probe then had 0 failures, and `ConcurrentWriters_AllCommit` keeps it covered.
+25. **FireDAC + SQLite needs three settings changed from FireDAC's defaults to pass the
+    contract suite** (Delphi 12 CE, Win32 and Win64, same results on both). First run: 14/16.
+    `Utf8Text_RoundTrip` read `'São Paulo ? ok'` for `'São Paulo → ok'` (VARCHAR handled as ANSI,
+    as in gotcha 13) — `StringFormat=Unicode` fixed it. `ConcurrentWriters_AllCommit` failed
+    with "database table is locked" (a shared-cache table lock); with `SharedCache=False` it
+    failed instead with "database is locked", still at once (the whole suite took 0.29 s); with
+    `BusyTimeout=5000` and `UpdateOptions.LockWait = True` added together it passed (16/16, the
+    suite now 1.2 s: the writers wait for each other). Which of those last two was needed wasn't
+    isolated. `LockingMode=Normal` is set from FireDAC's documentation, never tried with
+    `Exclusive`. The Community Edition ships no source for the SQLite driver, so these came
+    from measurement, not from reading the driver.

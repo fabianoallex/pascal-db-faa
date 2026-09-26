@@ -7,16 +7,18 @@
   PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
-    Protocol         Zeos protocol: 'firebird' or 'postgresql' (required).
-                     'firebird' uses the Firebird 3+ API when the client
-                     library has it and the legacy API otherwise (a 2.5
-                     client).
-    HostName         server host ('' = local server, Firebird)
+    Protocol         Zeos protocol: 'firebird', 'postgresql' or 'sqlite'
+                     (required). 'firebird' uses the Firebird 3+ API when
+                     the client library has it and the legacy API otherwise
+                     (a 2.5 client).
+    HostName         server host ('' = local server, Firebird; unused by
+                     SQLite)
     Port             server port (optional)
-    Database         database path (Firebird) or name (PostgreSQL)
+    Database         database path (Firebird, SQLite: the file, created on
+                     first connect) or name (PostgreSQL)
     User, Password
     ClientCodepage   connection character set (e.g. UTF8)
-    LibraryLocation  full path of the client library (fbclient/libpq) when
+    LibraryLocation  full path of the client library (fbclient/libpq/sqlite3) when
                      it isn't found on the default search path (optional)
   Any other line goes to TZConnection.Properties as is (Zeos connection
   properties, e.g. CreateNewDatabase=true).
@@ -50,7 +52,18 @@
     isc_drop_database zeroes the handle Zeos keeps, and Disconnect then
     skips the detach; the Firebird 3+ API's IAttachment.dropDatabase frees
     the attachment while Zeos still holds it, and there is no way to clear
-    that reference from outside. }
+    that reference from outside.
+  - SQLite: Zeos 8.0.0 binds a Currency parameter with
+    sqlite3_bind_int64 over the Currency's own bits (an Int64 "absolute"
+    the value, in ZDbcSqLiteStatement), so 12.34 is stored as the integer
+    123400 (measured on FPC 3.2.2, Linux). The parameters here send a
+    Currency to SQLite as a Double instead, which is also how SQLite stores
+    a NUMERIC with decimals (REAL).
+  - SQLite allows one writer at a time, and without a busy timeout a second
+    connection that tries to write fails at once with "database is locked"
+    (measured: 3 of 4 concurrent writers failed within 4 ms). SQLite
+    connections get Zeos's busytimeout=5000 (milliseconds) unless the
+    settings say otherwise. }
 
 interface
 
@@ -130,9 +143,12 @@ type
     procedure WriteInteger(const AName: string; AValue: Integer); override;
     procedure WriteInt64(const AName: string; AValue: Int64); override;
     procedure WriteCurrency(const AName: string; AValue: Currency); override;
+  private
+    FCurrencyAsDouble: Boolean;
   public
-    /// AParams is not owned (it belongs to the query).
-    constructor Create(AParams: TZParams);
+    /// AParams is not owned (it belongs to the query). ACurrencyAsDouble:
+    /// the connection is SQLite (see the unit header).
+    constructor Create(AParams: TZParams; ACurrencyAsDouble: Boolean);
   end;
 
   { TZeosQueryAdapter }
@@ -226,6 +242,8 @@ begin
     // See the unit header.
     if SameText(Copy(Result.Protocol, 1, 8), 'firebird') and (Result.Properties.Values['hard_commit'] = '') then
       Result.Properties.Values['hard_commit'] := 'true';
+    if SameText(Copy(Result.Protocol, 1, 6), 'sqlite') and (Result.Properties.Values['busytimeout'] = '') then
+      Result.Properties.Values['busytimeout'] := '5000';
   except
     Result.Free;
     raise;
@@ -366,10 +384,11 @@ end;
 
 { TZeosParamsAdapter }
 
-constructor TZeosParamsAdapter.Create(AParams: TZParams);
+constructor TZeosParamsAdapter.Create(AParams: TZParams; ACurrencyAsDouble: Boolean);
 begin
   inherited Create;
   FParams := AParams;
+  FCurrencyAsDouble := ACurrencyAsDouble;
 end;
 
 function TZeosParamsAdapter.ParamExists(const AName: string): Boolean;
@@ -457,8 +476,16 @@ begin
 end;
 
 procedure TZeosParamsAdapter.WriteCurrency(const AName: string; AValue: Currency);
+var
+  LValue: Double;
 begin
-  FParams.ParamByName(AName).AsCurrency := AValue;
+  if FCurrencyAsDouble then
+  begin
+    LValue := AValue; // an assignment converts (a Double(...) cast may not: CLAUDE.md, gotcha 18)
+    FParams.ParamByName(AName).AsDouble := LValue;
+  end
+  else
+    FParams.ParamByName(AName).AsCurrency := AValue;
 end;
 
 { TZeosQueryAdapter }
@@ -513,7 +540,8 @@ end;
 
 function TZeosQueryAdapter.CreateParams: IParams;
 begin
-  Result := TZeosParamsAdapter.Create(FQuery.Params);
+  Result := TZeosParamsAdapter.Create(FQuery.Params,
+    SameText(Copy(FQuery.Connection.Protocol, 1, 6), 'sqlite'));
 end;
 
 { TZeosProvider }

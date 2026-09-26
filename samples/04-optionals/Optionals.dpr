@@ -24,8 +24,8 @@
   filters, apply partial updates (printing the SQL each one produced), and
   read nullable columns with NullableStrings. The SQL lives in a
   TMemorySqlSource so the templates sit next to the code that fills them
-  (sample 03 shows .sql files); the same text serves PostgreSQL and
-  Firebird, except CREATE TABLE.
+  (sample 03 shows .sql files); the same text serves every database,
+  except CREATE TABLE.
 
   Same source for Delphi (Optionals.dproj) and Lazarus/FPC (Optionals.lpi);
   connection settings as in sample 02. *)
@@ -72,9 +72,11 @@ begin
   Result := LSource;
   LSource.Add(SQL_DIR_POSTGRESQL, 'SCHEMA.CREATE',
     'CREATE TABLE IF NOT EXISTS SAMPLE_CUSTOMERS ' + Format(TABLE_COLUMNS, ['']));
+  LSource.Add(SQL_DIR_SQLITE, 'SCHEMA.CREATE',
+    'CREATE TABLE IF NOT EXISTS SAMPLE_CUSTOMERS ' + Format(TABLE_COLUMNS, ['']));
   LSource.Add(SQL_DIR_FIREBIRD, 'SCHEMA.CREATE',
     'RECREATE TABLE SAMPLE_CUSTOMERS ' + Format(TABLE_COLUMNS, [' CHARACTER SET UTF8']));
-  for LDir in TArray<string>.Create(SQL_DIR_POSTGRESQL, SQL_DIR_FIREBIRD) do
+  for LDir in TArray<string>.Create(SQL_DIR_POSTGRESQL, SQL_DIR_FIREBIRD, SQL_DIR_SQLITE) do
     LSource
       .Add(LDir, 'CUSTOMER.DELETE_ALL', 'DELETE FROM SAMPLE_CUSTOMERS')
       .Add(LDir, 'CUSTOMER.INSERT',

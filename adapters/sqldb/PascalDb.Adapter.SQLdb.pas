@@ -7,14 +7,20 @@
   from PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
-    ConnectorType  SQLdb connector name: 'Firebird' or 'PostgreSQL'
-                   (required; both are registered by this unit)
-    HostName       server host ('' = local/embedded, Firebird)
+    ConnectorType  SQLdb connector name: 'Firebird', 'PostgreSQL' or
+                   'SQLite3' (required; all three are registered by this
+                   unit)
+    HostName       server host ('' = local/embedded, Firebird; unused by
+                   SQLite)
     Port           server port (optional)
-    DatabaseName   database path (Firebird) or name (PostgreSQL)
+    DatabaseName   database path (Firebird, SQLite: the file, created on
+                   first connect) or name (PostgreSQL)
     UserName, Password
     CharSet        connection character set (e.g. UTF8)
-    ClientLibrary  full path of the client library (fbclient/libpq) when it
+    BusyTimeout    SQLite only: milliseconds a statement waits for another
+                   connection's write lock before failing with "database is
+                   locked" (default 5000)
+    ClientLibrary  full path of the client library (fbclient/libpq/sqlite3) when it
                    isn't found on the default search path (optional)
   Any other line is passed to the connection's Params as is.
 
@@ -24,7 +30,20 @@
   - SQLdb starts the native transaction by itself when a query opens, so
     DoStartTransaction only starts it if it isn't active yet.
   - TSQLTransaction.Commit/Rollback close the datasets attached to it: read
-    the results before committing (the usual repository pattern). }
+    the results before committing (the usual repository pattern).
+  - SQLite: FPC 3.2.2's sqlite3conn prepares statements with the legacy
+    sqlite3_prepare, which returns SQLITE_SCHEMA ("database schema has
+    changed") when another connection changed the schema after this one last
+    read it, instead of preparing again as sqlite3_prepare_v2 does. With a
+    pool that is the normal case (migrations on one connection, the next
+    statement on another), so a statement failing with SQLITE_SCHEMA is
+    prepared and run once more; the error is raised before the statement
+    does anything, so the retry is safe.
+  - SQLite allows one writer at a time, and without a busy timeout a second
+    connection that tries to write fails at once with "database is locked"
+    (measured: 3 of 4 concurrent writers failed within 4 ms). Every SQLite
+    connection gets PRAGMA busy_timeout (BusyTimeout, default 5000 ms) when
+    it opens. }
 
 interface
 
@@ -40,6 +59,7 @@ uses
   sqldblib,
   ibconnection,
   pqconnection,
+  sqlite3conn,
   PascalDb.Interfaces,
   PascalDb.SqlDialect,
   PascalDb.Pool,
@@ -93,6 +113,7 @@ type
     function DataSet: TDataSet; override;
     function SqlLines: TStrings; override;
     procedure DoExecSql; override;
+    procedure DoOpen; override;
     procedure DoClearParams; override;
     function CreateParams: IParams; override;
   public
@@ -134,6 +155,36 @@ implementation
 
 var
   GLibraryLoaders: TList = nil;
+
+const
+  SQLITE_SCHEMA = 17; // sqlite3.h: "The database schema changed"
+  DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5000;
+
+// See the unit header. Runs in a throwaway transaction: SQLdb executes
+// statements only inside one.
+procedure ApplySQLiteBusyTimeout(AConn: TSQLConnector);
+var
+  LTransaction: TSQLTransaction;
+begin
+  if not SameText(AConn.ConnectorType, 'SQLite3') then
+    Exit;
+  LTransaction := TSQLTransaction.Create(nil);
+  try
+    LTransaction.DataBase := AConn;
+    AConn.ExecuteDirect('PRAGMA busy_timeout = ' +
+      IntToStr(StrToIntDef(AConn.Params.Values['BusyTimeout'], DEFAULT_SQLITE_BUSY_TIMEOUT_MS)), LTransaction);
+    LTransaction.Commit;
+  finally
+    LTransaction.Free;
+  end;
+end;
+
+// See the unit header: SQLite's "schema changed", which a new prepare fixes.
+function IsSQLiteSchemaChanged(E: Exception; ADataBase: TDatabase): Boolean;
+begin
+  Result := (E is ESQLDatabaseError) and (ESQLDatabaseError(E).ErrorCode = SQLITE_SCHEMA)
+    and (ADataBase is TSQLConnector) and SameText(TSQLConnector(ADataBase).ConnectorType, 'SQLite3');
+end;
 
 // One TSQLDBLibraryLoader per (type, path), alive for the whole process.
 procedure PdbSQLdbUseClientLibrary(const AConnectorType, ALibrary: string);
@@ -190,6 +241,7 @@ end;
 procedure TSQLdbConnectionAdapter.Connect;
 begin
   FConnection.Open;
+  ApplySQLiteBusyTimeout(FConnection);
 end;
 
 procedure TSQLdbConnectionAdapter.Commit;
@@ -256,7 +308,17 @@ begin
     LQuery.ParseSQL := False;
     LQuery.ParamCheck := False;
     LQuery.SQL.Text := ASql;
-    LQuery.ExecSQL;
+    try
+      LQuery.ExecSQL;
+    except
+      on E: Exception do
+      begin
+        if not IsSQLiteSchemaChanged(E, LQuery.DataBase) then
+          raise;
+        LQuery.UnPrepare;
+        LQuery.ExecSQL;
+      end;
+    end;
   finally
     LQuery.Free;
   end;
@@ -296,7 +358,34 @@ end;
 
 procedure TSQLdbQueryAdapter.DoExecSql;
 begin
-  FQuery.ExecSQL;
+  try
+    FQuery.ExecSQL;
+  except
+    on E: Exception do
+    begin
+      if not IsSQLiteSchemaChanged(E, FQuery.DataBase) then
+        raise;
+      FQuery.UnPrepare;
+      FQuery.ExecSQL;
+    end;
+  end;
+end;
+
+procedure TSQLdbQueryAdapter.DoOpen;
+begin
+  try
+    FQuery.Open;
+  except
+    on E: Exception do
+    begin
+      if not IsSQLiteSchemaChanged(E, FQuery.DataBase) then
+        raise;
+      if FQuery.Active then
+        FQuery.Close;
+      FQuery.UnPrepare;
+      FQuery.Open;
+    end;
+  end;
 end;
 
 procedure TSQLdbQueryAdapter.DoClearParams;
@@ -350,6 +439,7 @@ begin
         LConn.Params.Values[LName] := LValue;
     end;
     LConn.Open;
+    ApplySQLiteBusyTimeout(LConn);
   except
     LConn.Free;
     raise;

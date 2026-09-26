@@ -8,24 +8,28 @@ unit Samples.Env;
   (queries, transactions, the repository) is driver-agnostic.
 
   Settings (environment variables, all optional):
-    PASCALDB_SAMPLE_ENGINE    postgresql (default) or firebird
-    PASCALDB_SAMPLE_HOST      default localhost
+    PASCALDB_SAMPLE_ENGINE    postgresql (default), firebird or sqlite
+    PASCALDB_SAMPLE_HOST      default localhost (unused by SQLite)
     PASCALDB_SAMPLE_PORT      default: the driver's (5432 / 3050)
     PASCALDB_SAMPLE_DATABASE  PostgreSQL: database name (default postgres).
                               Firebird: path of an existing database on the
-                              server (required)
-    PASCALDB_SAMPLE_USER      default postgres / SYSDBA
-    PASCALDB_SAMPLE_PASSWORD  default postgres / masterkey
+                              server (required). SQLite: the database file,
+                              created on first connect (default
+                              pascaldb_samples.sqlite in the current folder)
+    PASCALDB_SAMPLE_USER      default postgres / SYSDBA (unused by SQLite)
+    PASCALDB_SAMPLE_PASSWORD  default postgres / masterkey (unused by SQLite)
     PASCALDB_SAMPLE_CLIENT    full path of the client library (libpq /
-                              fbclient) when it isn't found on the default
-                              search path, e.g.
-                              C:\Program Files\PostgreSQL\17\bin\libpq.dll
+                              fbclient / sqlite3) when it isn't found on the
+                              default search path, e.g.
+                              C:\Program Files\PostgreSQL\17\bin\libpq.dll.
+                              FireDAC links SQLite into the program: no
+                              client library
 
   Each adapter has its own names for the connection settings (see the
   adapter units); SetConnectionParams below is the whole difference.
 
-  The SQL directory follows the engine ('PG' or 'FB'), so a program can keep
-  one version of a script per database under the same key. }
+  The SQL directory follows the engine ('PG', 'FB' or 'SQLITE'), so a
+  program can keep one version of a script per database under the same key. }
 
 {$IFDEF FPC}{$MODE DELPHI}{$H+}{$ENDIF}
 
@@ -37,12 +41,16 @@ uses
   PascalDb.SqlSources,
   PascalDb.Pool;
 
+type
+  TSampleEngine = (sePostgreSQL, seFirebird, seSQLite);
+
 const
   SQL_DIR_POSTGRESQL = 'PG';
   SQL_DIR_FIREBIRD = 'FB';
+  SQL_DIR_SQLITE = 'SQLITE';
 
-function SampleIsPostgres: Boolean;
-/// Human-readable description of the target, e.g. 'PostgreSQL on localhost (SQLdb)'.
+function SampleEngine: TSampleEngine;
+/// Human-readable description of the target, e.g. 'PostgreSQL on localhost (SQLdb adapter)'.
 function SampleTarget: string;
 /// The connection settings in effect, one per line, for error messages
 /// (the password is left out).
@@ -81,14 +89,19 @@ begin
     Result := ADefault;
 end;
 
-function SampleIsPostgres: Boolean;
+function SampleEngine: TSampleEngine;
 var
   LEngine: string;
 begin
   LEngine := LowerCase(Env('PASCALDB_SAMPLE_ENGINE', 'postgresql'));
-  if (LEngine <> 'postgresql') and (LEngine <> 'firebird') then
-    raise Exception.CreateFmt('PASCALDB_SAMPLE_ENGINE must be postgresql or firebird, not "%s"', [LEngine]);
-  Result := LEngine = 'postgresql';
+  if LEngine = 'postgresql' then
+    Result := sePostgreSQL
+  else if LEngine = 'firebird' then
+    Result := seFirebird
+  else if LEngine = 'sqlite' then
+    Result := seSQLite
+  else
+    raise Exception.CreateFmt('PASCALDB_SAMPLE_ENGINE must be postgresql, firebird or sqlite, not "%s"', [LEngine]);
 end;
 
 function Host: string;
@@ -103,10 +116,12 @@ end;
 
 function DatabaseName: string;
 begin
-  if SampleIsPostgres then
-    Result := Env('PASCALDB_SAMPLE_DATABASE', 'postgres')
+  case SampleEngine of
+    sePostgreSQL:
+      Result := Env('PASCALDB_SAMPLE_DATABASE', 'postgres');
+    seSQLite:
+      Result := ExpandFileName(Env('PASCALDB_SAMPLE_DATABASE', 'pascaldb_samples.sqlite'));
   else
-  begin
     Result := Env('PASCALDB_SAMPLE_DATABASE', '');
     if Result = '' then
       raise Exception.Create('Firebird: set PASCALDB_SAMPLE_DATABASE to the path of an existing database on the server');
@@ -115,18 +130,18 @@ end;
 
 function UserName: string;
 begin
-  if SampleIsPostgres then
-    Result := Env('PASCALDB_SAMPLE_USER', 'postgres')
+  if SampleEngine = seFirebird then
+    Result := Env('PASCALDB_SAMPLE_USER', 'SYSDBA')
   else
-    Result := Env('PASCALDB_SAMPLE_USER', 'SYSDBA');
+    Result := Env('PASCALDB_SAMPLE_USER', 'postgres');
 end;
 
 function Password: string;
 begin
-  if SampleIsPostgres then
-    Result := Env('PASCALDB_SAMPLE_PASSWORD', 'postgres')
+  if SampleEngine = seFirebird then
+    Result := Env('PASCALDB_SAMPLE_PASSWORD', 'masterkey')
   else
-    Result := Env('PASCALDB_SAMPLE_PASSWORD', 'masterkey');
+    Result := Env('PASCALDB_SAMPLE_PASSWORD', 'postgres');
 end;
 
 function ClientLibrary: string;
@@ -141,15 +156,19 @@ const
 
 procedure SetConnectionParams(AParams: TStrings);
 begin
-  if SampleIsPostgres then
-    AParams.Values['Protocol'] := 'postgresql'
-  else
-    AParams.Values['Protocol'] := 'firebird';
-  AParams.Values['HostName'] := Host;
-  AParams.Values['Port'] := Port;
+  case SampleEngine of
+    sePostgreSQL: AParams.Values['Protocol'] := 'postgresql';
+    seFirebird: AParams.Values['Protocol'] := 'firebird';
+    seSQLite: AParams.Values['Protocol'] := 'sqlite';
+  end;
+  if SampleEngine <> seSQLite then
+  begin
+    AParams.Values['HostName'] := Host;
+    AParams.Values['Port'] := Port;
+    AParams.Values['User'] := UserName;
+    AParams.Values['Password'] := Password;
+  end;
   AParams.Values['Database'] := DatabaseName;
-  AParams.Values['User'] := UserName;
-  AParams.Values['Password'] := Password;
   AParams.Values['ClientCodepage'] := 'UTF8';
   AParams.Values['LibraryLocation'] := ClientLibrary;
 end;
@@ -166,16 +185,20 @@ const
 
 procedure SetConnectionParams(AParams: TStrings);
 begin
-  if SampleIsPostgres then
-    AParams.Values['ConnectorType'] := 'PostgreSQL'
-  else
-    AParams.Values['ConnectorType'] := 'Firebird';
-  AParams.Values['HostName'] := Host;
-  AParams.Values['Port'] := Port;
+  case SampleEngine of
+    sePostgreSQL: AParams.Values['ConnectorType'] := 'PostgreSQL';
+    seFirebird: AParams.Values['ConnectorType'] := 'Firebird';
+    seSQLite: AParams.Values['ConnectorType'] := 'SQLite3';
+  end;
+  if SampleEngine <> seSQLite then
+  begin
+    AParams.Values['HostName'] := Host;
+    AParams.Values['Port'] := Port;
+    AParams.Values['UserName'] := UserName;
+    AParams.Values['Password'] := Password;
+    AParams.Values['CharSet'] := 'UTF8';
+  end;
   AParams.Values['DatabaseName'] := DatabaseName;
-  AParams.Values['UserName'] := UserName;
-  AParams.Values['Password'] := Password;
-  AParams.Values['CharSet'] := 'UTF8';
   AParams.Values['ClientLibrary'] := ClientLibrary;
 end;
 
@@ -191,7 +214,14 @@ const
 
 procedure SetConnectionParams(AParams: TStrings);
 begin
-  if SampleIsPostgres then
+  if SampleEngine = seSQLite then
+  begin
+    // No server, credentials or client library: the engine is in the program.
+    AParams.Values['DriverID'] := 'SQLite';
+    AParams.Values['Database'] := DatabaseName;
+    Exit;
+  end;
+  if SampleEngine = sePostgreSQL then
     AParams.Values['DriverID'] := 'PG'
   else
   begin
@@ -216,29 +246,36 @@ end;
 {$IFEND}
 
 function SampleTarget: string;
-var
-  LEngine: string;
 begin
-  if SampleIsPostgres then
-    LEngine := 'PostgreSQL'
+  case SampleEngine of
+    sePostgreSQL: Result := Format('PostgreSQL on %s', [Host]);
+    seFirebird: Result := Format('Firebird on %s', [Host]);
   else
-    LEngine := 'Firebird';
-  Result := Format('%s on %s (%s adapter)', [LEngine, Host, ADAPTER_NAME]);
+    Result := Format('SQLite file %s', [DatabaseName]);
+  end;
+  Result := Format('%s (%s adapter)', [Result, ADAPTER_NAME]);
 end;
 
 function SampleConnectionSummary: string;
 var
   LPort, LClient: string;
 begin
-  LPort := Port;
-  if LPort = '' then
-    if SampleIsPostgres then
-      LPort := '5432 (default)'
-    else
-      LPort := '3050 (default)';
   LClient := ClientLibrary;
   if LClient = '' then
     LClient := '(default search path)';
+  if SampleEngine = seSQLite then
+  begin
+    Result :=
+      '  database: ' + DatabaseName + sLineBreak +
+      '  client:   ' + LClient;
+    Exit;
+  end;
+  LPort := Port;
+  if LPort = '' then
+    if SampleEngine = sePostgreSQL then
+      LPort := '5432 (default)'
+    else
+      LPort := '3050 (default)';
   Result :=
     '  host:     ' + Host + sLineBreak +
     '  port:     ' + LPort + sLineBreak +
@@ -274,15 +311,22 @@ var
 begin
   LConfig := TDatabaseConfig.Create;
   SetConnectionParams(LConfig.ConnectionParams);
-  if SampleIsPostgres then
-  begin
-    LConfig.SQLDialect := 'PostgreSQL';
-    LConfig.SQLDirectory := SQL_DIR_POSTGRESQL;
-  end
-  else
-  begin
-    LConfig.SQLDialect := 'Firebird';
-    LConfig.SQLDirectory := SQL_DIR_FIREBIRD;
+  case SampleEngine of
+    sePostgreSQL:
+      begin
+        LConfig.SQLDialect := 'PostgreSQL';
+        LConfig.SQLDirectory := SQL_DIR_POSTGRESQL;
+      end;
+    seFirebird:
+      begin
+        LConfig.SQLDialect := 'Firebird';
+        LConfig.SQLDirectory := SQL_DIR_FIREBIRD;
+      end;
+    seSQLite:
+      begin
+        LConfig.SQLDialect := 'SQLite';
+        LConfig.SQLDirectory := SQL_DIR_SQLITE;
+      end;
   end;
   LConfig.SqlSource := ASqlSource;
   // One connection opened up front, up to 5 under load; a caller waits at

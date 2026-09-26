@@ -1,7 +1,7 @@
 ﻿unit PascalDb.IntegrationEnv;
 
-{ The integration suite's environment: a fresh database per run (Firebird or
-  PostgreSQL), migrated with the library's own migration engine, and the
+{ The integration suite's environment: a fresh database per run (Firebird,
+  PostgreSQL or SQLite), migrated with the library's own migration engine, and the
   IDBFactory the contract tests run against. This is the only
   adapter-specific part of the integration suite: on FPC the factory is the
   SQLdb adapter's; on Delphi it is the FireDAC adapter's; with
@@ -10,26 +10,33 @@
   the same test bodies validate every adapter on every database.
 
   Settings (environment variables, all optional):
-    PASCALDB_IT_ENGINE    firebird (default) or postgresql
+    PASCALDB_IT_ENGINE    firebird (default), postgresql or sqlite
     PASCALDB_IT_HOST      server host. Firebird: '' = local server (path
-                          only). PostgreSQL: default localhost
+                          only). PostgreSQL: default localhost. Unused by
+                          SQLite
     PASCALDB_IT_PORT      server port (default: the driver's; PostgreSQL 5432)
     PASCALDB_IT_DATABASE  Firebird: database path on the server (default:
                           pascaldb_it.fdb next to the executable).
-                          PostgreSQL: database name (default pascaldb_it)
+                          PostgreSQL: database name (default pascaldb_it).
+                          SQLite: database file (default pascaldb_it.sqlite
+                          next to the executable)
     PASCALDB_IT_USER      default SYSDBA / postgres
     PASCALDB_IT_PASSWORD  default masterkey / postgres
-    PASCALDB_IT_CLIENT    full path of the client library (fbclient/libpq).
-                          When empty on Windows: Firebird, the client of a
-                          default Firebird 2.5 64-bit install that matches
-                          the executable's bitness (bin or WOW64);
-                          PostgreSQL (64-bit only), bin\libpq.dll of the
-                          newest install under C:\Program Files\PostgreSQL.
-                          Otherwise the driver's default search.
+    PASCALDB_IT_CLIENT    full path of the client library
+                          (fbclient/libpq/sqlite3). When empty on Windows:
+                          Firebird, the client of a default Firebird 2.5
+                          64-bit install that matches the executable's
+                          bitness (bin or WOW64); PostgreSQL (64-bit only),
+                          bin\libpq.dll of the newest install under
+                          C:\Program Files\PostgreSQL. Otherwise the
+                          driver's default search. FireDAC links SQLite into
+                          the program: no client library.
 
   The database is dropped (if it exists) and created on first use, and
   dropped again at the end of the run. PostgreSQL databases are created and
   dropped with SQL through a maintenance database, outside any transaction.
+  A SQLite database is a file: the first connection creates it, and dropping
+  it is deleting the file (with its -journal/-wal/-shm companions).
   Zeos has no call of its own to drop a Firebird database; the Zeos runners
   use PdbZeosDropFirebirdDatabase (PascalDb.Adapter.Zeos), which works on a
   remote server too. }
@@ -89,14 +96,32 @@ begin
     Result := ADefault;
 end;
 
-function IsPostgres: Boolean;
+type
+  TEngine = (engFirebird, engPostgres, engSQLite);
+
+function Engine: TEngine;
 var
   LEngine: string;
 begin
   LEngine := LowerCase(Env('PASCALDB_IT_ENGINE', 'firebird'));
-  if (LEngine <> 'firebird') and (LEngine <> 'postgresql') then
-    raise Exception.CreateFmt('PASCALDB_IT_ENGINE must be firebird or postgresql, not "%s"', [LEngine]);
-  Result := LEngine = 'postgresql';
+  if LEngine = 'firebird' then
+    Result := engFirebird
+  else if LEngine = 'postgresql' then
+    Result := engPostgres
+  else if LEngine = 'sqlite' then
+    Result := engSQLite
+  else
+    raise Exception.CreateFmt('PASCALDB_IT_ENGINE must be firebird, postgresql or sqlite, not "%s"', [LEngine]);
+end;
+
+function IsPostgres: Boolean;
+begin
+  Result := Engine = engPostgres;
+end;
+
+function IsSQLite: Boolean;
+begin
+  Result := Engine = engSQLite;
 end;
 
 function Host: string;
@@ -114,10 +139,24 @@ end;
 
 function DatabaseName: string;
 begin
-  if IsPostgres then
-    Result := Env('PASCALDB_IT_DATABASE', 'pascaldb_it')
+  case Engine of
+    engPostgres: Result := Env('PASCALDB_IT_DATABASE', 'pascaldb_it');
+    engSQLite: Result := Env('PASCALDB_IT_DATABASE', ExtractFilePath(ParamStr(0)) + 'pascaldb_it.sqlite');
   else
     Result := Env('PASCALDB_IT_DATABASE', ExtractFilePath(ParamStr(0)) + 'pascaldb_it.fdb');
+  end;
+end;
+
+// SQLite: the database file and the companions the engine may leave next to it.
+procedure DeleteSQLiteFiles;
+const
+  SUFFIXES: array[0..3] of string = ('', '-journal', '-wal', '-shm');
+var
+  LSuffix: string;
+begin
+  for LSuffix in SUFFIXES do
+    if FileExists(DatabaseName + LSuffix) then
+      DeleteFile(DatabaseName + LSuffix);
 end;
 
 function UserName: string;
@@ -172,7 +211,7 @@ begin
   begin
     if IsPostgres then
       Result := DefaultLibPq
-    else if FileExists(DEFAULT_FB25_CLIENT) then
+    else if (Engine = engFirebird) and FileExists(DEFAULT_FB25_CLIENT) then
       Result := DEFAULT_FB25_CLIENT;
   end;
   {$ENDIF}
@@ -189,11 +228,11 @@ var
 begin
   // Firebird: the text columns are declared UTF8 (the database default
   // character set is NONE). PostgreSQL: the database encoding (UTF8 in the
-  // official images) applies to every column.
-  if IsPostgres then
-    LUtf8 := ''
+  // official images) applies to every column. SQLite stores text as UTF-8.
+  if Engine = engFirebird then
+    LUtf8 := ' CHARACTER SET UTF8'
   else
-    LUtf8 := ' CHARACTER SET UTF8';
+    LUtf8 := '';
   Result := TMemorySqlSource.Create
     .Add(SQL_DIRECTORY, 'MIG.0001',
       'CREATE TABLE SCHEMA_MIGRATIONS (' +
@@ -231,10 +270,12 @@ end;
 procedure SetConnectionParams(AParams: TStrings; const ADatabase: string);
 begin
   // Zeos connection settings (see PascalDb.Adapter.Zeos)
-  if IsPostgres then
-    AParams.Values['Protocol'] := 'postgresql'
+  case Engine of
+    engPostgres: AParams.Values['Protocol'] := 'postgresql';
+    engSQLite: AParams.Values['Protocol'] := 'sqlite';
   else
     AParams.Values['Protocol'] := 'firebird';
+  end;
   AParams.Values['HostName'] := Host;
   AParams.Values['Port'] := Port;
   AParams.Values['Database'] := ADatabase;
@@ -269,6 +310,11 @@ end;
 
 procedure DropDatabase(const AConfig: IDatabaseConfig);
 begin
+  if IsSQLite then
+  begin
+    DeleteSQLiteFiles;
+    Exit;
+  end;
   if IsPostgres then
   begin
     try
@@ -295,6 +341,13 @@ var
   LConn: TZConnection;
 begin
   DropDatabase(AConfig);
+  if IsSQLite then
+  begin
+    // The first connection creates the file.
+    if FileExists(DatabaseName) then
+      raise Exception.CreateFmt('Could not delete the test database left by a previous run: %s (still in use?)', [DatabaseName]);
+    Exit;
+  end;
   if IsPostgres then
     ExecOnMaintenanceDb('CREATE DATABASE ' + DatabaseName)
   else
@@ -322,10 +375,12 @@ end;
 procedure SetConnectionParams(AParams: TStrings; const ADatabase: string);
 begin
   // SQLdb connection settings (see PascalDb.Adapter.SQLdb)
-  if IsPostgres then
-    AParams.Values['ConnectorType'] := 'PostgreSQL'
+  case Engine of
+    engPostgres: AParams.Values['ConnectorType'] := 'PostgreSQL';
+    engSQLite: AParams.Values['ConnectorType'] := 'SQLite3';
   else
     AParams.Values['ConnectorType'] := 'Firebird';
+  end;
   AParams.Values['HostName'] := Host;
   AParams.Values['Port'] := Port;
   AParams.Values['DatabaseName'] := ADatabase;
@@ -365,6 +420,11 @@ procedure DropDatabase(const AConfig: IDatabaseConfig);
 var
   LConn: TSQLConnection;
 begin
+  if IsSQLite then
+  begin
+    DeleteSQLiteFiles;
+    Exit;
+  end;
   LConn := NewDirectConnection;
   try
     try
@@ -382,6 +442,13 @@ var
   LConn: TSQLConnection;
 begin
   DropDatabase(AConfig);
+  if IsSQLite then
+  begin
+    // The first connection creates the file.
+    if FileExists(DatabaseName) then
+      raise Exception.CreateFmt('Could not delete the test database left by a previous run: %s (still in use?)', [DatabaseName]);
+    Exit;
+  end;
   LConn := NewDirectConnection;
   try
     LConn.CreateDB;
@@ -400,6 +467,13 @@ end;
 procedure SetConnectionParams(AParams: TStrings; const ADatabase: string);
 begin
   // FireDAC connection definition (see PascalDb.Adapter.FireDAC)
+  if IsSQLite then
+  begin
+    // No server, credentials or client library: the engine is in the program.
+    AParams.Values['DriverID'] := 'SQLite';
+    AParams.Values['Database'] := ADatabase;
+    Exit;
+  end;
   if IsPostgres then
     AParams.Values['DriverID'] := 'PG'
   else
@@ -463,6 +537,11 @@ procedure DropDatabase(const AConfig: IDatabaseConfig);
 var
   LConn: TFDConnection;
 begin
+  if IsSQLite then
+  begin
+    DeleteSQLiteFiles;
+    Exit;
+  end;
   if IsPostgres then
   begin
     try
@@ -493,6 +572,13 @@ var
   LConn: TFDConnection;
 begin
   DropDatabase(AConfig);
+  if IsSQLite then
+  begin
+    // The first connection creates the file.
+    if FileExists(DatabaseName) then
+      raise Exception.CreateFmt('Could not delete the test database left by a previous run: %s (still in use?)', [DatabaseName]);
+    Exit;
+  end;
   if IsPostgres then
   begin
     ExecOnMaintenanceDb('CREATE DATABASE ' + DatabaseName);
@@ -518,10 +604,12 @@ function BuildConfig: IDatabaseConfig;
 begin
   Result := TDatabaseConfig.Create;
   SetConnectionParams(Result.ConnectionParams, DatabaseName);
-  if IsPostgres then
-    Result.SQLDialect := 'PostgreSQL'
+  case Engine of
+    engPostgres: Result.SQLDialect := 'PostgreSQL';
+    engSQLite: Result.SQLDialect := 'SQLite';
   else
     Result.SQLDialect := 'Firebird';
+  end;
   Result.SQLDirectory := SQL_DIRECTORY;
   Result.SqlSource := BuildSqlSource;
   // 0 on purpose: the factory is created before the database is recreated,

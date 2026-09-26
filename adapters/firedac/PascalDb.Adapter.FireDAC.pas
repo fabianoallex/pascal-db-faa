@@ -7,18 +7,36 @@
   from PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams): FireDAC connection
-  definition parameters as Name=Value — DriverID (FB or PG), Database,
-  Server, Port, User_Name, Password, CharacterSet, ... — passed to
-  TFDConnection.Params as is, except:
+  definition parameters as Name=Value — DriverID (FB, PG or SQLite),
+  Database, Server, Port, User_Name, Password, CharacterSet, ... — passed
+  to TFDConnection.Params as is, except:
     VendorLib  full path of the client library (fbclient/libpq), applied
                once per process through the driver link (TFDPhysFBDriverLink /
                TFDPhysPgDriverLink) instead of a connection parameter. A
                32-bit program needs the 32-bit client (Firebird 2.5 64-bit
-               installs it in the WOW64 folder).
+               installs it in the WOW64 folder). Not for SQLite: its engine
+               is linked into the program (FireDAC.Phys.SQLiteWrapper.Stat),
+               so there is no client library.
+  SQLite (Database = the file, created on first connect). Unless the
+  settings say otherwise, connections here use:
+    LockingMode=Normal  FireDAC's documented default (Exclusive) keeps every
+                        other connection out of the file, so a pool couldn't
+                        open a second one (not tried with Exclusive);
+    SharedCache=False   with FireDAC's default (True), a second writer failed
+                        at once with "database table is locked" (a table
+                        lock, which the busy timeout doesn't wait for);
+    BusyTimeout=5000    and UpdateOptions.LockWait = True: with SharedCache
+                        off, a second writer still failed at once, with
+                        "database is locked"; with both of these set it
+                        waited for the lock (which of the two was needed
+                        wasn't isolated);
+    StringFormat=Unicode  with FireDAC's default, 'São Paulo → ok' came back
+                        as 'São Paulo ? ok': VARCHAR columns were handled as
+                        ANSI strings.
 
   The FireDAC runtime units every FireDAC program needs (Stan.Def,
-  Stan.Async, DApt, the FB and PG drivers) are used here, so a consumer
-  doesn't hit "Object factory ... missing". Connections run with
+  Stan.Async, DApt, the FB, PG and SQLite drivers) are used here, so a
+  consumer doesn't hit "Object factory ... missing". Connections run with
   ResourceOptions.SilentMode, so no wait-cursor unit is required either.
   Queries fetch the whole result on Open (FetchOptions.Mode = fmAll), so
   RecordCount is the real row count, as on the other adapters. }
@@ -43,6 +61,8 @@ uses
   FireDAC.Phys,
   FireDAC.Phys.FB,
   FireDAC.Phys.PG,
+  FireDAC.Phys.SQLite,
+  FireDAC.Phys.SQLiteWrapper.Stat,
   FireDAC.Comp.Client,
   PascalDb.Interfaces,
   PascalDb.SqlDialect,
@@ -185,7 +205,8 @@ begin
   else if SameText(ADriverID, 'PG') then
     LLink := TFDPhysPgDriverLink.Create(nil)
   else
-    raise EDatabaseError.CreateFmt('PascalDb.Adapter.FireDAC: VendorLib is only supported for FB and PG, not %s', [ADriverID]);
+    raise EDatabaseError.CreateFmt('PascalDb.Adapter.FireDAC: VendorLib is only supported for FB and PG, not %s ' +
+      '(SQLite is linked into the program)', [ADriverID]);
   PdbPreloadClientLibrary(AVendorLib);
   LLink.VendorLib := AVendorLib;
   GDriverLinks.Add(LLink);
@@ -464,6 +485,19 @@ begin
     for I := 0 to LParams.Count - 1 do
       if not SameText(LParams.Names[I], 'VendorLib') then
         LConn.Params.Add(LParams[I]);
+    // SQLite defaults: see the unit header.
+    if SameText(LParams.Values['DriverID'], 'SQLite') then
+    begin
+      if LConn.Params.Values['LockingMode'] = '' then
+        LConn.Params.Values['LockingMode'] := 'Normal';
+      if LConn.Params.Values['SharedCache'] = '' then
+        LConn.Params.Values['SharedCache'] := 'False';
+      if LConn.Params.Values['StringFormat'] = '' then
+        LConn.Params.Values['StringFormat'] := 'Unicode';
+      if LConn.Params.Values['BusyTimeout'] = '' then
+        LConn.Params.Values['BusyTimeout'] := '5000';
+      LConn.UpdateOptions.LockWait := True;
+    end;
     LConn.Connected := True;
   except
     LConn.Free;

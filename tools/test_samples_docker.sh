@@ -6,9 +6,10 @@
 # on the first run, none on the second; the outcomes of 04's partial updates
 # and of 05's three pool phases are checked in their output). Everything is
 # removed at the end, even on failure. Acceptance: every sample exits with 0
-# and reports 0 unfreed blocks.
+# and reports 0 unfreed blocks. SQLite needs no server: its database is a file
+# inside the FPC container.
 #
-# ENGINE:    postgresql (default) or firebird
+# ENGINE:    postgresql (default), firebird or sqlite
 # ADAPTER:   sqldb (default) or zeos
 # ZEOSDBO:   ADAPTER=zeos only: the ZeosLib 8 folder (the one containing
 #            src/core, src/dbc, ...), mounted read-only into the FPC container
@@ -38,7 +39,11 @@ case "$ENGINE" in
     SERVER_IMAGE="$FB_IMAGE"; SERVER_ENV="FIREBIRD_ROOT_PASSWORD=masterkey"; SERVER_ENV2="FIREBIRD_DATABASE=samples.fdb"
     CLIENT_PKG=libfbclient2; CLIENT_GLOB='/usr/lib/*/libfbclient.so.2'; DB_PORT=3050
     SAMPLE_DATABASE=/var/lib/firebird/data/samples.fdb; SAMPLE_PASSWORD=masterkey ;;
-  *) echo "ENGINE must be postgresql or firebird" >&2; exit 2 ;;
+  sqlite)
+    SERVER_IMAGE=""; SERVER_ENV=""; SERVER_ENV2=""
+    CLIENT_PKG=libsqlite3-0; CLIENT_GLOB='/usr/lib/*/libsqlite3.so.0'; DB_PORT=""
+    SAMPLE_DATABASE=/t/samples.sqlite; SAMPLE_PASSWORD="" ;;
+  *) echo "ENGINE must be postgresql, firebird or sqlite" >&2; exit 2 ;;
 esac
 
 ZEOS_MOUNT=""
@@ -66,7 +71,7 @@ cd "$ROOT"
 python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sql/MigrationsSql.res --check
 
 docker network create "$NET" >/dev/null
-docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" -e "$SERVER_ENV2" "$SERVER_IMAGE" >/dev/null
+[ -z "$SERVER_IMAGE" ] || docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" -e "$SERVER_ENV2" "$SERVER_IMAGE" >/dev/null
 
 # $ZEOS_MOUNT is unquoted on purpose: empty (no option) or "-v <dir>:/zeos:ro".
 MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MOUNT \
@@ -105,7 +110,9 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   build 04-optionals Optionals u4 "$ADAPTER_OPTS"
   build 05-pool PoolUnderLoad u5 "$ADAPTER_OPTS"
   run MockRepository
-  for i in $(seq 1 60); do (echo > /dev/tcp/$PASCALDB_SAMPLE_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
+  if [ -n "$DB_PORT" ]; then
+    for i in $(seq 1 60); do (echo > /dev/tcp/$PASCALDB_SAMPLE_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
+  fi
   # Firebird creates the database only after the port opens: retry briefly,
   # but only while the sample cannot connect.
   for i in 1 2 3 4 5 6; do
