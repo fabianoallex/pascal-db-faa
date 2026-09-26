@@ -275,7 +275,8 @@ Package Manager under "zeos").
 ## Gotchas found (Delphi × FPC 3.2.2)
 
 Format: symptom → cause → fix. Also recorded in the skill: 1–4, 7 in
-`references/rtl-gotchas.md` ("Generics / RTL collections", "Types", "Resource files"); 5–6 in
+`references/rtl-gotchas.md` ("Generics / RTL collections", "Types", "Resource files"), and 18
+in "Types"; 5–6 in
 the compat adapter bullet of `SKILL.md` ("Mirrored tests"); 8 in "Encoding"; 9 in the
 `lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14 and 16 in "Database access"; 12
 and 15 in the tests section (`TearDown`, `finalization`). The skill links to this repository
@@ -378,3 +379,10 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     come back. Fix: `SqlLines.Clear` before the assignment. Contract test
     `SameSqlReassigned_ParamsStillBind` failed on Zeos before the fix and passes on all four
     Linux combinations after it. Not measured: whether FireDAC was affected.
+18. **A `Double(...)` typecast of a `Currency` converts on FPC for Windows but not on FPC for
+    Linux.** Sample 03 printed prices with `Format('%8.2f', [Double(LResult.Currencies['PRICE'])])`:
+    `12.50` on Windows, `125000.00` on every Linux run. Isolated with FPC 3.2.2 x86_64 on both
+    targets: on win64 the cast gives `12.50`; on linux, `0.00` for a `Currency` variable and
+    `125000.00` for a `Currency` function result (the internal Int64, scaled by 10000); no
+    warning on either. An assignment to a `Double` gave `12.50` everywhere. Fix: convert by
+    assignment (`samples/03-migrations/Migrations.dpr`, `ListProducts`). Not measured: Delphi.
