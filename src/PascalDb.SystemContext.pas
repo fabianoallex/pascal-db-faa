@@ -6,7 +6,19 @@
   and TSleep.Sleep instead of SysUtils.Now/Sleep, and tests swap the
   implementation with SetClock/SetSleep (and restore the default with Reset)
   — that is what makes the pool's timeout, idle and wait behavior testable
-  without a real clock or Sleep. }
+  without a real clock or Sleep.
+
+  Thread safety: Now and Sleep are called from every thread that uses the
+  pool, so they only READ the current instance (reading an interface is
+  safe: its reference count changes atomically). The default instances are
+  created once, in this unit's initialization, while the program still has
+  a single thread. They used to be created lazily ("if not Assigned then
+  create") on the first call: two threads making that first call together
+  both wrote the shared interface, which is not atomic, and one instance
+  leaked while another was released twice (EInvalidPointer) — measured on
+  Linux FPC with the pool's concurrency tests on one CPU. SetClock,
+  SetSleep and Reset write it and are for tests: call them while no other
+  thread uses the pool. }
 
 interface
 
@@ -81,26 +93,25 @@ end;
 
 class function TClock.Now: TDateTime;
 begin
-  if not Assigned(FClock) then
-    FClock := TSystemClock.Create;
   Result := FClock.Now;
 end;
 
 class function TClock.Date: TDateTime;
 begin
-  if not Assigned(FClock) then
-    FClock := TSystemClock.Create;
   Result := FClock.Date;
 end;
 
 class procedure TClock.SetClock(AClock: IClock);
 begin
-  FClock := AClock;
+  if Assigned(AClock) then
+    FClock := AClock
+  else
+    Reset;
 end;
 
 class procedure TClock.Reset;
 begin
-  FClock := nil;
+  FClock := TSystemClock.Create;
 end;
 
 { TSystemSleep }
@@ -114,20 +125,29 @@ end;
 
 class procedure TSleep.Sleep(milliseconds: Cardinal);
 begin
-  if not Assigned(FSleep) then
-    FSleep := TSystemSleep.Create;
   FSleep.Sleep(milliseconds);
 end;
 
 class procedure TSleep.SetSleep(ASleep: ISleep);
 begin
-  FSleep := ASleep;
+  if Assigned(ASleep) then
+    FSleep := ASleep
+  else
+    Reset;
 end;
 
 class procedure TSleep.Reset;
 begin
-  FSleep := nil;
+  FSleep := TSystemSleep.Create;
 end;
 
-end.
+initialization
+  // Created here, single-threaded, never lazily: see the unit comment.
+  TClock.Reset;
+  TSleep.Reset;
 
+finalization
+  TClock.FClock := nil;
+  TSleep.FSleep := nil;
+
+end.

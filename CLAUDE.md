@@ -313,6 +313,16 @@ Package Manager under "zeos").
   clean. The contract suite is single-threaded, so it never exercised this. On a failure, the
   sample now prints the backtrace (FPC) and `test_samples_docker.sh` prints heaptrc's report on
   a leak; that is the evidence to start from.
+  **Likely explained (2026-09-26), not confirmed for this case:** `TClock` and `TSleep`
+  (`PascalDb.SystemContext`) created their default instance lazily on the first call, and two
+  threads making that first call together raced on the shared interface: one instance leaked,
+  another was released twice. Found through the unit suite failing in GitHub CI (2 unfreed
+  blocks of 32 bytes). Measured on Linux FPC, `--cpus=1`, 4 runners at once, `--suite=TPoolTests`
+  × 400: before the fix, 14 runs failed (`EInvalidPointer`, `EAccessViolation` in a pool worker)
+  and 73 leaked; 9/400 failed without heaptrc too, so it wasn't heaptrc. After it (default
+  instances created in the unit's initialization): 0 failures, 0 leaks. A pool whose callers
+  wait (`TSleep.Sleep`) or reuse connections (`TClock.Now`) from several threads at once, as
+  sample 05's phase 1, hit the same race. Close this item if sample 05 stays clean in CI.
 
 ---
 

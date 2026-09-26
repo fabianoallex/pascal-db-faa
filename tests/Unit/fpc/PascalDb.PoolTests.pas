@@ -686,6 +686,8 @@ begin
 end;
 
 function TDBFactoryMock.CreateConnection: IDBConnection;
+var
+  LConn: TFakeDBConnection;
 begin
   if FCreateConnectionFailuresRemaining > 0 then
   begin
@@ -693,8 +695,14 @@ begin
     raise Exception.Create('fake connect failure (database offline)');
   end;
 
-  FLastCreatedConnection := TFakeDBConnection.Create;
-  Result := FLastCreatedConnection;
+  // The pool calls this from several threads at once (outside its lock).
+  // Result must come from the local, never from re-reading the shared
+  // field: another thread may have overwritten it in between, leaving this
+  // connection unreferenced (a leak) and handing the other one out twice
+  // (freed while still in use: EInvalidPointer).
+  LConn := TFakeDBConnection.Create;
+  Result := LConn;
+  FLastCreatedConnection := LConn;
 end;
 
 procedure TDBFactoryMock.SimulateCreateConnectionFail(ACount: Integer);
