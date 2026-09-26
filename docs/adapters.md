@@ -124,4 +124,4 @@ An adapter implements `IDBComponentProvider` (connection, transaction, query, sc
 top of `PascalDb.Adapter.Base` and `PascalDb.Adapter.DataSet`, which already hold everything
 that isn't driver-specific: most of each existing adapter is its driver's quirks. The integration
 contract suite (`tests/Integration`) is what tells whether a new adapter behaves like the
-others.
+others. [Guide 9](writing-an-adapter.md) walks through it, with a skeleton.

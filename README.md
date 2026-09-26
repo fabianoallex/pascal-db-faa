@@ -47,7 +47,8 @@ end;  // the connection goes back to the pool when LQuery and LScope are release
 ## Documentation
 
 - [**Guides**](docs/README.md): getting started, SQL by key and templates, optional and
-  nullable values, migrations, testing with the mock, errors, the pool, adapters and databases.
+  nullable values, migrations, testing with the mock, errors, the pool, adapters and databases,
+  writing an adapter for another component.
 - [**Samples**](samples/README.md): five console programs, each one source for both compilers.
 
 No version has been tagged yet: the API isn't frozen.

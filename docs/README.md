@@ -14,6 +14,7 @@ Free Pascal (see [`samples/README.md`](../samples/README.md)).
 | [6. Errors](errors.md) | What raises what, and when: connecting, a connection lost in use, data errors, pool timeouts | 02, 05 |
 | [7. The connection pool](pool.md) | Settings, growth and waiting, idle sweep, events and snapshots | 05 |
 | [8. Adapters and databases](adapters.md) | SQLdb / FireDAC / Zeos × Firebird / PostgreSQL / SQLite: connection settings, client libraries, SQLite notes, what an FPC program must do | all |
+| [9. Writing an adapter](writing-an-adapter.md) | Supporting another connection component (or database): the classes to write, a skeleton, what the library relies on, checking it with the contract suite | — |
 
 ## Status
 
