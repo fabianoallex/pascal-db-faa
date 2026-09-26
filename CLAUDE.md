@@ -276,7 +276,7 @@ Package Manager under "zeos").
 
 Format: symptom → cause → fix. Also recorded in the skill: 1–4, 7 in
 `references/rtl-gotchas.md` ("Generics / RTL collections", "Types", "Resource files"), 18
-in "Types" and 19 in "Resource files"; 5–6 in
+in "Types", 19 in "Resource files" and 20 in "Threading / interop"; 5–6 in
 the compat adapter bullet of `SKILL.md` ("Mirrored tests"); 8 in "Encoding"; 9 in the
 `lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14 and 16 in "Database access"; 12
 and 15 in the tests section (`TearDown`, `finalization`). The skill links to this repository
