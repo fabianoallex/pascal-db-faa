@@ -188,8 +188,10 @@ begin
   try
     if not Supports(LConn.GetSQLDialect, IMigrationDialect, Result) then
       raise Exception.Create(
-        'The configured dialect does not implement IMigrationDialect. ' +
-        'Check that TFirebirdDialect or TPostgreSQLDialect is in use.');
+        'The configured SQL dialect does not implement IMigrationDialect. ' +
+        'Check IDatabaseConfig.SQLDialect (the built-in ones are Firebird, PostgreSQL ' +
+        'and SQLite); a dialect registered with TSQLDialectFactory.RegisterDialect must ' +
+        'implement IMigrationDialect to run migrations.');
   finally
     LConn := nil; // returns it to the pool
   end;
