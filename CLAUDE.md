@@ -396,3 +396,13 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     `-FU` when the project has a unit output directory (the samples' `.lpi` do). Fix: never give
     an embedded `.res` the project's name (now `sql/MigrationsSql.res`). Not measured: Delphi's
     resolution of the same case, and FPC versions other than 3.2.2.
+20. **On FPC, console lines written by two threads come out cut in the middle when the output is
+    redirected, even under a lock.** Sample 05 writes from worker threads, the pool's sweep thread
+    and the main thread, every line inside one `TCriticalSection`; on Linux, redirected to a file,
+    a line came out as `pool: 1 open (1 id` + the sweep thread's line + `le), max 3; ...`. Cause:
+    FPC's `Output` is a threadvar, one buffer per thread, and each buffer reaches the file when it
+    fills, not when the lock is released. Isolated with FPC 3.2.2 (x86_64), two threads writing 200
+    locked lines each, output redirected: linux, 2 broken lines without `Flush(Output)` and 0 with
+    it; win64, 0 in both. Fix: `Flush(Output)` inside the lock, after `Writeln`
+    (`samples/05-pool/PoolUnderLoad.dpr`, `Say`). Not measured: Delphi, and an interactive
+    terminal on Linux.

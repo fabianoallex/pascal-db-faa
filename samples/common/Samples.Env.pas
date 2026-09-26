@@ -34,7 +34,8 @@ interface
 uses
   SysUtils,
   PascalDb.Interfaces,
-  PascalDb.SqlSources;
+  PascalDb.SqlSources,
+  PascalDb.Pool;
 
 const
   SQL_DIR_POSTGRESQL = 'PG';
@@ -49,8 +50,16 @@ function SampleConnectionSummary: string;
 /// Acquires (and returns) a pooled connection; when that fails, prints the
 /// settings in use and re-raises the driver's exception.
 procedure CheckSampleConnection(const AFactory: IDBFactory);
+/// The configuration for the configured database, SQL read from
+/// ASqlSource, with the samples' default pool settings; change what you need
+/// before passing it to NewSampleFactory.
+function NewSampleConfig(const ASqlSource: ISqlSource): IDatabaseConfig;
 /// A factory for the configured database; SQL is read from ASqlSource.
-function NewSampleFactory(const ASqlSource: ISqlSource): IDBFactory;
+function NewSampleFactory(const ASqlSource: ISqlSource): IDBFactory; overload;
+/// A factory for AConfig; AOnPoolEvent receives the pool's events (see
+/// TPoolEventKind), from whichever thread caused them.
+function NewSampleFactory(const AConfig: IDatabaseConfig;
+  AOnPoolEvent: TPoolEventProc = nil): IDBFactory; overload;
 
 implementation
 
@@ -145,9 +154,9 @@ begin
   AParams.Values['LibraryLocation'] := ClientLibrary;
 end;
 
-function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
+function NewFactory(const AConfig: IDatabaseConfig; AOnPoolEvent: TPoolEventProc): IDBFactory;
 begin
-  Result := TZeosFactory.Create(AConfig);
+  Result := TZeosFactory.Create(AConfig, nil, AOnPoolEvent);
 end;
 
 {$ELSEIF DEFINED(FPC)}
@@ -170,9 +179,9 @@ begin
   AParams.Values['ClientLibrary'] := ClientLibrary;
 end;
 
-function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
+function NewFactory(const AConfig: IDatabaseConfig; AOnPoolEvent: TPoolEventProc): IDBFactory;
 begin
-  Result := TSQLdbFactory.Create(AConfig);
+  Result := TSQLdbFactory.Create(AConfig, nil, AOnPoolEvent);
 end;
 
 {$ELSE}
@@ -199,9 +208,9 @@ begin
   AParams.Values['VendorLib'] := ClientLibrary;
 end;
 
-function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
+function NewFactory(const AConfig: IDatabaseConfig; AOnPoolEvent: TPoolEventProc): IDBFactory;
 begin
-  Result := TFDFactory.Create(AConfig);
+  Result := TFDFactory.Create(AConfig, nil, AOnPoolEvent);
 end;
 
 {$IFEND}
@@ -259,7 +268,7 @@ begin
   end;
 end;
 
-function NewSampleFactory(const ASqlSource: ISqlSource): IDBFactory;
+function NewSampleConfig(const ASqlSource: ISqlSource): IDatabaseConfig;
 var
   LConfig: IDatabaseConfig; // an interface variable, never a class one (see CLAUDE.md)
 begin
@@ -282,7 +291,17 @@ begin
   LConfig.PoolMaxConnections := 5;
   LConfig.PoolWaitMaxAttemps := 50;
   LConfig.PoolWaitMilliseconds := 100;
-  Result := NewFactory(LConfig);
+  Result := LConfig;
+end;
+
+function NewSampleFactory(const ASqlSource: ISqlSource): IDBFactory;
+begin
+  Result := NewFactory(NewSampleConfig(ASqlSource), nil);
+end;
+
+function NewSampleFactory(const AConfig: IDatabaseConfig; AOnPoolEvent: TPoolEventProc): IDBFactory;
+begin
+  Result := NewFactory(AConfig, AOnPoolEvent);
 end;
 
 end.

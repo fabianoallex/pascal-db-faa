@@ -10,11 +10,12 @@ both compilers**: open the `.dproj` in Delphi or the `.lpi` in Lazarus (they're 
 | [02-quickstart](02-quickstart/Quickstart.dpr) | Configuration and factory, the acquire / start / commit / rollback pattern, SQL by key with one version per database, the same repository on a real database, a batch rolled back as a whole, error handling | Yes |
 | [03-migrations](03-migrations/Migrations.dpr) | Versioned migrations (`TDBMigrationEngine`): `IsDDL` and why DDL and DML go in separate migrations, progress events through a method, running twice applies nothing; SQL in `.sql` files embedded as resources (`build_sql_res.py`), with a folder that overrides them during development | Yes |
 | [04-optionals](04-optionals/Optionals.dpr) | `INullXxx` / `IOptXxx` / `IOptNullXxx` as parameters and column reads; SQL templates shaped by them: optional filters (`ApplyFilter`, `${NAME_OP}`), partial updates where Undefined leaves a column alone and Null clears it (`ProcessTag`), printing the SQL each case produces | Yes |
+| [05-pool](05-pool/PoolUnderLoad.dpr) | The connection pool under concurrent load (worker threads): growth up to the limit, callers waiting their turn, `EPoolTimeoutException` when the wait runs out, the idle sweep; observed through its events (thread-safe handler) and `GetSnapshot` | Yes |
 
 01 and 02 share `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
 and against PostgreSQL or Firebird in 02.
 
-## Running samples 02 to 04
+## Running samples 02 to 05
 
 They connect to a local PostgreSQL by default:
 
