@@ -1,7 +1,8 @@
 #!/bin/sh
 # Everything CI runs (.github/workflows/ci.yml), also runnable locally with
-# Docker: the unit suite, then the integration (contract) suite for the SQLdb
-# and Zeos adapters on Firebird 5 and PostgreSQL 17, all on Linux FPC 3.2.2.
+# Docker: the unit suite, then the integration (contract) suite and the
+# samples for the SQLdb and Zeos adapters on Firebird 5 and PostgreSQL 17, all
+# on Linux FPC 3.2.2.
 # Delphi Community Edition can't build headless, so the Delphi side is still
 # validated in the IDE (see CLAUDE.md, "Tests").
 #
@@ -44,5 +45,11 @@ for ADAPTER in sqldb zeos; do
   for ENGINE in firebird postgresql; do
     echo "== integration: $ADAPTER on $ENGINE"
     ADAPTER=$ADAPTER ENGINE=$ENGINE sh tools/test_integration_docker.sh
+  done
+done
+for ADAPTER in sqldb zeos; do
+  for ENGINE in firebird postgresql; do
+    echo "== samples: $ADAPTER on $ENGINE"
+    ADAPTER=$ADAPTER ENGINE=$ENGINE sh tools/test_samples_docker.sh
   done
 done

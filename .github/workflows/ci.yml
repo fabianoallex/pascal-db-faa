@@ -17,5 +17,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Unit and integration suites (FPC 3.2.2, Firebird 5, PostgreSQL 17)
+      - name: Unit and integration suites and samples (FPC 3.2.2, Firebird 5, PostgreSQL 17)
         run: sh tools/ci-test.sh

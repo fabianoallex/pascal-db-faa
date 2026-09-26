@@ -64,8 +64,8 @@ PascalDb.lpg            Lazarus project group
 - Integration, Linux (Docker): `sh tools/test_integration_docker.sh` (Firebird 5) or
   `ENGINE=postgresql sh tools/test_integration_docker.sh` (PostgreSQL 17); `ADAPTER=zeos`
   (with `ZEOSDBO` set to the ZeosLib folder) runs it on the Zeos adapter
-- Everything CI runs, locally: `sh tools/ci-test.sh` (unit suite + both Linux adapters on both
-  databases; downloads ZeosLib 8.0.0 when `ZEOSDBO` isn't set)
+- Everything CI runs, locally: `sh tools/ci-test.sh` (unit suite, then the integration suite and
+  the samples on both Linux adapters and both databases; downloads ZeosLib 8.0.0 when `ZEOSDBO` isn't set)
 - Integration, Windows (local Firebird, or PostgreSQL with `PASCALDB_IT_ENGINE=postgresql` — see
   `CLAUDE.md`): `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi`
   (SQLdb), `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos),
