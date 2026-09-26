@@ -20,6 +20,16 @@
           <Mode Name="Default"/>
         </BuildModes>
       </Target>
+      <Target FileName="samples\01-mock-repository\MockRepository.lpi">
+        <BuildModes>
+          <Mode Name="Default"/>
+        </BuildModes>
+      </Target>
+      <Target FileName="samples\02-quickstart\Quickstart.lpi">
+        <BuildModes>
+          <Mode Name="Default"/>
+        </BuildModes>
+      </Target>
     </Targets>
   </ProjectGroup>
 </CONFIG>

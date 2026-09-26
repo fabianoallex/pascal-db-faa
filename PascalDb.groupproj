@@ -12,6 +12,12 @@
         <Projects Include="tests\Integration\PascalDb.IntegrationTestsZeos.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="samples\01-mock-repository\MockRepository.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="samples\02-quickstart\Quickstart.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -47,14 +53,32 @@
     <Target Name="PascalDb_IntegrationTestsZeos:Make">
         <MSBuild Projects="tests\Integration\PascalDb.IntegrationTestsZeos.dproj" Targets="Make"/>
     </Target>
+    <Target Name="MockRepository">
+        <MSBuild Projects="samples\01-mock-repository\MockRepository.dproj"/>
+    </Target>
+    <Target Name="MockRepository:Clean">
+        <MSBuild Projects="samples\01-mock-repository\MockRepository.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="MockRepository:Make">
+        <MSBuild Projects="samples\01-mock-repository\MockRepository.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Quickstart">
+        <MSBuild Projects="samples\02-quickstart\Quickstart.dproj"/>
+    </Target>
+    <Target Name="Quickstart:Clean">
+        <MSBuild Projects="samples\02-quickstart\Quickstart.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="Quickstart:Make">
+        <MSBuild Projects="samples\02-quickstart\Quickstart.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests;PascalDb_IntegrationTestsZeos"/>
+        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests;PascalDb_IntegrationTestsZeos;MockRepository;Quickstart"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean;PascalDb_IntegrationTestsZeos:Clean"/>
+        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean;PascalDb_IntegrationTestsZeos:Clean;MockRepository:Clean;Quickstart:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make;PascalDb_IntegrationTestsZeos:Make"/>
+        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make;PascalDb_IntegrationTestsZeos:Make;MockRepository:Make;Quickstart:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

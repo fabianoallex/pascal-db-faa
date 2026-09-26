@@ -17,8 +17,11 @@ linux/
 
 # ELF binary (no extension) produced by lazbuild on Linux in the project folder
 tests/Unit/fpc/PascalDbUnitTestsFpc
+samples/01-mock-repository/MockRepository
+samples/02-quickstart/Quickstart
 
 # test script logs
+samples/*/build.log
 tests/Unit/fpc/build.log
 tests/Unit/fpc/run.log
 

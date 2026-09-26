@@ -51,6 +51,7 @@ tests/Integration/fpc-zeos/  FPCUnit runner on Zeos (same mirror)
 adapters/sqldb/         SQLdb adapter (package pascal_db_faa_sqldb.lpk)
 adapters/firedac/       FireDAC adapter (Delphi)
 adapters/zeos/          Zeos adapter (both; package pascal_db_faa_zeos.lpk)
+samples/                console samples, one source for both compilers (see samples/README.md)
 tools/                  gen_fpc_mirror.py, build_sql_res.py, test_*.sh, ci-test.sh
 PascalDb.groupproj      Delphi project group
 PascalDb.lpg            Lazarus project group

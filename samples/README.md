@@ -1,0 +1,53 @@
+# Samples
+
+Console programs showing how to use pascal-db-faa. Each sample is **one source file for
+both compilers**: open the `.dproj` in Delphi or the `.lpi` in Lazarus (they're also in
+`PascalDb.groupproj` and `PascalDb.lpg`).
+
+| Sample | Shows | Needs a database |
+|---|---|---|
+| [01-mock-repository](01-mock-repository/MockRepository.dpr) | A repository that only knows `IDBFactory`, checked against `TMockDBFactory`: canned results, recorded executions and parameters | No |
+| [02-quickstart](02-quickstart/Quickstart.dpr) | Configuration and factory, the acquire / start / commit / rollback pattern, SQL by key with one version per database, the same repository on a real database, a batch rolled back as a whole, error handling | Yes |
+
+Both use `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
+and against PostgreSQL or Firebird in 02.
+
+## Running sample 02
+
+It connects to a local PostgreSQL by default:
+
+```
+docker run -d --name pascaldb-sample-pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:17
+```
+
+Settings come from environment variables (`PASCALDB_SAMPLE_ENGINE`, `_HOST`, `_PORT`,
+`_DATABASE`, `_USER`, `_PASSWORD`, `_CLIENT`); `common/Samples.Env.pas` documents them.
+On Windows, point `PASCALDB_SAMPLE_CLIENT` at the client library when it isn't on the
+`PATH`, e.g. `C:\Program Files\PostgreSQL\17\bin\libpq.dll` (64-bit programs only:
+PostgreSQL ships no 32-bit client). For Firebird, set `PASCALDB_SAMPLE_ENGINE=firebird`
+and `PASCALDB_SAMPLE_DATABASE` to an existing database.
+
+On PostgreSQL, from the second run on, the client library prints
+`NOTICE: relation "sample_cities" already exists, skipping` to stderr: it comes from
+`CREATE TABLE IF NOT EXISTS` and is harmless.
+
+## Adapter
+
+`common/Samples.Env.pas` is the only adapter-specific unit: SQLdb on Free Pascal, FireDAC
+on Delphi. Define `PASCALDB_SAMPLES_ZEOS` to use Zeos on either compiler instead (add
+`adapters/zeos` and the ZeosLib source folders to the search path; on Lazarus, require
+`pascal_db_faa_zeos.lpk` instead of `pascal_db_faa_sqldb.lpk`).
+
+## Free Pascal programs
+
+Both samples do what any FPC console program using the library must do: call
+`SetMultiByteConversionCodePage(CP_UTF8)` at startup and, on Unix, use `cthreads` and
+`cwstring` (see "Runtime requirements for FPC applications" in `CLAUDE.md`). Source files
+with non-ASCII literals are saved as UTF-8 with a BOM, so both compilers read them as
+UTF-8.
+
+## Testing the samples
+
+`sh tools/test_samples_docker.sh` builds both samples on Linux FPC and runs them against
+a PostgreSQL container (`ENGINE=firebird` for Firebird 5, `ADAPTER=zeos` with `ZEOSDBO`
+for Zeos); each must exit with 0 and report 0 unfreed blocks.
