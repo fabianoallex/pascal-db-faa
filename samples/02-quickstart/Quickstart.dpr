@@ -91,26 +91,6 @@ begin
   end;
 end;
 
-// A failed connect raises the driver's own exception, different for each
-// driver and silent about where the settings come from. Connecting alone,
-// before any SQL, is the one place where an exception can only mean "could
-// not connect", so this is where to say what to check.
-procedure CheckConnection(const AFactory: IDBFactory);
-var
-  LConn: IDBConnection;
-begin
-  try
-    LConn := AFactory.GetPool.AcquireConnection;
-    LConn := nil; // back to the pool
-  except
-    Writeln('Could not connect. Settings in use (PASCALDB_SAMPLE_*, see samples/README.md):');
-    Writeln(SampleConnectionSummary);
-    Writeln('Is the server running? Does the client library match this program''s bitness?');
-    Writeln;
-    raise; // the driver's message follows, from the handler in the main block
-  end;
-end;
-
 procedure PrintState(ARepo: TCityRepository; const AState: string);
 var
   LCity: TCity;
@@ -127,7 +107,8 @@ var
 begin
   Writeln('Target: ', SampleTarget);
   LFactory := NewSampleFactory(BuildSqlSource);
-  CheckConnection(LFactory);
+  // Connect before any SQL; on failure, lists the settings to check.
+  CheckSampleConnection(LFactory);
   Writeln('Connected.');
 
   // DDL runs in its own transaction: Firebird can't use a table in the

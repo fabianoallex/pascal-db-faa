@@ -2,7 +2,8 @@
 # Builds the samples on Linux FPC and runs them, SQLdb or Zeos adapter: a
 # database server container plus an FPC container on a private Docker network
 # (same layout as test_integration_docker.sh). Sample 01 needs no database;
-# sample 02 runs against the server. Everything is removed at the end, even on
+# samples 02 and 03 run against the server (03 twice: every migration applies
+# on the first run, none on the second). Everything is removed at the end, even on
 # failure. Acceptance: every sample exits with 0 and reports 0 unfreed blocks.
 #
 # ENGINE:    postgresql (default) or firebird
@@ -59,6 +60,9 @@ cleanup() {
 trap cleanup EXIT
 cleanup
 
+cd "$ROOT"
+python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sql/Migrations.res --check
+
 docker network create "$NET" >/dev/null
 docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" -e "$SERVER_ENV2" "$SERVER_IMAGE" >/dev/null
 
@@ -76,30 +80,34 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   apt-get install -y -qq "$CLIENT_PKG" >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
   export PASCALDB_SAMPLE_CLIENT="$(ls $CLIENT_GLOB 2>/dev/null | head -1)"
   [ -n "$PASCALDB_SAMPLE_CLIENT" ] || { echo "client library not installed: $CLIENT_GLOB"; tail -20 /t-apt.log; exit 1; }
-  mkdir -p /t/u1 /t/u2 && cp -r /src/src /src/adapters /src/samples /t/
+  mkdir -p /t/u1 /t/u2 /t/u3 && cp -r /src/src /src/adapters /src/samples /t/
   build() { # dir program units-folder [extra options]
     cd /t/samples/$1
     fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src -Fu../common -FU/t/$3 -gh -gl -o/t/$2 $4 $2.dpr > /t/build-$2.log 2>&1 \
       || { grep -iE "error|fatal" /t/build-$2.log | head -30; exit 1; }
   }
-  run() { # program
-    echo "== $1"
+  run() { # program [arguments]
+    echo "== $*"
     cd /t
     rm -f /t/heap-$1.txt # heaptrc appends to its log
-    HEAPTRC="log=/t/heap-$1.txt" ./$1 > /t/run-$1.log 2>&1 && LCODE=0 || LCODE=$?
+    HEAPTRC="log=/t/heap-$1.txt" ./"$@" > /t/run-$1.log 2>&1 && LCODE=0 || LCODE=$?
     cat /t/run-$1.log
     grep "unfreed" /t/heap-$1.txt
     [ "$LCODE" = 0 ] && grep -qE "^0 unfreed memory blocks" /t/heap-$1.txt
   }
   build 01-mock-repository MockRepository u1
   build 02-quickstart Quickstart u2 "$ADAPTER_OPTS"
+  build 03-migrations Migrations u3 "$ADAPTER_OPTS"
   run MockRepository
   for i in $(seq 1 60); do (echo > /dev/tcp/$PASCALDB_SAMPLE_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
   # Firebird creates the database only after the port opens: retry briefly,
-  # but only while the sample fails before reaching the database.
-  for i in 1 2 3 4 5; do
-    run Quickstart && exit 0
-    grep -q "ready and empty" /t/run-Quickstart.log && exit 1
+  # but only while the sample cannot connect.
+  for i in 1 2 3 4 5 6; do
+    run Quickstart && break
+    grep -q "^Could not connect" /t/run-Quickstart.log && [ $i -lt 6 ] || exit 1
     echo "(could not connect yet; retrying in 3 s)"; sleep 3
   done
-  exit 1'
+  run Migrations
+  grep -q "applied 5; schema version now: 5" /t/run-Migrations.log || { echo "expected 5 migrations applied"; exit 1; }
+  run Migrations
+  grep -q "applied 0; schema version now: 5" /t/run-Migrations.log || { echo "expected no pending migration"; exit 1; }'

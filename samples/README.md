@@ -8,13 +8,14 @@ both compilers**: open the `.dproj` in Delphi or the `.lpi` in Lazarus (they're 
 |---|---|---|
 | [01-mock-repository](01-mock-repository/MockRepository.dpr) | A repository that only knows `IDBFactory`, checked against `TMockDBFactory`: canned results, recorded executions and parameters | No |
 | [02-quickstart](02-quickstart/Quickstart.dpr) | Configuration and factory, the acquire / start / commit / rollback pattern, SQL by key with one version per database, the same repository on a real database, a batch rolled back as a whole, error handling | Yes |
+| [03-migrations](03-migrations/Migrations.dpr) | Versioned migrations (`TDBMigrationEngine`): `IsDDL` and why DDL and DML go in separate migrations, progress events through a method, running twice applies nothing; SQL in `.sql` files embedded as resources (`build_sql_res.py`), with a folder that overrides them during development | Yes |
 
-Both use `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
+01 and 02 share `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
 and against PostgreSQL or Firebird in 02.
 
-## Running sample 02
+## Running samples 02 and 03
 
-It connects to a local PostgreSQL by default:
+They connect to a local PostgreSQL by default:
 
 ```
 docker run -d --name pascaldb-sample-pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:17
@@ -31,6 +32,20 @@ On PostgreSQL, from the second run on, the client library prints
 `NOTICE: relation "sample_cities" already exists, skipping` to stderr: it comes from
 `CREATE TABLE IF NOT EXISTS` and is harmless.
 
+## Sample 03: SQL files
+
+The `.sql` files under `03-migrations/sql/PG` and `sql/FB` are linked into the program
+through `sql/Migrations.res`. After editing one, rebuild the `.res` (the test script
+checks it's up to date):
+
+```
+python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sql/Migrations.res
+```
+
+Or, while developing, set `PASCALDB_SAMPLE_SQL_DIR` to the `sql` folder: the files there
+are read first and the embedded copies are only the fallback. `--reset` drops the
+sample's tables (`SAMPLE_PRODUCTS`, `SCHEMA_MIGRATIONS`) so every migration applies again.
+
 ## Adapter
 
 `common/Samples.Env.pas` is the only adapter-specific unit: SQLdb on Free Pascal, FireDAC
@@ -40,7 +55,7 @@ on Delphi. Define `PASCALDB_SAMPLES_ZEOS` to use Zeos on either compiler instead
 
 ## Free Pascal programs
 
-Both samples do what any FPC console program using the library must do: call
+The samples do what any FPC console program using the library must do: call
 `SetMultiByteConversionCodePage(CP_UTF8)` at startup and, on Unix, use `cthreads` and
 `cwstring` (see "Runtime requirements for FPC applications" in `CLAUDE.md`). Source files
 with non-ASCII literals are saved as UTF-8 with a BOM, so both compilers read them as
@@ -48,6 +63,6 @@ UTF-8.
 
 ## Testing the samples
 
-`sh tools/test_samples_docker.sh` builds both samples on Linux FPC and runs them against
+`sh tools/test_samples_docker.sh` builds the samples on Linux FPC and runs them against
 a PostgreSQL container (`ENGINE=firebird` for Firebird 5, `ADAPTER=zeos` with `ZEOSDBO`
 for Zeos); each must exit with 0 and report 0 unfreed blocks.
