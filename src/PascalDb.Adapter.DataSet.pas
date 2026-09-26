@@ -266,6 +266,10 @@ begin
   if DataSet.Active then
     DataSet.Close;
   DoClearParams;
+  // Clear first, so the driver always sees a change and re-creates the
+  // parameters: Zeos doesn't re-parse an SQL text equal to the current one,
+  // and the parameters DoClearParams just removed would never come back.
+  SqlLines.Clear;
   SqlLines.Text := ASql;
 end;
 

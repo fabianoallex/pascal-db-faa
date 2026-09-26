@@ -14,7 +14,8 @@
   library's own engine), a round trip of every parameter type, typed NULLs,
   optional columns through SQL tags, INSERT ... RETURNING, UTF-8 text,
   commit/rollback, nested scopes with savepoints, a constraint violation
-  that must not discard the connection, scripts, and row counts.
+  that must not discard the connection, scripts, row counts, and
+  parameters after the same SQL text is assigned again.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
   PascalDb.DUnitXCompat). The mirror in tests/Integration/fpc is generated
@@ -57,6 +58,7 @@ type
     procedure ConstraintViolation_RaisesDataError_KeepsConnection;
     procedure SqlScript_RunsEveryStatement;
     procedure RecordCount_CountsEveryRow;
+    procedure SameSqlReassigned_ParamsStillBind;
   end;
 
 implementation
@@ -458,6 +460,39 @@ begin
       LResult.Next;
     end;
     TAssert.AssertEquals(25, LSeen);
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+// Assigning Sql resets the parameters; assigning the same text again (a loop
+// that sets Sql on every iteration) must still leave them bindable. Zeos
+// doesn't re-parse an unchanged SQL text, so the adapter base used to lose
+// them there ("Parameter "ID" not found").
+procedure TContractTests.SameSqlReassigned_ParamsStillBind;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  I: Integer;
+begin
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    for I := 1 to 3 do
+    begin
+      LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME)';
+      LQuery.Params.Integers['ID'] := 200 + I;
+      LQuery.Params.Strings['NAME'] := 'again ' + IntToStr(I);
+      LQuery.ExecSql;
+    end;
+    for I := 1 to 3 do
+    begin
+      LQuery.Sql := 'SELECT NAME FROM ITEMS WHERE ID = :ID';
+      LQuery.Params.Integers['ID'] := 200 + I;
+      TAssert.AssertEquals('again ' + IntToStr(I), LQuery.Open.Strings['NAME']);
+    end;
     LScope.Commit;
   except
     LScope.Rollback;

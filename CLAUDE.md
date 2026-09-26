@@ -368,3 +368,12 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     already fetches every result on `Open`); the suite then passed on Linux and still passed on
     Windows. Not measured: whether other statement kinds trigger it, and the Delphi runner with
     the Firebird 3+ API.
+17. **Zeos 8: assigning the same SQL text again loses the parameters.** Observed with the
+    Zeos adapter on Linux (FPC 3.2.2, PostgreSQL 17 and Firebird 5): a loop that set
+    `IQuery.Sql` to the same INSERT on every iteration failed on the second one with
+    `Parameter "CODE" not found` (found by sample 02; SQLdb passed). Cause:
+    `TDataSetQueryBase.SetSql` removes the parameters (`DoClearParams`) and then assigns
+    `SQL.Text`; Zeos doesn't re-parse a text equal to the current one, so the parameters never
+    come back. Fix: `SqlLines.Clear` before the assignment. Contract test
+    `SameSqlReassigned_ParamsStillBind` failed on Zeos before the fix and passes on all four
+    Linux combinations after it. Not measured: whether FireDAC was affected.
