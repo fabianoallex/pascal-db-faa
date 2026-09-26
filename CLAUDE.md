@@ -386,3 +386,13 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     `125000.00` for a `Currency` function result (the internal Int64, scaled by 10000); no
     warning on either. An assignment to a `Double` gave `12.50` everywhere. Fix: convert by
     assignment (`samples/03-migrations/Migrations.dpr`, `ListProducts`). Not measured: Delphi.
+19. **FPC with a unit output folder (`-FU`) links a same-named `.res` from the program's folder
+    instead of the path in `{$R}`.** Sample 03 linked its SQL as `{$R 'sql/Migrations.res'}`;
+    after the program was built in the Delphi IDE, which writes `Migrations.res` next to the
+    `.dpr`, every Linux run failed with `SQL not found ... resource SQL_PG_MIG_0001`, and passed
+    again with that file removed. Isolated with FPC 3.2.2 (linux and win64): a program with
+    `{$R 'sub/data.res'}` and another `data.res` next to it gets the one next to it when built with
+    `-FU`, whatever the program is called; without `-FU`, it gets `sub/data.res`. lazbuild passes
+    `-FU` when the project has a unit output directory (the samples' `.lpi` do). Fix: never give
+    an embedded `.res` the project's name (now `sql/MigrationsSql.res`). Not measured: Delphi's
+    resolution of the same case, and FPC versions other than 3.2.2.

@@ -20,6 +20,7 @@ tests/Unit/fpc/PascalDbUnitTestsFpc
 samples/01-mock-repository/MockRepository
 samples/02-quickstart/Quickstart
 samples/03-migrations/Migrations
+samples/04-optionals/Optionals
 
 # test script logs
 samples/*/build.log

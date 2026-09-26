@@ -6,10 +6,10 @@ program Migrations;
   SQL: sql/PG and sql/FB hold one .sql file per script; the name of the file
   is the key the program asks for (MIG.0001, PRODUCT.LIST, ...), and the
   factory's SQL directory (PG or FB, from Samples.Env) picks the folder.
-  tools/build_sql_res.py turns the tree into sql/Migrations.res, which the
+  tools/build_sql_res.py turns the tree into sql/MigrationsSql.res, which the
   $R directive below links into the program on both compilers; TResourceSqlSource
   reads it back. Rebuild the .res after editing a .sql file:
-    python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sql/Migrations.res
+    python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sql/MigrationsSql.res
   During development, set PASCALDB_SAMPLE_SQL_DIR to the sql folder: a
   TDirectorySqlSource then answers first and the embedded copy is only the
   fallback (TCompositeSqlSource), so an edited .sql takes effect without
@@ -40,7 +40,11 @@ program Migrations;
 {$IFDEF FPC}{$MODE DELPHI}{$H+}{$ENDIF}
 {$APPTYPE CONSOLE}
 
-{$R 'sql/Migrations.res'}
+// Not "Migrations.res": the Delphi IDE writes one next to this file, and FPC
+// with a unit output folder (-FU, as lazbuild uses) links a same-named .res
+// from the program's folder instead of the path given here (CLAUDE.md,
+// gotcha 19).
+{$R 'sql/MigrationsSql.res'}
 
 uses
   {$IFDEF UNIX}

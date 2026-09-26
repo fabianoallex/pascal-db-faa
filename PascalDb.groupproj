@@ -21,6 +21,9 @@
         <Projects Include="samples\03-migrations\Migrations.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="samples\04-optionals\Optionals.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -83,14 +86,23 @@
     <Target Name="Migrations:Make">
         <MSBuild Projects="samples\03-migrations\Migrations.dproj" Targets="Make"/>
     </Target>
+    <Target Name="Optionals">
+        <MSBuild Projects="samples\04-optionals\Optionals.dproj"/>
+    </Target>
+    <Target Name="Optionals:Clean">
+        <MSBuild Projects="samples\04-optionals\Optionals.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="Optionals:Make">
+        <MSBuild Projects="samples\04-optionals\Optionals.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests;PascalDb_IntegrationTestsZeos;MockRepository;Quickstart;Migrations"/>
+        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests;PascalDb_IntegrationTestsZeos;MockRepository;Quickstart;Migrations;Optionals"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean;PascalDb_IntegrationTestsZeos:Clean;MockRepository:Clean;Quickstart:Clean;Migrations:Clean"/>
+        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean;PascalDb_IntegrationTestsZeos:Clean;MockRepository:Clean;Quickstart:Clean;Migrations:Clean;Optionals:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make;PascalDb_IntegrationTestsZeos:Make;MockRepository:Make;Quickstart:Make;Migrations:Make"/>
+        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make;PascalDb_IntegrationTestsZeos:Make;MockRepository:Make;Quickstart:Make;Migrations:Make;Optionals:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

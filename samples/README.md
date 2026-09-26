@@ -9,11 +9,12 @@ both compilers**: open the `.dproj` in Delphi or the `.lpi` in Lazarus (they're 
 | [01-mock-repository](01-mock-repository/MockRepository.dpr) | A repository that only knows `IDBFactory`, checked against `TMockDBFactory`: canned results, recorded executions and parameters | No |
 | [02-quickstart](02-quickstart/Quickstart.dpr) | Configuration and factory, the acquire / start / commit / rollback pattern, SQL by key with one version per database, the same repository on a real database, a batch rolled back as a whole, error handling | Yes |
 | [03-migrations](03-migrations/Migrations.dpr) | Versioned migrations (`TDBMigrationEngine`): `IsDDL` and why DDL and DML go in separate migrations, progress events through a method, running twice applies nothing; SQL in `.sql` files embedded as resources (`build_sql_res.py`), with a folder that overrides them during development | Yes |
+| [04-optionals](04-optionals/Optionals.dpr) | `INullXxx` / `IOptXxx` / `IOptNullXxx` as parameters and column reads; SQL templates shaped by them: optional filters (`ApplyFilter`, `${NAME_OP}`), partial updates where Undefined leaves a column alone and Null clears it (`ProcessTag`), printing the SQL each case produces | Yes |
 
 01 and 02 share `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
 and against PostgreSQL or Firebird in 02.
 
-## Running samples 02 and 03
+## Running samples 02 to 04
 
 They connect to a local PostgreSQL by default:
 
@@ -35,11 +36,11 @@ On PostgreSQL, from the second run on, the client library prints
 ## Sample 03: SQL files
 
 The `.sql` files under `03-migrations/sql/PG` and `sql/FB` are linked into the program
-through `sql/Migrations.res`. After editing one, rebuild the `.res` (the test script
+through `sql/MigrationsSql.res`. After editing one, rebuild the `.res` (the test script
 checks it's up to date):
 
 ```
-python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sql/Migrations.res
+python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sql/MigrationsSql.res
 ```
 
 Or, while developing, set `PASCALDB_SAMPLE_SQL_DIR` to the `sql` folder: the files there
