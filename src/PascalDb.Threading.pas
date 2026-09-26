@@ -18,6 +18,8 @@ interface
 function PdbAtomicInc(var ATarget: Integer): Integer;
 function PdbAtomicDec(var ATarget: Integer): Integer;
 function PdbAtomicInc64(var ATarget: Int64): Int64;
+/// Adds ADelta atomically; returns the new value.
+function PdbAtomicAdd64(var ATarget: Int64; ADelta: Int64): Int64;
 function PdbAtomicRead64(var ATarget: Int64): Int64;
 
 /// Monotonic milliseconds (GetTickCount64), for measuring durations without
@@ -55,6 +57,15 @@ begin
   Result := InterLockedIncrement64(ATarget);
   {$ELSE}
   Result := AtomicIncrement(ATarget);
+  {$ENDIF}
+end;
+
+function PdbAtomicAdd64(var ATarget: Int64; ADelta: Int64): Int64;
+begin
+  {$IFDEF FPC}
+  Result := InterLockedExchangeAdd64(ATarget, ADelta) + ADelta;
+  {$ELSE}
+  Result := AtomicIncrement(ATarget, ADelta);
   {$ENDIF}
 end;
 

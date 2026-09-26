@@ -221,6 +221,9 @@ type
 
 implementation
 
+uses
+  PascalDb.Threading;
+
 type
   { Idle-connection sweep thread.
 
@@ -992,10 +995,12 @@ begin
   Result.PoolSize := FPool.Count;
   Result.MaxConnections := FMaxConnections;
   Result.IniConnections := FIniConnections;
-  Result.TotalCreated := FTotalCreated;
-  Result.TotalDiscarded := FTotalDiscarded;
-  Result.TotalTimeouts := FTotalTimeouts;
-  Result.TotalIdleSwept := FTotalIdleSwept;
+  // Incremented from any thread, some outside FLockPool: atomic reads (a
+  // plain 64-bit read can be torn on 32-bit targets).
+  Result.TotalCreated := PdbAtomicRead64(FTotalCreated);
+  Result.TotalDiscarded := PdbAtomicRead64(FTotalDiscarded);
+  Result.TotalTimeouts := PdbAtomicRead64(FTotalTimeouts);
+  Result.TotalIdleSwept := PdbAtomicRead64(FTotalIdleSwept);
 end;
 
 procedure TConnectionPool.StartIdleSweep;
@@ -1069,7 +1074,7 @@ begin
 
     if LToClose.Count > 0 then
     begin
-      Inc(FTotalIdleSwept, LToClose.Count);
+      PdbAtomicAdd64(FTotalIdleSwept, LToClose.Count);
       LEvent := BaseEvent(pekIdleSweepClosed);
       LEvent.ClosedCount := LToClose.Count;
       Notify(LEvent);
@@ -1112,7 +1117,7 @@ begin
           TryGetNewConnection) and the pool starts without this pre-warmed
           connection; the next real AcquireConnection (first request, health
           check, etc.) tries again. }
-        Inc(FTotalDiscarded);
+        PdbAtomicInc64(FTotalDiscarded);
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrConnectFailed;
         LEvent.ErrorMessage := E.Message;
@@ -1194,7 +1199,7 @@ var
       DecrementActiveConnections;
       raise;
     end;
-    Inc(FTotalCreated);
+    PdbAtomicInc64(FTotalCreated);
     Notify(BaseEvent(pekConnectionCreated));
   end;
 
@@ -1216,7 +1221,7 @@ var
           finally
             DecrementActiveConnections;
           end;
-          Inc(FTotalDiscarded);
+          PdbAtomicInc64(FTotalDiscarded);
           LEvent := BaseEvent(pekConnectionDiscarded);
           LEvent.DiscardReason := pdrConnectFailed;
           LEvent.ErrorMessage := E.Message;
@@ -1235,7 +1240,7 @@ var
         finally
           DecrementActiveConnections;
         end;
-        Inc(FTotalDiscarded);
+        PdbAtomicInc64(FTotalDiscarded);
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrStaleCheckFailed;
         Notify(LEvent);
@@ -1281,7 +1286,7 @@ begin
 
     if WaitAttempts >= FWaitMaxAttemps then
     begin
-      Inc(FTotalTimeouts);
+      PdbAtomicInc64(FTotalTimeouts);
       LThrottleEvent := BaseEvent(pekAcquireTimeout);
       LThrottleEvent.WaitAttempts := WaitAttempts;
       Notify(LThrottleEvent);
@@ -1390,7 +1395,7 @@ begin
   end;
 
   DecrementActiveConnections;
-  Inc(FTotalDiscarded);
+  PdbAtomicInc64(FTotalDiscarded);
   LEvent := BaseEvent(pekConnectionDiscarded);
   LEvent.DiscardReason := pdrBrokenAfterUse;
   Notify(LEvent);
