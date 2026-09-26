@@ -43,6 +43,9 @@ const
 function SampleIsPostgres: Boolean;
 /// Human-readable description of the target, e.g. 'PostgreSQL on localhost (SQLdb)'.
 function SampleTarget: string;
+/// The connection settings in effect, one per line, for error messages
+/// (the password is left out).
+function SampleConnectionSummary: string;
 /// A factory for the configured database; SQL is read from ASqlSource.
 function NewSampleFactory(const ASqlSource: ISqlSource): IDBFactory;
 
@@ -209,6 +212,27 @@ begin
   else
     LEngine := 'Firebird';
   Result := Format('%s on %s (%s adapter)', [LEngine, Host, ADAPTER_NAME]);
+end;
+
+function SampleConnectionSummary: string;
+var
+  LPort, LClient: string;
+begin
+  LPort := Port;
+  if LPort = '' then
+    if SampleIsPostgres then
+      LPort := '5432 (default)'
+    else
+      LPort := '3050 (default)';
+  LClient := ClientLibrary;
+  if LClient = '' then
+    LClient := '(default search path)';
+  Result :=
+    '  host:     ' + Host + sLineBreak +
+    '  port:     ' + LPort + sLineBreak +
+    '  database: ' + DatabaseName + sLineBreak +
+    '  user:     ' + UserName + sLineBreak +
+    '  client:   ' + LClient;
 end;
 
 function NewSampleFactory(const ASqlSource: ISqlSource): IDBFactory;
