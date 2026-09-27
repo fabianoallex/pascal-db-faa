@@ -51,7 +51,8 @@ end;  // the connection goes back to the pool when LQuery and LScope are release
   writing an adapter for another component.
 - [**Samples**](samples/README.md): five console programs, each one source for both compilers.
 
-No version has been tagged yet: the API isn't frozen.
+Current version: **0.1.0**. While it is 0.x the API may still change between minor
+versions; every change is listed in the [changelog](CHANGELOG.md).
 
 ## Status
 
