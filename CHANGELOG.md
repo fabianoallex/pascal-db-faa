@@ -4,6 +4,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 follow [Semantic Versioning](https://semver.org/). While the version is 0.x, a minor version
 may change the API; each such change is listed here.
 
+## [Unreleased]
+
+### Changed
+
+- SQL dialect names are matched ignoring case (`'firebird'` finds `Firebird`).
+- `TDBFactory.Create` resolves the SQL dialect and raises `EArgumentException` when it isn't
+  registered or `SQLDialect` is empty; before, the error appeared only on the first acquire.
+  The message lists the registered dialects.
+- `TSQLDialectFactory.GetDialect` raises `EArgumentException` (was `Exception`), and
+  `RegisterDialect` raises it for an empty name or a name already registered in any case.
+- The adapters' error messages and headers no longer present their tested drivers as the only
+  ones: Zeos passes any protocol, SQLdb any registered connector, FireDAC any linked driver
+  (`VendorLib` still only for FB and PG; the message says how to set it for another driver).
+
+### Added
+
+- Guide 10, [using another database](docs/other-databases.md).
+
 ## [0.1.0] - 2026-09-27
 
 First tagged version.
@@ -34,4 +52,5 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[Unreleased]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/fabianoallex/pascal-db-faa/releases/tag/v0.1.0

@@ -279,10 +279,11 @@ procedure PdbPreloadClientLibrary(const ALibrary: string);
 
 implementation
 
-{$IFDEF MSWINDOWS}
 uses
-  Windows;
-{$ENDIF}
+  {$IFDEF MSWINDOWS}
+  Windows,
+  {$ENDIF}
+  PascalDb.SqlDialect;
 
 procedure PdbPreloadClientLibrary(const ALibrary: string);
 {$IFDEF MSWINDOWS}
@@ -1088,6 +1089,10 @@ begin
   if AConfig.PoolMaxConnections < 1 then
     raise EArgumentException.CreateFmt(
       'TDBFactory: PoolMaxConnections is %d; it must be at least 1', [AConfig.PoolMaxConnections]);
+  // Resolved here too, not only when the first connection is built: a
+  // failing initial connection becomes a pool event, so a wrong name would
+  // only show up on the first acquire.
+  TSQLDialectFactory.GetDialect(AConfig.SQLDialect);
   FConfig := AConfig;
   FComponentProvider := AProvider;
   FContextTransactionProvider := AContextTransactionProvider;

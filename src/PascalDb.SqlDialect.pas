@@ -10,6 +10,9 @@
   resolve the dialect
   with TSQLDialectFactory.GetDialect(Config.SQLDialect). New database:
   RegisterDialect(Name, Class) in the application's composition root.
+  Names are matched ignoring case, like the drivers' own names ('firebird'
+  finds 'Firebird'); an unknown name raises EArgumentException listing the
+  registered ones.
 
   Business SQL does NOT go through here — it lives in each project's .sql
   files (see PascalDb.SqlLoader). }
@@ -29,7 +32,11 @@ type
 
   TSQLDialectFactory = class
   private
+    // Keyed by the upper-cased name; FNames keeps the names as registered,
+    // for error messages.
     class var FDialects: TDictionary<string, TSQLDialectClass>;
+    class var FNames: TStringList;
+    class function RegisteredNames: string; static;
   public
     class constructor Create;
     class destructor Destroy;
@@ -89,25 +96,53 @@ implementation
 class constructor TSQLDialectFactory.Create;
 begin
   FDialects := TDictionary<string, TSQLDialectClass>.Create;
+  FNames := TStringList.Create;
 end;
 
 class destructor TSQLDialectFactory.Destroy;
 begin
+  FNames.Free;
   FDialects.Free;
+end;
+
+class function TSQLDialectFactory.RegisteredNames: string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to FNames.Count - 1 do
+  begin
+    if I > 0 then
+      Result := Result + ', ';
+    Result := Result + FNames[I];
+  end;
 end;
 
 class procedure TSQLDialectFactory.RegisterDialect(const AName: string;
   ADialectClass: TSQLDialectClass);
 begin
-  FDialects.Add(AName, ADialectClass);
+  if Trim(AName) = '' then
+    raise EArgumentException.Create('TSQLDialectFactory.RegisterDialect: the name is empty');
+  if FDialects.ContainsKey(UpperCase(AName)) then
+    raise EArgumentException.CreateFmt('TSQLDialectFactory.RegisterDialect: a dialect named "%s" is already registered',
+      [AName]);
+  FDialects.Add(UpperCase(AName), ADialectClass);
+  FNames.Add(AName);
 end;
 
 class function TSQLDialectFactory.GetDialect(const AName: string): ISQLDialect;
 var
   LDialectClass: TSQLDialectClass;
 begin
-  if not FDialects.TryGetValue(AName, LDialectClass) then
-    raise Exception.CreateFmt('SQL dialect "%s" not found or not registered.', [AName]);
+  if not FDialects.TryGetValue(UpperCase(AName), LDialectClass) then
+  begin
+    if AName = '' then
+      raise EArgumentException.CreateFmt('No SQL dialect set: IDatabaseConfig.SQLDialect is empty ' +
+        '(registered dialects: %s)', [RegisteredNames]);
+    raise EArgumentException.CreateFmt('SQL dialect "%s" is not registered (registered dialects: %s). ' +
+      'Check IDatabaseConfig.SQLDialect, or register it with TSQLDialectFactory.RegisterDialect',
+      [AName, RegisteredNames]);
+  end;
 
   Result := LDialectClass.Create as ISQLDialect;
 end;

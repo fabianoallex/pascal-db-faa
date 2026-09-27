@@ -133,3 +133,9 @@ top of `PascalDb.Adapter.Base` and `PascalDb.Adapter.DataSet`, which already hol
 that isn't driver-specific: most of each existing adapter is its driver's quirks. The integration
 contract suite (`tests/Integration`) is what tells whether a new adapter behaves like the
 others. [Guide 9](writing-an-adapter.md) walks through it, with a skeleton.
+
+## Another database
+
+A database other than the three above needs an SQL dialect registered by the program and the
+driver's unit linked in; the adapters pass other drivers through.
+[Guide 10](other-databases.md) covers it, and how to check it with the contract suite.

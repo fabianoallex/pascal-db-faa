@@ -355,7 +355,8 @@ it once at startup, before creating the factory:
 TSQLDialectFactory.RegisterDialect('MyDb', TMyDbDialect);
 ```
 
-`PascalDb.SqlDialect` has the three built-in dialects to copy from.
+`PascalDb.SqlDialect` has the three built-in dialects to copy from; [guide 10](other-databases.md)
+describes each method and what else tends to differ between databases.
 
 ## What the rest of the library relies on
 

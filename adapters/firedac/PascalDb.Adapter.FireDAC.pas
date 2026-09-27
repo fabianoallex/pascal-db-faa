@@ -7,7 +7,9 @@
   from PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams): FireDAC connection
-  definition parameters as Name=Value — DriverID (FB, PG or SQLite),
+  definition parameters as Name=Value — DriverID (FB, PG or SQLite; another
+  driver works when the program links its FireDAC.Phys.* unit and registers
+  an SQL dialect for it, see docs/other-databases.md),
   Database, Server, Port, User_Name, Password, CharacterSet, ... — passed
   to TFDConnection.Params as is, except:
     VendorLib  full path of the client library (fbclient/libpq), applied
@@ -16,7 +18,9 @@
                32-bit program needs the 32-bit client (Firebird 2.5 64-bit
                installs it in the WOW64 folder). Not for SQLite: its engine
                is linked into the program (FireDAC.Phys.SQLiteWrapper.Stat),
-               so there is no client library.
+               so there is no client library. For a driver other than FB
+               and PG, leave VendorLib out and set it on that driver's link
+               in the program (e.g. a TFDPhysOracleDriverLink).
   SQLite (Database = the file, created on first connect). Unless the
   settings say otherwise, connections here use:
     LockingMode=Normal  FireDAC's documented default (Exclusive) keeps every
@@ -205,8 +209,10 @@ begin
   else if SameText(ADriverID, 'PG') then
     LLink := TFDPhysPgDriverLink.Create(nil)
   else
-    raise EDatabaseError.CreateFmt('PascalDb.Adapter.FireDAC: VendorLib is only supported for FB and PG, not %s ' +
-      '(SQLite is linked into the program)', [ADriverID]);
+    raise EDatabaseError.CreateFmt('PascalDb.Adapter.FireDAC: VendorLib in ConnectionParams is only applied for ' +
+      'FB and PG, not %s. Leave it out and set VendorLib on that driver''s link in your program (e.g. ' +
+      'TFDPhysOracleDriverLink.VendorLib) before the first connection; SQLite needs none (it is linked in)',
+      [ADriverID]);
   PdbPreloadClientLibrary(AVendorLib);
   LLink.VendorLib := AVendorLib;
   GDriverLinks.Add(LLink);

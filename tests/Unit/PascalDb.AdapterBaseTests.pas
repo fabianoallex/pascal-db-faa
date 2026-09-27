@@ -4,7 +4,8 @@
   TSqlScript.SplitStatements, the IOptXxx/INullXxx/IOptNullXxx semantics of
   TDBParams over a standalone TParams (typed NULLs and nil optionals
   included), TDatabaseConfig's pool defaults and TDBFactory's refusal of a
-  pool with no connections, and the savepoint SQL TScopeTransaction issues
+  pool with no connections or an unknown SQL dialect, dialect lookup by name
+  (case, unknown and empty names, duplicates), and the savepoint SQL TScopeTransaction issues
   for nested scopes. The same blocks
   are exercised against a real database by the integration contract tests.
 
@@ -98,6 +99,11 @@ type
     [Test] procedure Params_NilNull_WritesTypedNull;
     [Test] procedure Config_Defaults_GiveAUsablePool;
     [Test] procedure Factory_PoolMaxZero_RaisesClearError;
+    [Test] procedure Factory_UnknownDialect_RaisesOnCreate;
+    [Test] procedure Dialect_NameIgnoresCase;
+    [Test] procedure Dialect_Unknown_ListsRegisteredOnes;
+    [Test] procedure Dialect_Empty_SaysItIsNotSet;
+    [Test] procedure Dialect_RegisterSameNameAnyCase_Raises;
     [Test] procedure Scope_Main_CommitsTheTransaction;
     [Test] procedure Scope_Nested_UsesSavepoints;
   end;
@@ -370,6 +376,72 @@ begin
     on E: EArgumentException do
       TAssert.AssertTrue('The message must name the setting: ' + E.Message,
         Pos('PoolMaxConnections', E.Message) > 0);
+  end;
+end;
+
+procedure TAdapterBaseTests.Factory_UnknownDialect_RaisesOnCreate;
+var
+  LConfig: IDatabaseConfig;
+  LProvider: IDBComponentProvider;
+  LFactory: IDBFactory;
+begin
+  LConfig := TDatabaseConfig.Create;
+  LConfig.PoolIniConnections := 0;
+  LConfig.SQLDialect := 'NoSuchDatabase';
+  LProvider := TUnusedProvider.Create;
+  try
+    LFactory := TDBFactory.Create(LConfig, LProvider, nil, nil);
+    TAssert.Fail('A factory with an unknown SQL dialect must not be created');
+  except
+    on E: EArgumentException do
+      TAssert.AssertTrue('The message must name the dialect: ' + E.Message,
+        Pos('NoSuchDatabase', E.Message) > 0);
+  end;
+end;
+
+procedure TAdapterBaseTests.Dialect_NameIgnoresCase;
+begin
+  TAssert.AssertTrue('''firebird'' must find the Firebird dialect',
+    Pos('RDB$DATABASE', UpperCase(TSQLDialectFactory.GetDialect('firebird').GetPingSQL)) > 0);
+  TAssert.AssertTrue('''POSTGRESQL'' must find the PostgreSQL dialect',
+    Assigned(TSQLDialectFactory.GetDialect('POSTGRESQL')));
+end;
+
+procedure TAdapterBaseTests.Dialect_Unknown_ListsRegisteredOnes;
+begin
+  try
+    TSQLDialectFactory.GetDialect('Oracle');
+    TAssert.Fail('An unregistered dialect must raise');
+  except
+    on E: EArgumentException do
+    begin
+      TAssert.AssertTrue('The message must name the dialect: ' + E.Message, Pos('"Oracle"', E.Message) > 0);
+      TAssert.AssertTrue('The message must list the registered ones: ' + E.Message,
+        (Pos('Firebird', E.Message) > 0) and (Pos('PostgreSQL', E.Message) > 0) and (Pos('SQLite', E.Message) > 0));
+    end;
+  end;
+end;
+
+procedure TAdapterBaseTests.Dialect_Empty_SaysItIsNotSet;
+begin
+  try
+    TSQLDialectFactory.GetDialect('');
+    TAssert.Fail('An empty dialect name must raise');
+  except
+    on E: EArgumentException do
+      TAssert.AssertTrue('The message must point at the setting: ' + E.Message,
+        Pos('IDatabaseConfig.SQLDialect is empty', E.Message) > 0);
+  end;
+end;
+
+procedure TAdapterBaseTests.Dialect_RegisterSameNameAnyCase_Raises;
+begin
+  try
+    TSQLDialectFactory.RegisterDialect('FIREBIRD', TFirebirdDialect);
+    TAssert.Fail('Registering a name that differs only in case must raise');
+  except
+    on E: EArgumentException do
+      TAssert.AssertTrue('The message must name the dialect: ' + E.Message, Pos('FIREBIRD', E.Message) > 0);
   end;
 end;
 

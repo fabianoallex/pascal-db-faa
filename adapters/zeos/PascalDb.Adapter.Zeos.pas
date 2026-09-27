@@ -7,8 +7,10 @@
   PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
-    Protocol         Zeos protocol: 'firebird', 'postgresql' or 'sqlite'
-                     (required). 'firebird' uses the Firebird 3+ API when
+    Protocol         Zeos protocol (required): 'firebird', 'postgresql' and
+                     'sqlite' are the ones tested; any other Zeos protocol
+                     is passed through, with an SQL dialect registered for
+                     it (docs/other-databases.md). 'firebird' uses the Firebird 3+ API when
                      the client library has it and the legacy API otherwise
                      (a 2.5 client).
     HostName         server host ('' = local server, Firebird; unused by
@@ -212,7 +214,7 @@ var
   LName, LValue: string;
 begin
   if ASettings.Values['Protocol'] = '' then
-    raise EDatabaseError.Create('PascalDb.Adapter.Zeos: ConnectionParams must set Protocol (firebird or postgresql)');
+    raise EDatabaseError.Create('PascalDb.Adapter.Zeos: ConnectionParams must set Protocol (the Zeos protocol, e.g. firebird, postgresql or sqlite)');
   Result := TZConnection.Create(nil);
   try
     Result.LoginPrompt := False;

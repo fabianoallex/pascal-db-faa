@@ -7,9 +7,11 @@
   from PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
-    ConnectorType  SQLdb connector name: 'Firebird', 'PostgreSQL' or
-                   'SQLite3' (required; all three are registered by this
-                   unit)
+    ConnectorType  SQLdb connector name (required). 'Firebird', 'PostgreSQL'
+                   and 'SQLite3' are registered by this unit; for another
+                   one, add its connection unit to the program's uses
+                   (e.g. oracleconnection for 'Oracle') and register an SQL
+                   dialect for it (docs/other-databases.md)
     HostName       server host ('' = local/embedded, Firebird; unused by
                    SQLite)
     Port           server port (optional)
@@ -409,7 +411,7 @@ var
 begin
   LParams := AConfig.ConnectionParams;
   if LParams.Values['ConnectorType'] = '' then
-    raise EDatabaseError.Create('PascalDb.Adapter.SQLdb: ConnectionParams must set ConnectorType (Firebird or PostgreSQL)');
+    raise EDatabaseError.Create('PascalDb.Adapter.SQLdb: ConnectionParams must set ConnectorType (the SQLdb connector name, e.g. Firebird, PostgreSQL or SQLite3)');
   PdbSQLdbUseClientLibrary(LParams.Values['ConnectorType'], LParams.Values['ClientLibrary']);
 
   LConn := TSQLConnector.Create(nil);
