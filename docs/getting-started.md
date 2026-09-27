@@ -40,9 +40,10 @@ end;
 
 - **Hold the configuration in an `IDatabaseConfig` variable.** `TDatabaseConfig` is
   reference-counted; with a class variable, handing it to the factory frees it too early.
-- **Set the pool sizes.** `TDatabaseConfig` starts with every pool setting at 0, and a pool
-  whose `PoolMaxConnections` is 0 never opens a connection: the first acquire raises
-  `EPoolTimeoutException`. [Guide 7](pool.md) explains each setting.
+- **Size the pool for your program.** Without these lines the pool opens 1 connection at
+  start, grows to 10, and a caller waits up to 50 × 100 ms for a free one; `PoolMaxConnections`
+  below 1 makes the factory raise `EArgumentException`. [Guide 7](pool.md) explains each
+  setting.
 - **`ConnectionParams` is the only adapter-specific part.** Each adapter has its own names
   (`ConnectorType` / `DriverID` / `Protocol`, ...); [guide 8](adapters.md) lists them. From
   the factory on, the code is the same for every driver and database.

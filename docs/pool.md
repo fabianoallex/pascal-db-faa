@@ -9,16 +9,15 @@ connection back ([guide 1](getting-started.md)).
 
 ## Settings
 
-All on `IDatabaseConfig`. `TDatabaseConfig` starts with every one of them at 0, so set at least
-the first four.
+All on `IDatabaseConfig`, with the defaults `TDatabaseConfig` starts with.
 
-| Setting | Meaning |
-|---|---|
-| `PoolIniConnections` | connections opened when the factory is created. If the database is down then, the failures become events and the next acquire tries again: the program still starts |
-| `PoolMaxConnections` | the most connections the pool will have open at once. **0 means none**: the first acquire raises `EPoolTimeoutException` |
-| `PoolWaitMaxAttemps`, `PoolWaitMilliseconds` | when all `PoolMaxConnections` are busy, a caller checks again every `PoolWaitMilliseconds`, up to `PoolWaitMaxAttemps` times, then gets `EPoolTimeoutException` |
-| `PoolIdleTimeoutSeconds` | close connections idle for this long, never going below `PoolIniConnections`. 0 (the default) turns the sweep off |
-| `PoolIdleCheckIntervalMs` | how often the sweep runs (default 30000). Only matters when the sweep is on |
+| Setting | Default | Meaning |
+|---|---|---|
+| `PoolIniConnections` | 1 | connections opened when the factory is created. If the database is down then, the failures become events and the next acquire tries again: the program still starts |
+| `PoolMaxConnections` | 10 | the most connections the pool will have open at once. Below 1, creating the factory raises `EArgumentException` |
+| `PoolWaitMaxAttemps`, `PoolWaitMilliseconds` | 50, 100 | when all `PoolMaxConnections` are busy, a caller checks again every `PoolWaitMilliseconds`, up to `PoolWaitMaxAttemps` times, then gets `EPoolTimeoutException`. `PoolWaitMaxAttemps` = 0 means no waiting at all |
+| `PoolIdleTimeoutSeconds` | 0 | close connections idle for this long, never going below `PoolIniConnections`. 0 turns the sweep off |
+| `PoolIdleCheckIntervalMs` | 30000 | how often the sweep runs. Only matters when the sweep is on |
 
 The samples use 1 initial, 5 max and 50 × 100 ms of waiting. Size `PoolMaxConnections` to what
 the database accepts from this program, not to the number of threads: a thread that has to

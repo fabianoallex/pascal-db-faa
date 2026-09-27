@@ -147,7 +147,11 @@ type
   /// right DataType on a NULL parameter (some drivers reject untyped NULLs).
   TPdbParamType = (pptString, pptBoolean, pptDateTime, pptDouble, pptInteger, pptInt64, pptCurrency);
 
-  { TParamsBase }
+  { TParamsBase
+    The setters read a nil optional the way TOptionals.Safe does (and the
+    mock's params): nil IOptXxx/IOptNullXxx = Undefined, the parameter is
+    left untouched; nil INullXxx = NULL. An interface field of a record or
+    class starts as nil, so this is the common case, not an edge. }
 
   TParamsBase = class(TInterfacedObject, IParams)
   protected
@@ -301,6 +305,12 @@ constructor TDatabaseConfig.Create;
 begin
   inherited Create;
   FConnectionParams := TStringList.Create;
+  // A config nobody tuned must still work: with every pool setting at 0 the
+  // first acquire timed out at once ("Pool: 0/0 active").
+  FPoolIniConnections := 1;
+  FPoolMaxConnections := 10;
+  FPoolWaitMaxAttemps := 50;    // a caller waits up to 50 x 100 ms for a free connection
+  FPoolWaitMilliseconds := 100;
   FPoolIdleCheckIntervalMs := 30000; // only matters if PoolIdleTimeoutSeconds > 0
 end;
 
@@ -790,7 +800,7 @@ end;
 
 procedure TParamsBase.SetOptNullString(const AName: string; AValue: IOptNullString);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   if AValue.IsNull then
     WriteNull(AName, pptString)
@@ -800,7 +810,7 @@ end;
 
 procedure TParamsBase.SetOptNullBoolean(const AName: string; AValue: IOptNullBoolean);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   if AValue.IsNull then
     WriteNull(AName, pptBoolean)
@@ -810,7 +820,7 @@ end;
 
 procedure TParamsBase.SetOptNullDateTime(const AName: string; AValue: IOptNullDateTime);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   if AValue.IsNull then
     WriteNull(AName, pptDateTime)
@@ -820,7 +830,7 @@ end;
 
 procedure TParamsBase.SetOptNullDouble(const AName: string; AValue: IOptNullDouble);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   if AValue.IsNull then
     WriteNull(AName, pptDouble)
@@ -830,7 +840,7 @@ end;
 
 procedure TParamsBase.SetOptNullInteger(const AName: string; AValue: IOptNullInteger);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   if AValue.IsNull then
     WriteNull(AName, pptInteger)
@@ -840,7 +850,7 @@ end;
 
 procedure TParamsBase.SetOptNullInt64(const AName: string; AValue: IOptNullInt64);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   if AValue.IsNull then
     WriteNull(AName, pptInt64)
@@ -850,7 +860,7 @@ end;
 
 procedure TParamsBase.SetOptNullCurrency(const AName: string; AValue: IOptNullCurrency);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   if AValue.IsNull then
     WriteNull(AName, pptCurrency)
@@ -909,7 +919,7 @@ end;
 
 procedure TParamsBase.SetNullString(const AName: string; AValue: INullString);
 begin
-  if AValue.IsNull then
+  if not Assigned(AValue) or AValue.IsNull then
     WriteNull(AName, pptString)
   else
     WriteString(AName, AValue.Value);
@@ -917,7 +927,7 @@ end;
 
 procedure TParamsBase.SetNullBoolean(const AName: string; AValue: INullBoolean);
 begin
-  if AValue.IsNull then
+  if not Assigned(AValue) or AValue.IsNull then
     WriteNull(AName, pptBoolean)
   else
     WriteBoolean(AName, AValue.Value);
@@ -925,7 +935,7 @@ end;
 
 procedure TParamsBase.SetNullDateTime(const AName: string; AValue: INullDateTime);
 begin
-  if AValue.IsNull then
+  if not Assigned(AValue) or AValue.IsNull then
     WriteNull(AName, pptDateTime)
   else
     WriteDateTime(AName, AValue.Value);
@@ -933,7 +943,7 @@ end;
 
 procedure TParamsBase.SetNullDouble(const AName: string; AValue: INullDouble);
 begin
-  if AValue.IsNull then
+  if not Assigned(AValue) or AValue.IsNull then
     WriteNull(AName, pptDouble)
   else
     WriteDouble(AName, AValue.Value);
@@ -941,7 +951,7 @@ end;
 
 procedure TParamsBase.SetNullInteger(const AName: string; AValue: INullInteger);
 begin
-  if AValue.IsNull then
+  if not Assigned(AValue) or AValue.IsNull then
     WriteNull(AName, pptInteger)
   else
     WriteInteger(AName, AValue.Value);
@@ -949,7 +959,7 @@ end;
 
 procedure TParamsBase.SetNullInt64(const AName: string; AValue: INullInt64);
 begin
-  if AValue.IsNull then
+  if not Assigned(AValue) or AValue.IsNull then
     WriteNull(AName, pptInt64)
   else
     WriteInt64(AName, AValue.Value);
@@ -957,7 +967,7 @@ end;
 
 procedure TParamsBase.SetNullCurrency(const AName: string; AValue: INullCurrency);
 begin
-  if AValue.IsNull then
+  if not Assigned(AValue) or AValue.IsNull then
     WriteNull(AName, pptCurrency)
   else
     WriteCurrency(AName, AValue.Value);
@@ -1014,49 +1024,49 @@ end;
 
 procedure TParamsBase.SetOptString(const AName: string; AValue: IOptString);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   WriteString(AName, AValue.Value);
 end;
 
 procedure TParamsBase.SetOptBoolean(const AName: string; AValue: IOptBoolean);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   WriteBoolean(AName, AValue.Value);
 end;
 
 procedure TParamsBase.SetOptDateTime(const AName: string; AValue: IOptDateTime);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   WriteDateTime(AName, AValue.Value);
 end;
 
 procedure TParamsBase.SetOptDouble(const AName: string; AValue: IOptDouble);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   WriteDouble(AName, AValue.Value);
 end;
 
 procedure TParamsBase.SetOptInteger(const AName: string; AValue: IOptInteger);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   WriteInteger(AName, AValue.Value);
 end;
 
 procedure TParamsBase.SetOptInt64(const AName: string; AValue: IOptInt64);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   WriteInt64(AName, AValue.Value);
 end;
 
 procedure TParamsBase.SetOptCurrency(const AName: string; AValue: IOptCurrency);
 begin
-  if not AValue.HasValue then
+  if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   WriteCurrency(AName, AValue.Value);
 end;
@@ -1073,6 +1083,11 @@ begin
     raise EArgumentException.Create('TDBFactory: AConfig is required');
   if not Assigned(AProvider) then
     raise EArgumentException.Create('TDBFactory: AProvider is required');
+  // Otherwise the pool never opens a connection and every acquire fails
+  // with a timeout that hides the cause.
+  if AConfig.PoolMaxConnections < 1 then
+    raise EArgumentException.CreateFmt(
+      'TDBFactory: PoolMaxConnections is %d; it must be at least 1', [AConfig.PoolMaxConnections]);
   FConfig := AConfig;
   FComponentProvider := AProvider;
   FContextTransactionProvider := AContextTransactionProvider;

@@ -36,6 +36,12 @@ The other direction too: fixed here after the extraction, probably still present
   `TotalIdleSwept`) were incremented with a plain `Inc`, some outside the pool's lock, so
   concurrent events lost counts: sample 05 had 3 timeouts at the same moment and the snapshot
   said 2. They now use `PdbAtomicInc64`/`PdbAtomicAdd64` and are read with `PdbAtomicRead64`.
+- `TClock` and `TSleep` (`PascalDb.SystemContext`) created their default instance lazily on the
+  first call; two threads making that first call together raced on the shared interface (one
+  instance leaked, another was released twice: `EInvalidPointer`/`EAccessViolation` in pool
+  workers). Measured on Linux FPC, `--cpus=1`, 4 runners at once, `--suite=TPoolTests` × 400:
+  14 failures and 73 leaks before, 0 and 0 after. The defaults are now created in the unit's
+  initialization (`5c853c6`).
 
 | Here | There |
 |---|---|
@@ -301,28 +307,13 @@ Package Manager under "zeos").
 
 ## Known open items
 
-- FPC warns "Function result does not seem to be set" on `TMockDBFactory.CreateSqlScript`.
-  False positive: the method always raises (`ISqlScript` isn't supported by the mock).
-- **Rare failures with concurrent connections on Zeos + Firebird (Linux), cause unknown.** Sample
-  05 (worker threads, pool growing from 1 to 3) failed once in GitHub CI (run 36235419745): a
-  phase-1 worker got `EAccessViolation` while two connections were being created at the same
-  time; locally, the same sample once ended with 26 unfreed blocks. Probably related to the
-  earlier one-off in the Zeos + Firebird Docker run (missing-client message, then an AV at `$0`).
-  Not reproduced since: 80 more runs of the sample (60 with `--cpus=2`) and 200 rounds of a stress
-  program (concurrent connects, full worker cycle, 1-2 CPUs, a fresh process per round), all
-  clean. The contract suite is single-threaded, so it never exercised this. On a failure, the
-  sample now prints the backtrace (FPC) and `test_samples_docker.sh` prints heaptrc's report on
-  a leak; that is the evidence to start from.
-  **Likely explained (2026-09-26), not confirmed for this case:** `TClock` and `TSleep`
-  (`PascalDb.SystemContext`) created their default instance lazily on the first call, and two
-  threads making that first call together raced on the shared interface: one instance leaked,
-  another was released twice. Found through the unit suite failing in GitHub CI (2 unfreed
-  blocks of 32 bytes). Measured on Linux FPC, `--cpus=1`, 4 runners at once, `--suite=TPoolTests`
-  × 400: before the fix, 14 runs failed (`EInvalidPointer`, `EAccessViolation` in a pool worker)
-  and 73 leaked; 9/400 failed without heaptrc too, so it wasn't heaptrc. After it (default
-  instances created in the unit's initialization): 0 failures, 0 leaks. A pool whose callers
-  wait (`TSleep.Sleep`) or reuse connections (`TClock.Now`) from several threads at once, as
-  sample 05's phase 1, hit the same race. Close this item if sample 05 stays clean in CI.
+None.
+
+Closed on 2026-09-27: the rare failures with concurrent connections on Zeos + Firebird (Linux),
+sample 05 (CI run 36235419745: `EAccessViolation` in a worker; once 26 unfreed blocks locally).
+Attributed to the `TClock`/`TSleep` lazy-initialization race fixed in `5c853c6` (see the list
+under "Origin"); sample 05 stayed clean in every CI run since. If it comes back, the sample
+prints the FPC backtrace and `test_samples_docker.sh` prints heaptrc's report.
 
 ---
 

@@ -30,8 +30,10 @@ instances), so they are safe to pass between threads.
 
 An interface field in a record or class starts as `nil`, which is none of the three states.
 `TOptionals.Safe(X)` turns `nil` into Undefined (`IOptXxx`, `IOptNullXxx`) or Null
-(`INullXxx`) and returns anything else unchanged. **Pass values through `Safe` before handing
-them to parameters**: the parameter setters don't check for `nil`.
+(`INullXxx`) and returns anything else unchanged. The parameter setters read `nil` the same
+way (a `nil` `IOptXxx`/`IOptNullXxx` leaves the parameter untouched, a `nil` `INullXxx` writes
+NULL), on every adapter and on the mock, so a field can go to a parameter as it is; use `Safe`
+where your own code calls `HasValue`, `IsNull` or `Value` on it.
 
 ```pascal
 type

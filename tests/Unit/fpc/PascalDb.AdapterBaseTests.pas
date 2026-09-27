@@ -8,8 +8,10 @@
 
 { Tests for the driver-agnostic adapter building blocks, without a database:
   TSqlScript.SplitStatements, the IOptXxx/INullXxx/IOptNullXxx semantics of
-  TDBParams over a standalone TParams (typed NULLs included), and the
-  savepoint SQL TScopeTransaction issues for nested scopes. The same blocks
+  TDBParams over a standalone TParams (typed NULLs and nil optionals
+  included), TDatabaseConfig's pool defaults and TDBFactory's refusal of a
+  pool with no connections, and the savepoint SQL TScopeTransaction issues
+  for nested scopes. The same blocks
   are exercised against a real database by the integration contract tests.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
@@ -63,6 +65,18 @@ type
     property Log: TStringList read FLog;
   end;
 
+  { TUnusedProvider
+    IDBComponentProvider for tests that must fail before any connection is
+    built: every call raises. }
+  TUnusedProvider = class(TInterfacedObject, IDBComponentProvider)
+  public
+    function BuildConnection(AConfig: IDatabaseConfig): IDBConnection;
+    function BuildTransaction(AConn: IDBConnection): ITransaction;
+    function BuildScopeTransaction(ATransaction: ITransaction; AContextTransaction: IContextTransaction): IScopeTransaction;
+    function BuildQuery(AConn: IDBConnection; ATransaction: ITransaction): IQuery;
+    function BuildSqlScript(AConn: IDBConnection; ATransaction: ITransaction): ISqlScript;
+  end;
+
   TAdapterBaseTests = class(TTestCase)
   private
     FParams: TParams;
@@ -82,6 +96,11 @@ type
     procedure Params_NullValue_WritesValue;
     procedure Params_GetOptNull_MissingParamIsUndefined;
     procedure Params_GetNull_NullParamIsNull;
+    procedure Params_NilOpt_LeavesParamUntouched;
+    procedure Params_NilOptNull_LeavesParamUntouched;
+    procedure Params_NilNull_WritesTypedNull;
+    procedure Config_Defaults_GiveAUsablePool;
+    procedure Factory_PoolMaxZero_RaisesClearError;
     procedure Scope_Main_CommitsTheTransaction;
     procedure Scope_Nested_UsesSavepoints;
   end;
@@ -164,6 +183,39 @@ end;
 function TRecordingTransaction.GetNativeTransaction: TObject;
 begin
   Result := nil;
+end;
+
+{ TUnusedProvider }
+
+function TUnusedProvider.BuildConnection(AConfig: IDatabaseConfig): IDBConnection;
+begin
+  Result := nil;
+  raise Exception.Create('TUnusedProvider: not expected to be called');
+end;
+
+function TUnusedProvider.BuildTransaction(AConn: IDBConnection): ITransaction;
+begin
+  Result := nil;
+  raise Exception.Create('TUnusedProvider: not expected to be called');
+end;
+
+function TUnusedProvider.BuildScopeTransaction(ATransaction: ITransaction;
+  AContextTransaction: IContextTransaction): IScopeTransaction;
+begin
+  Result := nil;
+  raise Exception.Create('TUnusedProvider: not expected to be called');
+end;
+
+function TUnusedProvider.BuildQuery(AConn: IDBConnection; ATransaction: ITransaction): IQuery;
+begin
+  Result := nil;
+  raise Exception.Create('TUnusedProvider: not expected to be called');
+end;
+
+function TUnusedProvider.BuildSqlScript(AConn: IDBConnection; ATransaction: ITransaction): ISqlScript;
+begin
+  Result := nil;
+  raise Exception.Create('TUnusedProvider: not expected to be called');
 end;
 
 { TAdapterBaseTests }
@@ -257,6 +309,71 @@ procedure TAdapterBaseTests.Params_GetNull_NullParamIsNull;
 begin
   FIntf.NullIntegers['A'] := TOptNullInteger.Null;
   TAssert.AssertTrue(FIntf.NullIntegers['A'].IsNull);
+end;
+
+procedure TAdapterBaseTests.Params_NilOpt_LeavesParamUntouched;
+var
+  LNil: IOptString;
+begin
+  LNil := nil;
+  FIntf.Strings['A'] := 'kept';
+  FIntf.OptStrings['A'] := LNil;
+  TAssert.AssertEquals('A nil IOpt must read as Undefined', 'kept', FIntf.Strings['A']);
+end;
+
+procedure TAdapterBaseTests.Params_NilOptNull_LeavesParamUntouched;
+var
+  LNil: IOptNullInteger;
+begin
+  LNil := nil;
+  FIntf.Integers['A'] := 7;
+  FIntf.OptNullIntegers['A'] := LNil;
+  TAssert.AssertEquals('A nil IOptNull must read as Undefined', 7, FIntf.Integers['A']);
+end;
+
+procedure TAdapterBaseTests.Params_NilNull_WritesTypedNull;
+var
+  LNil: INullCurrency;
+begin
+  LNil := nil;
+  FIntf.Integers['A'] := 7;
+  FIntf.NullCurrencies['A'] := LNil;
+  TAssert.AssertTrue('A nil INull must write NULL', FParams.ParamByName('A').IsNull);
+  TAssert.AssertTrue('The NULL must carry the value type (Currency)',
+    FParams.ParamByName('A').DataType = ftCurrency);
+end;
+
+procedure TAdapterBaseTests.Config_Defaults_GiveAUsablePool;
+var
+  LConfig: IDatabaseConfig;
+begin
+  LConfig := TDatabaseConfig.Create;
+  TAssert.AssertEquals('PoolIniConnections', 1, LConfig.PoolIniConnections);
+  TAssert.AssertEquals('PoolMaxConnections', 10, LConfig.PoolMaxConnections);
+  TAssert.AssertEquals('PoolWaitMaxAttemps', 50, LConfig.PoolWaitMaxAttemps);
+  TAssert.AssertEquals('PoolWaitMilliseconds', 100, LConfig.PoolWaitMilliseconds);
+  TAssert.AssertEquals('PoolIdleTimeoutSeconds', 0, LConfig.PoolIdleTimeoutSeconds);
+end;
+
+procedure TAdapterBaseTests.Factory_PoolMaxZero_RaisesClearError;
+var
+  LConfig: IDatabaseConfig;
+  LProvider: IDBComponentProvider;
+  LFactory: IDBFactory;
+begin
+  LConfig := TDatabaseConfig.Create;
+  LConfig.PoolMaxConnections := 0;
+  // In a variable: a new object passed straight to a const interface
+  // parameter is never released.
+  LProvider := TUnusedProvider.Create;
+  try
+    LFactory := TDBFactory.Create(LConfig, LProvider, nil, nil);
+    TAssert.Fail('A factory with PoolMaxConnections = 0 must not be created');
+  except
+    on E: EArgumentException do
+      TAssert.AssertTrue('The message must name the setting: ' + E.Message,
+        Pos('PoolMaxConnections', E.Message) > 0);
+  end;
 end;
 
 procedure TAdapterBaseTests.Scope_Main_CommitsTheTransaction;

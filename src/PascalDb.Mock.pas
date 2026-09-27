@@ -1271,6 +1271,7 @@ end;
 function TMockDBFactory.CreateSqlScript(AConn: IDBConnection;
   ATransaction: ITransaction): ISqlScript;
 begin
+  Result := nil; // never reached; keeps FPC from warning that the result isn't set
   raise Exception.Create('PascalDb.Mock: ISqlScript is not supported by TMockDBFactory');
 end;
 
