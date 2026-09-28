@@ -270,10 +270,13 @@ read results before committing. Results are fetched completely on `Open`
 `User`, `Password`, `ClientCodepage`, `LibraryLocation`; any other line goes to
 `TZConnection.Properties`. Zeos 8 queries use its own `TZParams` (not Data.DB's `TParams`),
 so the adapter has its own `TParamsBase` over them; `TZParam.AsString` is Unicode on Delphi,
-so the FireDAC ANSI problem doesn't apply. `TZTransaction.StartTransaction` on a transaction
-whose native handle is already open (Zeos opens it with the first statement) creates a
-**savepoint** instead, and the matching `Commit` only releases it — so every statement the
-adapter runs starts the `ITransaction` first. Queries call `FetchAll` after opening, so
+so the FireDAC ANSI problem doesn't apply. An `ITransaction` is the `TZConnection`'s own
+transaction, **never a `TZTransaction` component**: on PostgreSQL, SQLite and the other
+one-transaction-per-connection databases, Zeos 8 opens a physical connection for each
+`TZTransaction` (gotcha 30). `TZConnection.StartTransaction` with a transaction already open
+creates a **savepoint** instead, and the matching `Commit` only releases it — so every
+statement the adapter runs starts the `ITransaction` first, and releasing a connection to the
+pool rolls back whatever was left open. Queries call `FetchAll` after opening, so
 `RecordCount` is exact and commits are hard commits (with rows pending, Zeos uses commit
 retaining). Firebird connections get `hard_commit=true` unless `ConnectionParams` sets it
 (see gotcha 16). Zeos can create a Firebird database (`CreateNewDatabase=true`) but has no
@@ -529,3 +532,18 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     Not a library defect: every driver fails the same way. Fix (test environment): Firebird
     defaults to `localhost` too; `PASCALDB_IT_HOST=local` still selects the local protocol. Not
     measured: Firebird 3+ locally.
+30. **Zeos 8: a `TZTransaction` component opens a physical connection of its own on PostgreSQL
+    and SQLite.** For databases with one transaction per connection (everything but Firebird,
+    InterBase and Oracle), `TZAbstractSingleTxnConnection.CreateTransaction`
+    (`ZDbcConnection.pas`) calls `DriverManager.GetConnection`. The adapter used one
+    `TZTransaction` per `ITransaction`, so every request (acquire, transaction, SELECT, commit)
+    opened and closed a PostgreSQL connection: 211 connections for 200 requests in the server's
+    log, ~38 ms per `StartTransaction` (the new connection's setup queries: `integer_datetimes`,
+    `bytea_output`, time zone, `version()`), ~10 ms per `Open` (no type or column cache on a new
+    connection); 2000 requests took 103 s. Worse than slow: the pool's limit didn't bound the
+    server connections, and its ping and discard watched the idle base connection, not the one
+    doing the work. Found by a benchmark for a "prepared statements" feature request (FPC 3.2.2,
+    Windows, PostgreSQL 17). Fix: the connection's own transaction (`TZConnection.StartTransaction`
+    / `Commit` / `Rollback`); 2000 requests 5.4 s on PostgreSQL, SQLite 3.4 s → 1.0 s, Firebird
+    unchanged. Contract test `Requests_StayOnPooledConnections` (30 requests must use at most
+    `PoolMaxConnections` server sessions) failed with 30 sessions before the fix.

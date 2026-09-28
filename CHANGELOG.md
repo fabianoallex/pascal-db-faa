@@ -39,6 +39,11 @@ may change the API; each such change is listed here.
 
 ### Fixed
 
+- Zeos on PostgreSQL and SQLite: every transaction opened a physical connection of its own (Zeos
+  8 does that for each `TZTransaction` component on databases with one transaction per
+  connection), so each request connected and disconnected, the pool's limit didn't bound the
+  server connections, and its checks watched an idle connection. The adapter now uses the
+  connection's own transaction. 2000 short requests on PostgreSQL: 103 s before, 5.4 s after.
 - FireDAC on PostgreSQL: running the same query again with a longer string parameter failed
   with "Data too large for variable" (FireDAC keeps the command prepared, and the parameter kept
   the first value's size). The adapter now unprepares when a string parameter has to grow.

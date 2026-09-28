@@ -57,6 +57,13 @@ function IntegrationFactory: IDBFactory;
 /// Number of migrations IntegrationFactory applies.
 function IntegrationSchemaVersion: Integer;
 
+/// A SELECT returning the server's id of the current session in column SID,
+/// or '' when the database has no such thing (SQLite: no server).
+function SessionIdSql: string;
+
+/// PoolMaxConnections of IntegrationFactory's configuration.
+function IntegrationPoolMax: Integer;
+
 /// A factory with the same settings as IntegrationFactory's, except that no
 /// connection can be opened: servers get a host name that never resolves,
 /// SQLite a database file in a folder that doesn't exist. A new one on each
@@ -630,6 +637,21 @@ begin
   Result.PoolMaxConnections := 5;
   Result.PoolWaitMaxAttemps := 200;
   Result.PoolWaitMilliseconds := 10;
+end;
+
+function SessionIdSql: string;
+begin
+  case Engine of
+    engPostgres: Result := 'SELECT pg_backend_pid() AS SID';
+    engSQLite: Result := '';
+  else
+    Result := 'SELECT CURRENT_CONNECTION AS SID FROM RDB$DATABASE';
+  end;
+end;
+
+function IntegrationPoolMax: Integer;
+begin
+  Result := BuildConfig.PoolMaxConnections;
 end;
 
 function UnreachableFactory: IDBFactory;

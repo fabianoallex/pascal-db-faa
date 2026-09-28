@@ -2,8 +2,8 @@
 
 {$I pascaldb.inc}
 
-{ ZeosLib 8 adapter (Delphi and Free Pascal): IDBFactory over TZConnection,
-  TZTransaction and TZQuery. Everything that isn't Zeos-specific comes from
+{ ZeosLib 8 adapter (Delphi and Free Pascal): IDBFactory over TZConnection
+  and TZQuery. Everything that isn't Zeos-specific comes from
   PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
@@ -30,12 +30,23 @@
     parameters have their own IParams (TZeosParamsAdapter). TZParam.AsString
     is a Unicode string on Delphi — no ANSI conversion as with
     TParam/TFDParam.AsString.
-  - TZTransaction.StartTransaction on a transaction whose native handle is
-    already open creates a SAVEPOINT instead, and its Commit then only
-    releases that savepoint. The native handle opens implicitly with the
-    first statement, so every statement here runs inside a transaction the
-    ITransaction started: otherwise a later StartTransaction/Commit pair
-    would never commit.
+  - An ITransaction is the TZConnection's own transaction, never a
+    TZTransaction component. On a database that has one transaction per
+    connection (PostgreSQL, SQLite, MySQL, ...; not Firebird), Zeos 8 gives
+    each TZTransaction a physical connection of its own
+    (TZAbstractSingleTxnConnection.CreateTransaction calls
+    DriverManager.GetConnection): with one TZTransaction per ITransaction,
+    every request opened and closed a PostgreSQL connection (measured: 211
+    connections for 200 requests, ~38 ms each to start the transaction),
+    the pool's limit didn't bound the server connections, and its checks
+    watched an idle connection instead of the one doing the work. A pooled
+    connection serves one unit of work at a time, so its own transaction is
+    enough; nested scopes are savepoints (TScopeTransaction).
+  - TZConnection.StartTransaction with a transaction already open creates a
+    SAVEPOINT instead, and the matching Commit only releases it. Every
+    statement here runs inside a transaction the ITransaction started (the
+    connection stays in AutoCommit otherwise), and releasing a connection to
+    the pool rolls back whatever was left open.
   - Queries fetch the whole result on Open (FetchAll), so RecordCount is the
     real row count and a Commit is a hard commit: with rows still pending,
     Zeos commits with "commit retaining" and keeps the transaction open.
@@ -75,7 +86,6 @@ uses
   DB,
   ZDbcIntfs,
   ZConnection,
-  ZTransaction,
   ZDataset,
   ZDatasetParam,
   PascalDb.Interfaces,
@@ -100,7 +110,8 @@ type
     procedure Connect;
     /// Transactions are managed through ITransaction; no-op here.
     procedure Commit;
-    /// Transactions are managed through ITransaction; no-op here.
+    /// Rolls back a transaction left open on the connection (the pool calls
+    /// it when the connection comes back), so the next user starts clean.
     procedure Rollback;
     procedure Disconnect(Force: Boolean = False);
     function GetSQLDialect: ISQLDialect;
@@ -110,7 +121,7 @@ type
 
   TZeosTransactionAdapter = class(TTransactionBase)
   private
-    FTransaction: TZTransaction;
+    FConnection: TZConnection; // not owned; its own transaction is the one used
   protected
     procedure DoStartTransaction; override;
     procedure DoCommit; override;
@@ -119,6 +130,7 @@ type
   public
     constructor Create(const AConn: IDBConnection);
     destructor Destroy; override;
+    /// The TZConnection: the transaction is the connection's own.
     function GetNativeTransaction: TObject; override;
   end;
 
@@ -218,6 +230,7 @@ begin
   Result := TZConnection.Create(nil);
   try
     Result.LoginPrompt := False;
+    Result.TransactIsolationLevel := tiReadCommitted;
     for I := 0 to ASettings.Count - 1 do
     begin
       LName := ASettings.Names[I];
@@ -311,6 +324,9 @@ end;
 
 procedure TZeosConnectionAdapter.Rollback;
 begin
+  // Every level: a scope left open may have added savepoints.
+  while FConnection.Connected and FConnection.InTransaction do
+    FConnection.Rollback;
 end;
 
 procedure TZeosConnectionAdapter.Disconnect(Force: Boolean);
@@ -328,37 +344,33 @@ end;
 constructor TZeosTransactionAdapter.Create(const AConn: IDBConnection);
 begin
   inherited Create(AConn);
-  FTransaction := TZTransaction.Create(nil);
-  FTransaction.Connection := AConn.GetNativeConnection as TZConnection;
-  FTransaction.AutoCommit := False;
-  FTransaction.TransactIsolationLevel := tiReadCommitted;
+  FConnection := AConn.GetNativeConnection as TZConnection;
 end;
 
 destructor TZeosTransactionAdapter.Destroy;
 begin
   if InTransaction then
   try
-    FTransaction.Rollback;
+    FConnection.Rollback;
   except
     // connection already gone: nothing left to roll back
   end;
-  FTransaction.Free;
   inherited Destroy;
 end;
 
 procedure TZeosTransactionAdapter.DoStartTransaction;
 begin
-  FTransaction.StartTransaction;
+  FConnection.StartTransaction;
 end;
 
 procedure TZeosTransactionAdapter.DoCommit;
 begin
-  FTransaction.Commit;
+  FConnection.Commit;
 end;
 
 procedure TZeosTransactionAdapter.DoRollback;
 begin
-  FTransaction.Rollback;
+  FConnection.Rollback;
 end;
 
 procedure TZeosTransactionAdapter.DoExecSql(const ASql: string);
@@ -369,8 +381,7 @@ begin
   StartTransaction;
   LQuery := TZQuery.Create(nil);
   try
-    LQuery.Connection := FTransaction.Connection;
-    LQuery.Transaction := FTransaction;
+    LQuery.Connection := FConnection;
     LQuery.ParamCheck := False;
     LQuery.SQL.Text := ASql;
     LQuery.ExecSQL;
@@ -381,7 +392,7 @@ end;
 
 function TZeosTransactionAdapter.GetNativeTransaction: TObject;
 begin
-  Result := FTransaction;
+  Result := FConnection;
 end;
 
 { TZeosParamsAdapter }
@@ -497,7 +508,8 @@ begin
   inherited Create(AConn, ATransaction);
   FQuery := TZQuery.Create(nil);
   FQuery.Connection := AConn.GetNativeConnection as TZConnection;
-  FQuery.Transaction := ATransaction.GetNativeTransaction as TZTransaction;
+  // No Transaction: the query runs in the connection's own transaction (see
+  // the unit header).
   FQuery.AfterOpen := QueryAfterOpen;
 end;
 

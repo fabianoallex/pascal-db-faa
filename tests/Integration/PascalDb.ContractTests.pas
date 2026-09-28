@@ -10,7 +10,8 @@
   commit/rollback, nested scopes with savepoints, a constraint violation
   that must not discard the connection, scripts, row counts, parameters
   after the same SQL text is assigned again, a string parameter that grows
-  while the statement stays prepared, concurrent writers (SQLite
+  while the statement stays prepared, requests staying on the pool's own
+  server sessions, concurrent writers (SQLite
   allows one at a time: the others must wait for the lock, not fail), and a
   failed connect surfacing as EDatabaseConnectException whatever the driver.
 
@@ -60,6 +61,7 @@ type
     [Test] procedure RecordCount_CountsEveryRow;
     [Test] procedure SameSqlReassigned_ParamsStillBind;
     [Test] procedure SameQuery_GrowingStringParam_Binds;
+    [Test] procedure Requests_StayOnPooledConnections;
     [Test] procedure ConcurrentWriters_AllCommit;
     [Test] procedure Unreachable_AcquireRaisesConnectException;
   end;
@@ -584,6 +586,45 @@ begin
   except
     LScope.Rollback;
     raise;
+  end;
+end;
+
+procedure TContractTests.Requests_StayOnPooledConnections;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LSessions: TStringList;
+  I: Integer;
+begin
+  // Each request is what a server does: acquire, transaction, one SELECT,
+  // commit, release. The work must run on the pool's connections: with a
+  // Zeos TZTransaction per ITransaction, PostgreSQL got a new session for
+  // every request (30 here), and the pool's limit bounded nothing.
+  if SessionIdSql = '' then
+    Exit; // SQLite: no server sessions to count
+  LSessions := TStringList.Create;
+  try
+    LSessions.Sorted := True;
+    LSessions.Duplicates := dupIgnore;
+    for I := 1 to 30 do
+    begin
+      LScope := FFactory.GetPool.AcquireQuery(LQuery);
+      LScope.StartTransaction;
+      try
+        LQuery.Sql := SessionIdSql;
+        LSessions.Add(LQuery.Open.Strings['SID']);
+        LScope.Commit;
+      except
+        LScope.Rollback;
+        raise;
+      end;
+      LQuery := nil;
+      LScope := nil;
+    end;
+    TAssert.AssertTrue(Format('30 requests ran on %d server sessions; the pool allows at most %d',
+      [LSessions.Count, IntegrationPoolMax]), LSessions.Count <= IntegrationPoolMax);
+  finally
+    LSessions.Free;
   end;
 end;
 
