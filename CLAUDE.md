@@ -520,3 +520,12 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     buffer. Firebird passed: its server describes the column size. Fix: `SetStringParam`
     unprepares before growing the size. Contract test `SameQuery_GrowingStringParam_Binds`;
     SQLdb and Zeos passed it without any change.
+29. **Firebird 2.5 on Windows, local protocol: connections opened at the same moment sometimes
+    fail with "connection lost to database"** (GDS 335544741) inside the connect. Found when the
+    Windows integration suites were repeated: `ConcurrentWriters_AllCommit` (4 threads, each
+    opening a connection) failed in 4/20 runs with SQLdb and 3/20 with Zeos on FPC Win64, and
+    4/10 (Win32) and 3/10 (Win64) with Zeos on Delphi; over TCP (`localhost`), 0/20. Single runs
+    had always passed, which is how it went unnoticed; the Linux CI uses Firebird 5 over TCP.
+    Not a library defect: every driver fails the same way. Fix (test environment): Firebird
+    defaults to `localhost` too; `PASCALDB_IT_HOST=local` still selects the local protocol. Not
+    measured: Firebird 3+ locally.

@@ -11,8 +11,10 @@
 
   Settings (environment variables, all optional):
     PASCALDB_IT_ENGINE    firebird (default), postgresql or sqlite
-    PASCALDB_IT_HOST      server host. Firebird: '' = local server (path
-                          only). PostgreSQL: default localhost. Unused by
+    PASCALDB_IT_HOST      server host (default localhost, over TCP). Firebird:
+                          'local' = the local protocol (path only), which
+                          fails intermittently with concurrent connections on
+                          Firebird 2.5 (CLAUDE.md, gotcha 29). Unused by
                           SQLite
     PASCALDB_IT_PORT      server port (default: the driver's; PostgreSQL 5432)
     PASCALDB_IT_DATABASE  Firebird: database path on the server (default:
@@ -132,10 +134,13 @@ end;
 
 function Host: string;
 begin
-  if IsPostgres then
-    Result := Env('PASCALDB_IT_HOST', 'localhost')
-  else
-    Result := Env('PASCALDB_IT_HOST', '');
+  // Firebird defaults to TCP too, not the local protocol: with Firebird 2.5
+  // on Windows, several connections opened at once through the local
+  // protocol sometimes failed with "connection lost to database" (see
+  // CLAUDE.md, gotcha 29). 'local' still selects it.
+  Result := Env('PASCALDB_IT_HOST', 'localhost');
+  if SameText(Result, 'local') then
+    Result := '';
 end;
 
 function Port: string;
