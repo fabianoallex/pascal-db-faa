@@ -310,6 +310,10 @@ type
     procedure Test_Pool_SteadyLightLoad_LetsSurplusBeSwept;
     procedure Test_Pool_IdleTimeoutConfig_DefaultsAndValidation;
     procedure Test_Pool_IdleSweep_DestroyDoesNotHang;
+    procedure Test_Pool_Keepalive_PingsOnlyDueConnections_NotCountedAsUse;
+    procedure Test_Pool_Keepalive_DiscardsDeadConnection;
+    procedure Test_Pool_Keepalive_SparesTheAcquirePing;
+    procedure Test_Pool_Keepalive_RunsInTheBackgroundThread;
     procedure Test_Pool_Concurrency_WithIdleSweepActive;
     procedure Test_Pool_Event_ConnectionCreated_FiresOnGrowth;
     procedure Test_Pool_Event_ConnectionDiscarded_TestConnectionFails;
@@ -1651,6 +1655,187 @@ begin
 
   LConfig.IdleTimeoutSeconds := 45;
   TAssert.AssertEquals('A valid IdleTimeoutSeconds (>=0) must be accepted', 45, LConfig.IdleTimeoutSeconds);
+
+  TAssert.AssertEquals('KeepaliveSeconds must default to 0 (off)', 0, LConfig.KeepaliveSeconds);
+  LConfig.KeepaliveSeconds := -1;
+  TAssert.AssertEquals('A negative KeepaliveSeconds must be ignored', 0, LConfig.KeepaliveSeconds);
+  LConfig.KeepaliveSeconds := 30;
+  TAssert.AssertEquals('A valid KeepaliveSeconds (>=0) must be accepted', 30, LConfig.KeepaliveSeconds);
+end;
+
+procedure TPoolTests.Test_Pool_Keepalive_PingsOnlyDueConnections_NotCountedAsUse;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LMockFactory: TDBFactoryMock;
+  LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
+  LPool: TConnectionPool;
+  LTicker: TFakeTicker;
+  LConn1, LConn2, LConn3: IDBConnection;
+begin
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
+  try
+    // KeepaliveSeconds stays 0 (default): no background thread; the test
+    // calls KeepaliveIdleConnections(60) itself.
+    LConfig := TConnectionPoolConfig.Create;
+    LConfig.IniConnections := 0;
+    LConfig.MaxConnections := 10;
+
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPoolIntf := TConnectionPool.Create(LFactory, LConfig);
+    LPool := LPoolIntf as TConnectionPool;
+
+    LConn1 := LPoolIntf.AcquireConnection;
+    LConn2 := LPoolIntf.AcquireConnection;
+    LConn3 := LPoolIntf.AcquireConnection;
+    LTicker.SetDefaultMs(T0Plus(0));
+    LConn1 := nil; // idle 65s at the keepalive below — due
+    LTicker.SetDefaultMs(T0Plus(10));
+    LConn2 := nil; // 55s — not due
+    LTicker.SetDefaultMs(T0Plus(20));
+    LConn3 := nil; // 45s — not due
+
+    LTicker.SetDefaultMs(T0Plus(65));
+    LPool.KeepaliveIdleConnections;
+    TAssert.AssertEquals('KeepaliveSeconds=0 (default): nothing may be pinged', 0, LMockFactory.TestedConnections.Count);
+
+    LPool.KeepaliveIdleConnections(60);
+    TAssert.AssertEquals('Only the connection idle for 65s (>=60) must be pinged', 1, LMockFactory.TestedConnections.Count);
+    TAssert.AssertEquals('A connection that passed the ping must be back in the pool', 3, LPoolIntf.GetPoolSize);
+    TAssert.AssertEquals('The keepalive must not change the active count', 3, LPoolIntf.GetActiveConnections);
+
+    // The ping isn't use: the sweep still sees the first connection as idle
+    // since T0 (and finds it at the front, where it was put back).
+    LPool.SweepIdleConnections(60);
+    TAssert.AssertEquals('The pinged connection must still be swept as idle since its release', 2, LPoolIntf.GetPoolSize);
+  finally
+    TTicker.Reset;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Keepalive_DiscardsDeadConnection;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LMockFactory: TDBFactoryMock;
+  LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
+  LPool: TConnectionPool;
+  LTicker: TFakeTicker;
+  LConn1, LConn2: IDBConnection;
+  LEvents: TList<TPoolEvent>;
+  LRecorder: TPoolEventRecorder;
+begin
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
+  LRecorder := TPoolEventRecorder.Create;
+  LEvents := LRecorder.Events;
+  try
+    LConfig := TConnectionPoolConfig.Create;
+    LConfig.IniConnections := 0;
+    LConfig.MaxConnections := 10;
+
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPoolIntf := TConnectionPool.Create(LFactory, LConfig, LRecorder.OnEvent);
+    LPool := LPoolIntf as TConnectionPool;
+
+    LConn1 := LPoolIntf.AcquireConnection;
+    LConn2 := LPoolIntf.AcquireConnection;
+    LConn1 := nil;
+    LConn2 := nil;
+    LEvents.Clear; // drop the 2 pekConnectionCreated events
+
+    LMockFactory.FailNextTestConnections(1);
+    LTicker.SetDefaultMs(T0Plus(100));
+    LPool.KeepaliveIdleConnections(60);
+
+    TAssert.AssertEquals('Both idle connections were due and must have been pinged', 2, LMockFactory.TestedConnections.Count);
+    TAssert.AssertEquals('The dead one must not go back to the pool', 1, LPoolIntf.GetPoolSize);
+    TAssert.AssertEquals('The dead one must leave the active count', 1, LPoolIntf.GetActiveConnections);
+    TAssert.AssertEquals('Must fire exactly 1 event', 1, LEvents.Count);
+    TAssert.AssertEquals(Ord(pekConnectionDiscarded), Ord(LEvents[0].Kind));
+    TAssert.AssertEquals(Ord(pdrStaleCheckFailed), Ord(LEvents[0].DiscardReason));
+    TAssert.AssertEquals(Int64(1), LPoolIntf.GetSnapshot.TotalDiscarded);
+  finally
+    TTicker.Reset;
+    LRecorder.Free;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Keepalive_SparesTheAcquirePing;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LMockFactory: TDBFactoryMock;
+  LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
+  LPool: TConnectionPool;
+  LTicker: TFakeTicker;
+  LConn: IDBConnection;
+begin
+  // Released at T0, pinged by the keepalive at T0+100s, acquired at T0+150s:
+  // 150s since the release, but only 50s since it was last known to work,
+  // so the acquire (ValidateIdleSeconds = 120) doesn't ping it again.
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
+  try
+    LConfig := TConnectionPoolConfig.Create;
+    LConfig.IniConnections := 1;
+    LConfig.MaxConnections := 10;
+
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPoolIntf := TConnectionPool.Create(LFactory, LConfig);
+    LPool := LPoolIntf as TConnectionPool;
+
+    LTicker.SetDefaultMs(T0Plus(100));
+    LPool.KeepaliveIdleConnections(60);
+    TAssert.AssertEquals('Precondition: the keepalive pinged the connection', 1, LMockFactory.TestedConnections.Count);
+
+    LTicker.SetDefaultMs(T0Plus(150));
+    LConn := LPoolIntf.AcquireConnection;
+    TAssert.AssertEquals('The acquire must not ping a connection the keepalive checked 50s ago', 1, LMockFactory.TestedConnections.Count);
+  finally
+    TTicker.Reset;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Keepalive_RunsInTheBackgroundThread;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LMockFactory: TDBFactoryMock;
+  LPool: TConnectionPool;
+  LStart: UInt64;
+  LPinged: Boolean;
+begin
+  // Real ticker and thread: with only KeepaliveSeconds set (no idle
+  // timeout), the background thread must start and ping the idle
+  // connection once it has been idle for 1s.
+  LConfig := TConnectionPoolConfig.Create;
+  LConfig.IniConnections := 1;
+  LConfig.MaxConnections := 10;
+  LConfig.KeepaliveSeconds := 1;
+  LConfig.IdleCheckIntervalMs := 20;
+
+  LMockFactory := TDBFactoryMock.Create;
+  LFactory := LMockFactory;
+  LPool := TConnectionPool.Create(LFactory, LConfig);
+  try
+    LStart := PdbTickMs;
+    repeat
+      Sleep(20);
+      LPinged := LMockFactory.TestedConnections.Count > 0;
+    until LPinged or (PdbTickMs - LStart > 5000);
+  finally
+    LPool.Free;
+  end;
+
+  TAssert.AssertTrue('The background thread must ping an idle connection within 5s', LPinged);
 end;
 
 procedure TPoolTests.Test_Pool_IdleSweep_DestroyDoesNotHang;

@@ -17,8 +17,9 @@ All on `IDatabaseConfig`, with the defaults `TDatabaseConfig` starts with.
 | `PoolMaxConnections` | 10 | the most connections the pool will have open at once. Below 1, creating the factory raises `EArgumentException` |
 | `PoolWaitMaxAttemps`, `PoolWaitMilliseconds` | 50, 100 | when all `PoolMaxConnections` are busy, a caller checks again every `PoolWaitMilliseconds`, up to `PoolWaitMaxAttemps` times, then gets `EPoolTimeoutException`. `PoolWaitMaxAttemps` = 0 means no waiting at all |
 | `PoolIdleTimeoutSeconds` | 0 | close connections idle for this long, never going below `PoolIniConnections`. 0 turns the sweep off |
-| `PoolIdleCheckIntervalMs` | 30000 | how often the sweep runs. Only matters when the sweep is on |
-| `PoolValidateIdleSeconds` | 120 | a connection idle for this long gets the dialect's ping before it is handed out. 0 pings on every acquire (one extra round trip each time); negative never pings |
+| `PoolIdleCheckIntervalMs` | 30000 | how often the background thread runs the sweep and the keepalive. Only matters when one of them is on |
+| `PoolValidateIdleSeconds` | 120 | a connection not known to work for this long (since its release or its last keepalive ping) gets the dialect's ping before it is handed out. 0 pings on every acquire (one extra round trip each time); negative never pings |
+| `PoolKeepaliveSeconds` | 0 | the background thread pings idle connections not known to work for this long, and closes the ones that fail. 0 turns it off |
 
 The samples use 1 initial, 5 max and 50 × 100 ms of waiting. Size `PoolMaxConnections` to what
 the database accepts from this program, not to the number of threads: a thread that has to
@@ -31,13 +32,20 @@ wait a little for a connection is normal.
 - **Reuses the most recently released connection first** (last in, first out). The same few
   connections do the work, and the ones a peak left behind stay idle long enough for the
   sweep to close them.
-- **Checks old connections before reusing them**: a connection idle for
+- **Checks old connections before reusing them**: a connection not known to work for
   `PoolValidateIdleSeconds` or more (2 minutes by default) gets the dialect's ping first, and is
   discarded if it fails; the acquire then tries the next one. The ping has no timeout of its
   own: on a connection the network dropped silently, it waits as long as the driver does.
 - **Discards broken connections**: a connection that dropped while in use comes back marked
   and is closed instead of queued ([guide 6](errors.md)).
 - **Sweeps idle connections** when `PoolIdleTimeoutSeconds` is set, in a background thread.
+- **Keeps idle connections alive** when `PoolKeepaliveSeconds` is set: the same thread pings
+  them, so a firewall or the server's idle limit doesn't drop them, and an acquire finds them
+  already checked. Set it below whichever of those limits is shortest, and below
+  `PoolValidateIdleSeconds` if you want the acquire to skip its ping. A ping doesn't count as
+  use: the sweep still closes a connection nobody used for `PoolIdleTimeoutSeconds`. While a
+  connection is being pinged it is out of the pool (an acquire gets another one, or opens one),
+  and a ping stuck on a dead network holds the background thread, never an acquire.
 
 Idle times are measured on a monotonic clock, so changing the system time (daylight saving, a
 manual adjustment) doesn't age the connections. Tests can replace that clock with
@@ -54,7 +62,7 @@ LFactory := TSQLdbFactory.Create(LConfig, nil, LMonitor.OnPoolEvent);
 | `TPoolEvent.Kind` | When |
 |---|---|
 | `pekConnectionCreated` | a physical connection was opened (initial or growth) |
-| `pekConnectionDiscarded` | a connection was dropped; `DiscardReason`: `pdrConnectFailed` (opening or reopening failed; `ErrorMessage` has why), `pdrStaleCheckFailed` (the ping failed), `pdrBrokenAfterUse` (it dropped while in use) |
+| `pekConnectionDiscarded` | a connection was dropped; `DiscardReason`: `pdrConnectFailed` (opening or reopening failed; `ErrorMessage` has why), `pdrStaleCheckFailed` (the ping failed, on acquire or in the keepalive), `pdrBrokenAfterUse` (it dropped while in use) |
 | `pekAcquireThrottled` | a caller had to wait (`WaitAttempts`) and **then got** a connection |
 | `pekAcquireTimeout` | a caller gave up; `EPoolTimeoutException` is raised right after |
 | `pekIdleSweepClosed` | the sweep closed `ClosedCount` connections |

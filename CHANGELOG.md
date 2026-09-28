@@ -19,6 +19,11 @@ may change the API; each such change is listed here.
   `IConnectionPoolConfig`): how long a connection must have been idle to get the ping before it
   is handed out. The default, 120, is the value that was fixed in the code; 0 pings on every
   acquire, a negative value never.
+- `PoolKeepaliveSeconds` (`IDatabaseConfig`; `KeepaliveSeconds` on `IConnectionPoolConfig`),
+  off by default: the pool's background thread pings idle connections not known to work for
+  that long and closes the ones that fail. A ping resets the time `PoolValidateIdleSeconds`
+  measures, not the one `PoolIdleTimeoutSeconds` does. `TConnectionPool.KeepaliveIdleConnections`
+  runs one round on demand.
 - `TTicker` (`PascalDb.SystemContext`): a replaceable monotonic clock, like `TClock` and
   `TSleep`, for tests that control the pool's idle times.
 

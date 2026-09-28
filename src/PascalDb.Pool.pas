@@ -20,7 +20,9 @@
   - liveness check (the dialect's ping) of connections idle for
     ValidateIdleSeconds or more, and discard of dead ones;
   - sweep of idle connections (IdleTimeoutSeconds), in a dedicated thread
-    (TIdleSweepThread) that never closes below IniConnections.
+    (TIdleSweepThread) that never closes below IniConnections;
+  - keepalive (KeepaliveSeconds): the same thread pings idle connections
+    before a firewall or the server's idle limit drops them.
 
   Idle connections are handed out last in, first out: an acquire takes the
   connection released most recently. The pool used to be FIFO, which spread
@@ -66,7 +68,12 @@ type
 
   TConnectionItem = record
     Connection: IDBConnection;
-    LastRelease: UInt64; // TTicker.NowMs when it came back to the pool
+    LastRelease: UInt64; // TTicker.NowMs when it came back to the pool (idle since)
+    // TTicker.NowMs when it was last known to work: its release or a
+    // successful keepalive ping. The acquire check (ValidateIdleSeconds) and
+    // the keepalive measure from here; the idle sweep from LastRelease, so a
+    // ping never counts as use.
+    LastAlive: UInt64;
     class function New(AConn: IDBConnection): TConnectionItem; static;
   end;
 
@@ -81,6 +88,7 @@ type
     function GetIdleTimeoutSeconds: Integer;
     function GetIdleCheckIntervalMs: Integer;
     function GetValidateIdleSeconds: Integer;
+    function GetKeepaliveSeconds: Integer;
     procedure SetIniConnections(AValue: Integer);
     procedure SetMaxConnections(AValue: Integer);
     procedure SetWaitMaxAttemps(AValue: Integer);
@@ -88,6 +96,7 @@ type
     procedure SetIdleTimeoutSeconds(AValue: Integer);
     procedure SetIdleCheckIntervalMs(AValue: Integer);
     procedure SetValidateIdleSeconds(AValue: Integer);
+    procedure SetKeepaliveSeconds(AValue: Integer);
     property IniConnections: Integer read GetIniConnections write SetIniConnections;
     property MaxConnections: Integer read GetMaxConnections write SetMaxConnections;
     property WaitMaxAttemps: Integer read GetWaitMaxAttemps write SetWaitMaxAttemps;
@@ -95,13 +104,21 @@ type
     /// Seconds a connection may stay idle in the pool before being closed
     /// (never below IniConnections). 0 (default) = off.
     property IdleTimeoutSeconds: Integer read GetIdleTimeoutSeconds write SetIdleTimeoutSeconds;
-    /// Interval between idle sweeps. Only matters when
-    /// IdleTimeoutSeconds > 0. Values <= 0 fall back to the default (30000ms).
+    /// Interval between runs of the background thread (idle sweep and
+    /// keepalive). Only matters when IdleTimeoutSeconds > 0 or
+    /// KeepaliveSeconds > 0. Values <= 0 fall back to the default (30000ms).
     property IdleCheckIntervalMs: Integer read GetIdleCheckIntervalMs write SetIdleCheckIntervalMs;
-    /// An idle connection unused for at least this many seconds gets the
-    /// dialect's ping before it is handed out, and is discarded if the ping
-    /// fails. 120 (default); 0 = ping on every acquire; negative = never.
+    /// An idle connection not known to work for at least this many seconds
+    /// (since its release or its last keepalive ping) gets the dialect's ping
+    /// before it is handed out, and is discarded if the ping fails.
+    /// 120 (default); 0 = ping on every acquire; negative = never.
     property ValidateIdleSeconds: Integer read GetValidateIdleSeconds write SetValidateIdleSeconds;
+    /// The background thread pings idle connections not known to work for
+    /// this many seconds, and discards the ones that fail. Keeps firewalls and
+    /// server idle limits from dropping them, and spares the acquire the ping.
+    /// Checked every IdleCheckIntervalMs. 0 (default) = off; negative values
+    /// are ignored.
+    property KeepaliveSeconds: Integer read GetKeepaliveSeconds write SetKeepaliveSeconds;
   end;
 
   { TConnectionPoolConfig }
@@ -115,6 +132,7 @@ type
     FIdleTimeoutSeconds: Integer;
     FIdleCheckIntervalMs: Integer;
     FValidateIdleSeconds: Integer;
+    FKeepaliveSeconds: Integer;
     function GetIniConnections: Integer;
     function GetMaxConnections: Integer;
     procedure SetIniConnections(AValue: Integer);
@@ -126,11 +144,13 @@ type
     function GetIdleTimeoutSeconds: Integer;
     function GetIdleCheckIntervalMs: Integer;
     function GetValidateIdleSeconds: Integer;
+    function GetKeepaliveSeconds: Integer;
     procedure SetWaitMaxAttemps(AValue: Integer);
     procedure SetWaitMilliseconds(AValue: Integer);
     procedure SetIdleTimeoutSeconds(AValue: Integer);
     procedure SetIdleCheckIntervalMs(AValue: Integer);
     procedure SetValidateIdleSeconds(AValue: Integer);
+    procedure SetKeepaliveSeconds(AValue: Integer);
   end;
 
   // Pool events only cover what signals abnormal operation or capacity
@@ -148,12 +168,16 @@ type
     pekAcquireTimeout,       // ran out of wait attempts; EPoolTimeoutException is raised next
     pekIdleSweepClosed       // the idle sweep closed one or more connections
   );
+  // A connection that fails the keepalive ping is reported as
+  // pekConnectionDiscarded with pdrStaleCheckFailed, like one that fails the
+  // ping on acquire.
 
   TPoolDiscardReason = (
     pdrConnectFailed,     // ConnectionItem.Connection.Connect failed to reconnect, or
                            // AcquireConnection failed to open a new connection during the
                            // initial ramp-up (CreateInitialConnections, database offline at boot)
-    pdrStaleCheckFailed,  // FFactory.TestConnection returned False (stale/dead connection)
+    pdrStaleCheckFailed,  // FFactory.TestConnection returned False (stale/dead connection),
+                           // on acquire or in the keepalive
     pdrBrokenAfterUse     // IsConnectionBrokenError (PascalDb.Interfaces) marked the connection via
                            // IDiscardableConnection during use (Query/Commit/Rollback) —
                            // discarded on release, never goes back idle to the pool
@@ -192,6 +216,7 @@ type
     FIdleTimeoutSeconds: Integer;
     FIdleCheckIntervalMs: Integer;
     FValidateIdleSeconds: Integer;
+    FKeepaliveSeconds: Integer;
     FIdleSweepThread: TThread;
     FIdleSweepWake: TEvent;
     FOnEvent: TPoolEventProc;
@@ -237,6 +262,14 @@ type
     /// IdleTimeoutSeconds configured (nor, therefore, any thread started).
     procedure SweepIdleConnections; overload;
     procedure SweepIdleConnections(AIdleTimeoutSeconds: Integer); overload;
+    /// Pings the idle connections not known to work for AKeepaliveSeconds
+    /// (see LastAlive) and discards the ones that fail. The ones being pinged
+    /// are taken out of the pool meanwhile, so no acquire gets them; the ping
+    /// runs outside the pool's lock. The background thread calls the
+    /// parameterless version when KeepaliveSeconds > 0; public for tests, as
+    /// SweepIdleConnections.
+    procedure KeepaliveIdleConnections; overload;
+    procedure KeepaliveIdleConnections(AKeepaliveSeconds: Integer); overload;
   end;
 
 implementation
@@ -250,7 +283,11 @@ type
     A dedicated class instead of TThread.CreateAnonymousThread: FPC 3.2.2 has
     no anonymous methods. It accesses the pool's private members (same unit).
     The lifecycle (Terminate via FIdleSweepWake, a single WaitFor, Free)
-    still belongs to TConnectionPool — see StartIdleSweep/StopIdleSweep. }
+    still belongs to TConnectionPool — see StartIdleSweep/StopIdleSweep.
+    Each round sweeps first and then runs the keepalive, so a connection
+    about to be closed isn't pinged; either one does nothing when it is off.
+    A keepalive ping stuck on a dead network holds this thread (and the
+    next sweep) until the driver gives up; it never blocks an acquire. }
   TIdleSweepThread = class(TThread)
   private
     FPool: TConnectionPool;
@@ -269,7 +306,10 @@ end;
 procedure TIdleSweepThread.Execute;
 begin
   while FPool.FIdleSweepWake.WaitFor(FPool.FIdleCheckIntervalMs) = wrTimeout do
+  begin
     FPool.SweepIdleConnections;
+    FPool.KeepaliveIdleConnections;
+  end;
 end;
 
 type
@@ -848,6 +888,7 @@ class function TConnectionItem.New(AConn: IDBConnection): TConnectionItem;
 begin
   Result.Connection := AConn;
   Result.LastRelease := TTicker.NowMs;
+  Result.LastAlive := Result.LastRelease;
 end;
 
 { TConnectionPoolConfig }
@@ -855,7 +896,7 @@ end;
 constructor TConnectionPoolConfig.Create;
 begin
   inherited Create;
-  FIdleCheckIntervalMs := 30000; // only matters if IdleTimeoutSeconds > 0
+  FIdleCheckIntervalMs := 30000; // only matters if IdleTimeoutSeconds or KeepaliveSeconds > 0
   FValidateIdleSeconds := 120;
 end;
 
@@ -933,6 +974,17 @@ begin
   FValidateIdleSeconds := AValue; // every value means something; see the property
 end;
 
+function TConnectionPoolConfig.GetKeepaliveSeconds: Integer;
+begin
+  Result := FKeepaliveSeconds;
+end;
+
+procedure TConnectionPoolConfig.SetKeepaliveSeconds(AValue: Integer);
+begin
+  if AValue >= 0 then
+    FKeepaliveSeconds := AValue;
+end;
+
 { TConnectionPool }
 
 constructor TConnectionPool.Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig;
@@ -956,6 +1008,7 @@ begin
     FIdleTimeoutSeconds := AConfig.IdleTimeoutSeconds;
     FIdleCheckIntervalMs := AConfig.IdleCheckIntervalMs;
     FValidateIdleSeconds := AConfig.ValidateIdleSeconds;
+    FKeepaliveSeconds := AConfig.KeepaliveSeconds;
   end
   else
   begin
@@ -966,6 +1019,7 @@ begin
     FIdleTimeoutSeconds := 0; // off by default
     FIdleCheckIntervalMs := 30000;
     FValidateIdleSeconds := 120;
+    FKeepaliveSeconds := 0; // off by default
   end;
 
   if FIdleCheckIntervalMs <= 0 then
@@ -980,7 +1034,7 @@ begin
 
   CreateInitialConnections;
 
-  if FIdleTimeoutSeconds > 0 then
+  if (FIdleTimeoutSeconds > 0) or (FKeepaliveSeconds > 0) then
     StartIdleSweep;
 end;
 
@@ -1113,6 +1167,85 @@ begin
     end;
   finally
     LToClose.Free;
+  end;
+end;
+
+procedure TConnectionPool.KeepaliveIdleConnections;
+begin
+  KeepaliveIdleConnections(FKeepaliveSeconds);
+end;
+
+procedure TConnectionPool.KeepaliveIdleConnections(AKeepaliveSeconds: Integer);
+var
+  LDue: TList<TConnectionItem>;
+  LItem: TConnectionItem;
+  LAlive: Boolean;
+  LEvent: TPoolEvent;
+  I, J: Integer;
+begin
+  if AKeepaliveSeconds <= 0 then
+    Exit;
+
+  LDue := TList<TConnectionItem>.Create;
+  try
+    // Phase 1 (fast, under the lock): take the due ones out of FPool, so no
+    // acquire gets a connection in the middle of its ping. They still count
+    // in FActiveConnections: meanwhile the pool may open a new one for an
+    // acquire, but never more than MaxConnections in all.
+    FLockPool.Enter;
+    try
+      for I := FPool.Count - 1 downto 0 do
+        if TTicker.ElapsedMs(FPool[I].LastAlive) >= UInt64(AKeepaliveSeconds) * 1000 then
+        begin
+          LDue.Add(FPool[I]);
+          FPool.Delete(I);
+        end;
+    finally
+      FLockPool.Leave;
+    end;
+
+    // Phase 2 (slow, outside the lock, like the sweep's Disconnect): ping
+    // each one. A live one goes back right away, at its LastRelease place, so
+    // FPool stays ordered for the sweep and the LIFO acquire; a dead one is
+    // discarded as on acquire.
+    for I := 0 to LDue.Count - 1 do
+    begin
+      LItem := LDue[I];
+      try
+        LAlive := FFactory.TestConnection(LItem.Connection);
+      except
+        LAlive := False; // TDBFactory's never raises; a third-party factory might
+      end;
+
+      if LAlive then
+      begin
+        LItem.LastAlive := TTicker.NowMs;
+        FLockPool.Enter;
+        try
+          J := FPool.Count;
+          while (J > 0) and (FPool[J - 1].LastRelease > LItem.LastRelease) do
+            Dec(J);
+          FPool.Insert(J, LItem);
+        finally
+          FLockPool.Leave;
+        end;
+      end
+      else
+      begin
+        try
+          LItem.Connection.Disconnect(True);
+        except
+          // ignore — the connection is being discarded anyway
+        end;
+        DecrementActiveConnections;
+        PdbAtomicInc64(FTotalDiscarded);
+        LEvent := BaseEvent(pekConnectionDiscarded);
+        LEvent.DiscardReason := pdrStaleCheckFailed;
+        Notify(LEvent);
+      end;
+    end;
+  finally
+    LDue.Free;
   end;
 end;
 
@@ -1266,7 +1399,7 @@ var
     end;
 
     if (FValidateIdleSeconds >= 0) and
-       (TTicker.ElapsedMs(ConnectionItem.LastRelease) >= UInt64(FValidateIdleSeconds) * 1000) then
+       (TTicker.ElapsedMs(ConnectionItem.LastAlive) >= UInt64(FValidateIdleSeconds) * 1000) then
     begin
       if not FFactory.TestConnection(ConnectionItem.Connection) then
       begin

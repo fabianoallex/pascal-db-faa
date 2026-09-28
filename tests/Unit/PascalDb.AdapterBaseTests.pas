@@ -357,6 +357,7 @@ begin
   TAssert.AssertEquals('PoolWaitMilliseconds', 100, LConfig.PoolWaitMilliseconds);
   TAssert.AssertEquals('PoolIdleTimeoutSeconds', 0, LConfig.PoolIdleTimeoutSeconds);
   TAssert.AssertEquals('PoolValidateIdleSeconds', 120, LConfig.PoolValidateIdleSeconds);
+  TAssert.AssertEquals('PoolKeepaliveSeconds', 0, LConfig.PoolKeepaliveSeconds);
 end;
 
 procedure TAdapterBaseTests.Factory_PoolMaxZero_RaisesClearError;

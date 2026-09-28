@@ -55,7 +55,8 @@ end;
 `TestConnection(CreateConnection)` is **not** a way to do this: `CreateConnection` already opens
 the connection on SQLdb, so it raises before `TestConnection` runs. `TestConnection` answers
 "is this open connection still alive?" (the pool uses it on connections idle for
-`PoolValidateIdleSeconds` or more, 2 minutes by default) and returns `False` instead of raising.
+`PoolValidateIdleSeconds` or more, 2 minutes by default, and for the keepalive) and returns
+`False` instead of raising.
 
 ## Transactions and exceptions
 
