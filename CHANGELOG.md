@@ -39,6 +39,9 @@ may change the API; each such change is listed here.
 
 ### Fixed
 
+- FireDAC on PostgreSQL: running the same query again with a longer string parameter failed
+  with "Data too large for variable" (FireDAC keeps the command prepared, and the parameter kept
+  the first value's size). The adapter now unprepares when a string parameter has to grow.
 - The pool measures idle times on a monotonic clock. With the wall clock, a change of the
   system time (daylight saving, a manual adjustment) made every idle connection look that much
   older, sending them all to the liveness check and to the idle sweep at once.

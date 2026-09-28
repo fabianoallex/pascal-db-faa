@@ -9,7 +9,8 @@
   optional columns through SQL tags, INSERT ... RETURNING, UTF-8 text,
   commit/rollback, nested scopes with savepoints, a constraint violation
   that must not discard the connection, scripts, row counts, parameters
-  after the same SQL text is assigned again, concurrent writers (SQLite
+  after the same SQL text is assigned again, a string parameter that grows
+  while the statement stays prepared, concurrent writers (SQLite
   allows one at a time: the others must wait for the lock, not fail), and a
   failed connect surfacing as EDatabaseConnectException whatever the driver.
 
@@ -58,6 +59,7 @@ type
     [Test] procedure SqlScript_RunsEveryStatement;
     [Test] procedure RecordCount_CountsEveryRow;
     [Test] procedure SameSqlReassigned_ParamsStillBind;
+    [Test] procedure SameQuery_GrowingStringParam_Binds;
     [Test] procedure ConcurrentWriters_AllCommit;
     [Test] procedure Unreachable_AcquireRaisesConnectException;
   end;
@@ -106,6 +108,9 @@ begin
       raise;
     end;
   except
+    // The driver's detail too: EDatabaseUnavailableException's Message is generic.
+    on E: EDatabaseUnavailableException do
+      FError := E.ClassName + ': ' + E.Message + ' (' + E.OriginalClassName + ': ' + E.OriginalMessage + ')';
     on E: Exception do
       FError := E.ClassName + ': ' + E.Message;
   end;
@@ -540,6 +545,40 @@ begin
       LQuery.Sql := 'SELECT NAME FROM ITEMS WHERE ID = :ID';
       LQuery.Params.Integers['ID'] := 200 + I;
       TAssert.AssertEquals('again ' + IntToStr(I), LQuery.Open.Strings['NAME']);
+    end;
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+procedure TContractTests.SameQuery_GrowingStringParam_Binds;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  I: Integer;
+begin
+  // The SQL is assigned once and the query run again with a longer string
+  // each time: the driver keeps the statement prepared, and FireDAC on
+  // PostgreSQL kept the first value's size for the parameter, so the second
+  // row failed with "Data too large for variable [NAME]".
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME)';
+    for I := 1 to 40 do
+    begin
+      LQuery.Params.Integers['ID'] := 400 + I;
+      LQuery.Params.Strings['NAME'] := StringOfChar('n', I);
+      LQuery.ExecSql;
+    end;
+    LQuery.Sql := 'SELECT ID FROM ITEMS WHERE NAME = :NAME';
+    for I := 1 to 40 do
+    begin
+      LQuery.Params.Strings['NAME'] := StringOfChar('n', I);
+      TAssert.AssertEquals('Row with a ' + IntToStr(I) + '-character name', 400 + I,
+        LQuery.Open.Integers['ID']);
     end;
     LScope.Commit;
   except

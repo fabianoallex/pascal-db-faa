@@ -510,3 +510,13 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     `libfbclient.so.2` both load. The test scripts always pass the full path, which is why the
     suites never showed it; three agents writing a consumer program all hit the SQLite one. Not
     measured: Zeos's default names.
+28. **FireDAC + PostgreSQL: the same query run again with a longer string parameter fails with
+    "Data too large for variable".** `[FireDAC][Phys][PG]-345. Data too large for variable
+    [NAME]. Max len = [6], actual len = [7]` on the 10th row of a loop inserting `'item 1'` ...
+    `'item 10'` with the SQL assigned once (Delphi 12 CE, Win64, PostgreSQL 17; found by a
+    benchmark for a "prepared statements" feature request). Cause: FireDAC keeps the command
+    prepared between executions of the same SQL, and the bound buffer keeps the size of the
+    first value; the adapter already grew `TFDParam.Size`, which doesn't resize a prepared
+    buffer. Firebird passed: its server describes the column size. Fix: `SetStringParam`
+    unprepares before growing the size. Contract test `SameQuery_GrowingStringParam_Binds`;
+    SQLdb and Zeos passed it without any change.

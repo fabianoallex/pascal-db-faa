@@ -332,8 +332,18 @@ procedure TFDParamsAdapter.SetStringParam(AParam: TFDParam; const AValue: string
 begin
   // FireDAC sizes a string parameter from its first value; a longer value
   // later would be truncated — grow it first (behavior of the origin adapter).
+  // Growing it isn't enough once the command is prepared (FireDAC keeps it
+  // prepared between executions of the same SQL): the bound buffer keeps the
+  // old size, and PostgreSQL, which doesn't describe parameter sizes, failed
+  // with "Data too large for variable". Unprepare, so the next execution
+  // prepares with the new size (a re-prepare only when a value is longer
+  // than every one before it).
   if AParam.Size < Length(AValue) then
+  begin
+    if FQuery.Prepared then
+      FQuery.Unprepare;
     AParam.Size := Length(AValue);
+  end;
   // AsWideString, not AsString: TFDParam.AsString makes the parameter
   // ftString (ANSI), and FireDAC then converts the text to the ANSI code
   // page — characters outside it arrive at the database as "?" (observed:
