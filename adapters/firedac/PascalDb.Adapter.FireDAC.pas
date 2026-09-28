@@ -153,6 +153,7 @@ type
     function SqlLines: TStrings; override;
     procedure DoExecSql; override;
     procedure DoClearParams; override;
+    function ResetParamValues: Boolean; override;
     function CreateParams: IParams; override;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
@@ -476,6 +477,16 @@ end;
 procedure TFDQueryAdapter.DoClearParams;
 begin
   FQuery.Params.Clear;
+end;
+
+function TFDQueryAdapter.ResetParamValues: Boolean;
+var
+  I: Integer;
+begin
+  // Values only: the parameters (and the prepared statement) stay.
+  for I := 0 to FQuery.Params.Count - 1 do
+    FQuery.Params[I].Clear;
+  Result := True;
 end;
 
 function TFDQueryAdapter.CreateParams: IParams;

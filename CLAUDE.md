@@ -434,7 +434,10 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     `SQL.Text`; Zeos doesn't re-parse a text equal to the current one, so the parameters never
     come back. Fix: `SqlLines.Clear` before the assignment. Contract test
     `SameSqlReassigned_ParamsStillBind` failed on Zeos before the fix and passes on all four
-    Linux combinations after it. Not measured: whether FireDAC was affected.
+    Linux combinations after it. Not measured: whether FireDAC was affected. Later, the same
+    text skips that reset altogether (`ResetParamValues` clears only the values), because
+    re-assigning made FireDAC and Zeos prepare again on every iteration; contract test
+    `SameSqlReassigned_PreviousValuesDontLeak` checks no value survives.
 18. **A `Double(...)` typecast of a `Currency` converts on FPC for Windows but not on FPC for
     Linux.** Sample 03 printed prices with `Format('%8.2f', [Double(LResult.Currencies['PRICE'])])`:
     `12.50` on Windows, `125000.00` on every Linux run. Isolated with FPC 3.2.2 x86_64 on both

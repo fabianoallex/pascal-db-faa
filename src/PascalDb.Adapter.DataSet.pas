@@ -71,6 +71,8 @@ type
     FConn: IDBConnection;
     FTransaction: ITransaction;
     FParams: IParams;
+    FSql: string;
+    FHasSql: Boolean;
     function Field(const AName: string): TField;
   protected
     /// The driver's query component (a TDataSet descendant).
@@ -84,6 +86,11 @@ type
     procedure DoOpen; virtual;
     /// Drops the parameters of the previous SQL before new SQL is set.
     procedure DoClearParams; virtual; abstract;
+    /// SetSql with the text already set: clears every parameter's value but
+    /// keeps the parameters, so the driver keeps the statement prepared, and
+    /// returns True. The default returns False, and SetSql resets the query
+    /// as for new SQL (drops the parameters and assigns the text again).
+    function ResetParamValues: Boolean; virtual;
     /// The IParams over the query's parameters; called once, lazily.
     function CreateParams: IParams; virtual; abstract;
   public
@@ -268,12 +275,26 @@ procedure TDataSetQueryBase.SetSql(const ASql: string);
 begin
   if DataSet.Active then
     DataSet.Close;
+  // The same text again (a loop that sets the SQL on every iteration): keep
+  // the parameters and the prepared statement, clear only the values, so
+  // nothing from the previous run is sent. Reassigning the text made FireDAC
+  // and Zeos prepare again: 2000 SELECTs took 2 to 28 times as long as with
+  // the SQL set once (SQLdb prepares on every execution anyway).
+  if FHasSql and (ASql = FSql) and ResetParamValues then
+    Exit;
   DoClearParams;
   // Clear first, so the driver always sees a change and re-creates the
   // parameters: Zeos doesn't re-parse an SQL text equal to the current one,
   // and the parameters DoClearParams just removed would never come back.
   SqlLines.Clear;
   SqlLines.Text := ASql;
+  FSql := ASql;
+  FHasSql := True;
+end;
+
+function TDataSetQueryBase.ResetParamValues: Boolean;
+begin
+  Result := False;
 end;
 
 function TDataSetQueryBase.GetSql: string;

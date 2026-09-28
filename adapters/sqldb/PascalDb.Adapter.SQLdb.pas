@@ -117,6 +117,7 @@ type
     procedure DoExecSql; override;
     procedure DoOpen; override;
     procedure DoClearParams; override;
+    function ResetParamValues: Boolean; override;
     function CreateParams: IParams; override;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
@@ -398,6 +399,16 @@ end;
 procedure TSQLdbQueryAdapter.DoClearParams;
 begin
   FQuery.Params.Clear;
+end;
+
+function TSQLdbQueryAdapter.ResetParamValues: Boolean;
+var
+  I: Integer;
+begin
+  // Values only: the parameters (and the prepared statement) stay.
+  for I := 0 to FQuery.Params.Count - 1 do
+    FQuery.Params[I].Clear;
+  Result := True;
 end;
 
 function TSQLdbQueryAdapter.CreateParams: IParams;

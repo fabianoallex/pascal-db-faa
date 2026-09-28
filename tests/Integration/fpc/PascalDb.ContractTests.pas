@@ -15,7 +15,8 @@
   optional columns through SQL tags, INSERT ... RETURNING, UTF-8 text,
   commit/rollback, nested scopes with savepoints, a constraint violation
   that must not discard the connection, scripts, row counts, parameters
-  after the same SQL text is assigned again, a string parameter that grows
+  after the same SQL text is assigned again (still bound, without the
+  previous run's values), a string parameter that grows
   while the statement stays prepared, requests staying on the pool's own
   server sessions, concurrent writers (SQLite
   allows one at a time: the others must wait for the lock, not fail), and a
@@ -63,6 +64,7 @@ type
     procedure SqlScript_RunsEveryStatement;
     procedure RecordCount_CountsEveryRow;
     procedure SameSqlReassigned_ParamsStillBind;
+    procedure SameSqlReassigned_PreviousValuesDontLeak;
     procedure SameQuery_GrowingStringParam_Binds;
     procedure Requests_StayOnPooledConnections;
     procedure ConcurrentWriters_AllCommit;
@@ -552,6 +554,52 @@ begin
       TAssert.AssertEquals('again ' + IntToStr(I), LQuery.Open.Strings['NAME']);
     end;
     LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+procedure TContractTests.SameSqlReassigned_PreviousValuesDontLeak;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LResult: IQueryResult;
+  LRan: Boolean;
+begin
+  // Setting the same SQL again keeps the parameters (and the prepared
+  // statement) but must clear their values: a parameter the caller doesn't
+  // set this time must not reach the database with the previous value.
+  // Whether the driver then sends NULL or refuses an unset parameter varies;
+  // either way, QTY must not be 7. (QTY, not NAME: NAME is UNIQUE, and a
+  // leaked name would fail the insert for another reason.)
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME, QTY) VALUES (:ID, :NAME, :QTY)';
+    LQuery.Params.Integers['ID'] := 501;
+    LQuery.Params.Strings['NAME'] := 'first';
+    LQuery.Params.Integers['QTY'] := 7;
+    LQuery.ExecSql;
+
+    LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME, QTY) VALUES (:ID, :NAME, :QTY)';
+    LQuery.Params.Integers['ID'] := 502;
+    LQuery.Params.Strings['NAME'] := 'second';
+    LRan := True;
+    try
+      LQuery.ExecSql;
+    except
+      LRan := False; // the driver refused the unset parameter: nothing leaked
+    end;
+    if LRan then
+    begin
+      LQuery.Sql := 'SELECT QTY FROM ITEMS WHERE ID = :ID';
+      LQuery.Params.Integers['ID'] := 502;
+      LResult := LQuery.Open;
+      TAssert.AssertFalse('QTY must not keep the previous run''s value',
+        (not LResult.Eof) and (LResult.Integers['QTY'] = 7));
+    end;
+    LScope.Rollback;
   except
     LScope.Rollback;
     raise;

@@ -104,6 +104,7 @@ type
     function SqlLines: TStrings; override;
     procedure DoExecSql; override;
     procedure DoClearParams; override;
+    function ResetParamValues: Boolean; override;  // optional, see below
     function CreateParams: IParams; override;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
@@ -269,6 +270,18 @@ end;
 procedure TXyzQueryAdapter.DoClearParams;
 begin
   FQuery.Params.Clear;
+end;
+
+// Optional. Called when IQuery.Sql is set to the text it already has (a loop that sets the
+// SQL on every iteration): clear the values, keep the parameters, and the driver keeps the
+// statement prepared. Without the override, the query is reset as for new SQL.
+function TXyzQueryAdapter.ResetParamValues: Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to FQuery.Params.Count - 1 do
+    FQuery.Params[I].Clear;
+  Result := True;
 end;
 
 function TXyzQueryAdapter.CreateParams: IParams;

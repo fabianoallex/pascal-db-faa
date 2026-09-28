@@ -8,6 +8,11 @@ may change the API; each such change is listed here.
 
 ### Changed
 
+- Setting `IQuery.Sql` to the text it already has keeps the parameters and the prepared
+  statement and clears only the values (it used to rebuild both, so FireDAC and Zeos prepared
+  the statement again). 2000 SELECTs with the SQL set inside the loop, Zeos: PostgreSQL
+  2.2 s -> 1.1 s, Firebird 1.3 s -> 0.31 s. An adapter opts in with
+  `TDataSetQueryBase.ResetParamValues`; without it, the old reset applies.
 - SQLdb: queries no longer look the table's primary key up in the catalog on every `Open`
   (`UsePrimaryKeyAsKey := False`; the adapter never edits a dataset). 2000 SELECTs by key:
   PostgreSQL 10.0 s -> 3.5 s, Firebird 1.9 s -> 0.5 s.
