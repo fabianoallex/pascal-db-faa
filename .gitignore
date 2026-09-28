@@ -54,3 +54,6 @@ packagefiles.xml
 
 # downloaded by tools/ci-test.sh (ZeosLib)
 .ci/
+
+# local third-party binaries for Windows test runs (e.g. sqlite.org's sqlite3.dll); see CLAUDE.md
+.deps/

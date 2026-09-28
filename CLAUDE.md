@@ -193,6 +193,11 @@ The FPCUnit runner does both.
 - **SQLite on Windows:** `PASCALDB_IT_ENGINE=sqlite`. SQLdb and Zeos load `sqlite3.dll`
   (`PASCALDB_IT_CLIENT`, or the default search), and it must be one with the column-metadata
   functions — the official build from sqlite.org has them, Python's doesn't (see gotcha 23).
+  Local copies of sqlite.org's 3.53.4 DLL live in `.deps/sqlite-3.53.4/{x86,x64}/sqlite3.dll`
+  (git-ignored; SHA-256 x86 `1c2fcfa7...2eb9f`, x64 `ab57d043...cd1ec`): point
+  `PASCALDB_IT_CLIENT` at the one matching the runner's bitness. Without it, a Win32 runner may
+  pick up the old `sqlite3.dll` in Delphi's own `bin` folder (no `RETURNING`: 3 contract tests
+  fail) and a Win64 one finds none.
   FireDAC links SQLite into the program and needs no DLL. **On Delphi:** open
   `PascalDb.groupproj` in the IDE and run
   `tests/Unit/PascalDb.UnitTests.dproj`, `tests/Integration/PascalDb.IntegrationTests.dproj`
