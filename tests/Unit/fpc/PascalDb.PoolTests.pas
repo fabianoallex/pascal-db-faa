@@ -224,7 +224,9 @@ type
 
   TDBFactoryMock = class(TInterfacedObject, IDBFactory)
   private
-    FSimulateTestConnectionFail: Boolean;
+    // How many upcoming TestConnection calls must fail, decremented on each
+    // call until it reaches 0 (see FailNextTestConnections).
+    FTestConnectionFailuresRemaining: Integer;
     FTestedConnections: TList<IDBConnection>;
     FLastCreatedConnection: TFakeDBConnection;
     FNextQueryOpenExceptionClass: ExceptClass;
@@ -254,8 +256,9 @@ type
     // Makes the next ACount calls to CreateConnection raise an exception
     // (simulates Connect failing because the database is offline).
     procedure SimulateCreateConnectionFail(ACount: Integer);
-    property SimulateTestConnectionFail: Boolean
-      read FSimulateTestConnectionFail write FSimulateTestConnectionFail;
+    // Makes the next ACount calls to TestConnection return False (a dead
+    // connection); the ones after that return True again.
+    procedure FailNextTestConnections(ACount: Integer);
     property TestedConnections: TList<IDBConnection> read FTestedConnections;
     // Last TFakeDBConnection created by CreateConnection — tests use it to
     // simulate IsConnected dropping after a failure (see TFakeDBConnection.Connected).
@@ -303,6 +306,7 @@ type
     procedure Test_Pool_IdleTimeout_Off_EvictsNothing;
     procedure Test_Pool_IdleTimeout_EvictsOnlyTheOldest;
     procedure Test_Pool_IdleTimeout_RespectsIniConnectionsFloor;
+    procedure Test_Pool_SteadyLightLoad_LetsSurplusBeSwept;
     procedure Test_Pool_IdleTimeoutConfig_DefaultsAndValidation;
     procedure Test_Pool_IdleSweep_DestroyDoesNotHang;
     procedure Test_Pool_Concurrency_WithIdleSweepActive;
@@ -712,7 +716,6 @@ end;
 
 constructor TDBFactoryMock.Create;
 begin
-  FSimulateTestConnectionFail := False;
   FTestedConnections := TList<IDBConnection>.Create;
 end;
 
@@ -807,7 +810,14 @@ end;
 function TDBFactoryMock.TestConnection(AConn: IDBConnection): Boolean;
 begin
   FTestedConnections.Add(AConn);
-  Result := not FSimulateTestConnectionFail;
+  Result := FTestConnectionFailuresRemaining <= 0;
+  if not Result then
+    Dec(FTestConnectionFailuresRemaining);
+end;
+
+procedure TDBFactoryMock.FailNextTestConnections(ACount: Integer);
+begin
+  FTestConnectionFailuresRemaining := ACount;
 end;
 
 { TPoolTests }
@@ -1204,9 +1214,9 @@ begin
   // Releases during CreateInitialConnections (2 connections, in index order)
   LTicker.EnqueueMs(T0Plus(0));      // LastRelease conn1
   LTicker.EnqueueMs(T0Plus(50));     // LastRelease conn2
-  // Checks in AcquireConnection
-  LTicker.EnqueueMs(T0Plus(121));    // 121s for conn1 → tested → fails → removed
-  LTicker.EnqueueMs(T0Plus(130));    // 80s for conn2 → not tested → used
+  // Checks in AcquireConnection (LIFO: conn2 first)
+  LTicker.EnqueueMs(T0Plus(200));    // 150s for conn2 → tested → fails → removed
+  LTicker.EnqueueMs(T0Plus(201));    // 201s for conn1 → tested → passes → used
 
   TTicker.SetTicker(LTicker);
   try
@@ -1220,10 +1230,11 @@ begin
 
     TAssert.AssertEquals('The pool must have 2 active connections after initialization', 2, LPool.GetActiveConnections);
 
-    LMockFactory.SimulateTestConnectionFail := True;
+    LMockFactory.FailNextTestConnections(1);
 
     LConn := LPool.AcquireConnection;
 
+    TAssert.AssertEquals('Both connections were idle long enough to be tested', 2, LMockFactory.TestedConnections.Count);
     TAssert.AssertEquals('After removing the failed connection, 1 active connection must remain', 1, LPool.GetActiveConnections);
 
     TAssert.AssertTrue('Must return the second (healthy) connection', Assigned(LConn));
@@ -1516,6 +1527,56 @@ begin
   end;
 end;
 
+procedure TPoolTests.Test_Pool_SteadyLightLoad_LetsSurplusBeSwept;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
+  LPool: TConnectionPool;
+  LTicker: TFakeTicker;
+  LConn1, LConn2, LConn3: IDBConnection;
+  I: Integer;
+begin
+  // A peak opened 3 connections; after it, one request every 10 s, which
+  // one connection serves easily. When the pool was FIFO, the requests went
+  // round the 3 connections, each was idle only 30 s at a time, and a 60 s
+  // sweep never closed any of them. LIFO keeps reusing the same one, so the
+  // other two age out.
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
+  try
+    LConfig := TConnectionPoolConfig.Create;
+    LConfig.IniConnections := 0;
+    LConfig.MaxConnections := 10;
+
+    LFactory := TDBFactoryMock.Create;
+    LPoolIntf := TConnectionPool.Create(LFactory, LConfig);
+    LPool := LPoolIntf as TConnectionPool;
+
+    LConn1 := LPoolIntf.AcquireConnection;
+    LConn2 := LPoolIntf.AcquireConnection;
+    LConn3 := LPoolIntf.AcquireConnection;
+    LConn1 := nil;
+    LConn2 := nil;
+    LConn3 := nil;
+    TAssert.AssertEquals('Precondition: 3 idle connections after the peak', 3, LPoolIntf.GetPoolSize);
+
+    for I := 1 to 10 do
+    begin
+      LTicker.SetDefaultMs(T0Plus(I * 10));
+      LConn1 := LPoolIntf.AcquireConnection;
+      LConn1 := nil;
+    end;
+
+    LPool.SweepIdleConnections(60); // "now" = T0+100s
+    TAssert.AssertEquals('Only the connection doing the work may stay open', 1, LPoolIntf.GetPoolSize);
+    TAssert.AssertEquals('The swept connections must leave the active count', 1, LPoolIntf.GetActiveConnections);
+  finally
+    TTicker.Reset;
+  end;
+end;
+
 procedure TPoolTests.Test_Pool_IdleTimeoutConfig_DefaultsAndValidation;
 var
   LConfig: IConnectionPoolConfig;
@@ -1665,14 +1726,14 @@ var
   LRecorder: TPoolEventRecorder;
 begin
   // Same scenario as Test_Pool_IdleConnectionFails: 2 connections in the
-  // ramp-up, the 1st fails the liveness check (>=120s idle) and is discarded,
-  // the 2nd is reused.
+  // ramp-up, the 1st tested fails the liveness check (>=120s idle) and is
+  // discarded, the 2nd passes and is reused.
   LTicker := TFakeTicker.Create;
   LTicker.SetDefaultMs(T0Plus(0));
   LTicker.EnqueueMs(T0Plus(0));      // LastRelease conn1
   LTicker.EnqueueMs(T0Plus(50));     // LastRelease conn2
-  LTicker.EnqueueMs(T0Plus(121));    // 121s for conn1 → tested → fails → removed
-  LTicker.EnqueueMs(T0Plus(130));    // 80s for conn2 → not tested → used
+  LTicker.EnqueueMs(T0Plus(200));    // 150s for conn2 → tested → fails → removed
+  LTicker.EnqueueMs(T0Plus(201));    // 201s for conn1 → tested → passes → used
 
   TTicker.SetTicker(LTicker);
   LRecorder := TPoolEventRecorder.Create;
@@ -1689,7 +1750,7 @@ begin
 
     LEvents.Clear; // drop the 2 pekConnectionCreated events from the initial ramp-up
 
-    LMockFactory.SimulateTestConnectionFail := True;
+    LMockFactory.FailNextTestConnections(1);
     LConn := LPool.AcquireConnection;
 
     TAssert.AssertEquals('Discarding the dead connection must fire exactly 1 pekConnectionDiscarded event', 1, LEvents.Count);

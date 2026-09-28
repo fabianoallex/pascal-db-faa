@@ -21,6 +21,15 @@
   - sweep of idle connections (IdleTimeoutSeconds), in a dedicated thread
     (TIdleSweepThread) that never closes below IniConnections.
 
+  Idle connections are handed out last in, first out: an acquire takes the
+  connection released most recently. The pool used to be FIFO, which spread
+  the load over every open connection in turn; under a light, steady load
+  none of them was ever idle for IdleTimeoutSeconds, so a pool that grew in a
+  peak never shrank back. With LIFO the same few connections do the work and
+  the surplus ages out. FPool is kept ordered by LastRelease (a release
+  appends): the oldest idle connection is always at index 0, the next one to
+  hand out at the end.
+
   Observability: events (TPoolEventProc) only for what is abnormal or for
   capacity growth, never for the happy path; and GetSnapshot for periodic
   reads of state + accumulated counters.
@@ -143,7 +152,7 @@ type
   TPoolEvent = record
     Kind: TPoolEventKind;
     ActiveConnections: Integer;  // FActiveConnections at the time of the event
-    PoolSize: Integer;           // idle connections in the queue at the time of the event
+    PoolSize: Integer;           // idle connections in the pool at the time of the event
     MaxConnections: Integer;
     IniConnections: Integer;
     WaitAttempts: Integer;             // pekAcquireThrottled / pekAcquireTimeout
@@ -165,7 +174,7 @@ type
     FFactory: IDBFactory;
     FMaxConnections: Integer;
     FIniConnections: Integer;
-    FPool: TQueue<TConnectionItem>;
+    FPool: TList<TConnectionItem>; // idle connections, by LastRelease; see the unit comment
     FLockPool: TCriticalSection;
     FActiveConnections: Integer;
     FWaitMaxAttemps: Integer;
@@ -942,7 +951,7 @@ begin
 
   SetWeak(@FFactory, AFactory);
 
-  FPool     := TQueue<TConnectionItem>.Create;
+  FPool     := TList<TConnectionItem>.Create;
   FLockPool := TCriticalSection.Create;
 
   CreateInitialConnections;
@@ -962,8 +971,7 @@ begin
 
   FLockPool.Enter;
   try
-    while FPool.Count > 0 do
-      FPool.Dequeue;
+    FPool.Clear;
     FPool.Free;
   finally
     FLockPool.Leave;
@@ -1040,18 +1048,18 @@ begin
 
   LToClose := TList<IDBConnection>.Create;
   try
-    // Phase 1 (fast, under the lock): decide what goes. FPool is FIFO by
-    // increasing LastRelease, so the front item is always the oldest — just
-    // peek and stop at the first one that isn't idle long enough.
+    // Phase 1 (fast, under the lock): decide what goes. FPool is ordered by
+    // increasing LastRelease, so index 0 is always the oldest — just look at
+    // it and stop at the first one that isn't idle long enough.
     FLockPool.Enter;
     try
       while (FPool.Count > FIniConnections) and (FPool.Count > 0) do
       begin
-        LItem := FPool.Peek;
+        LItem := FPool[0];
         if TTicker.ElapsedMs(LItem.LastRelease) < UInt64(AIdleTimeoutSeconds) * 1000 then
           Break;
 
-        FPool.Dequeue;
+        FPool.Delete(0);
         LToClose.Add(LItem.Connection);
         Dec(FActiveConnections); // already under FLockPool; see DecrementActiveConnections
       end;
@@ -1176,8 +1184,10 @@ var
     try
       if FPool.Count > 0 then
       begin
+        // LIFO: the most recently released connection (see the unit comment).
         ShouldUseFromPool := True;
-        ConnectionItem := FPool.Dequeue;
+        ConnectionItem := FPool[FPool.Count - 1];
+        FPool.Delete(FPool.Count - 1);
       end
       else if FActiveConnections < FMaxConnections then
       begin
@@ -1368,7 +1378,7 @@ begin
 
   FLockPool.Enter;
   try
-    FPool.Enqueue(TConnectionItem.New(LRealConn));
+    FPool.Add(TConnectionItem.New(LRealConn));
   finally
     FLockPool.Leave;
   end;

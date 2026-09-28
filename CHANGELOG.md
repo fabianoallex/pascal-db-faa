@@ -6,6 +6,13 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Changed
+
+- The pool hands out the most recently released idle connection (LIFO); it was FIFO. With
+  FIFO, a light, steady load went round every open connection, none stayed idle for
+  `PoolIdleTimeoutSeconds`, and a pool that grew in a peak never shrank back (3 connections
+  and one request every 10 s: the 60 s sweep closed none; now it closes the 2 unused ones).
+
 ### Fixed
 
 - The pool measures idle times on a monotonic clock. With the wall clock, a change of the

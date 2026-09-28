@@ -294,7 +294,7 @@ type
   // and what it looks like now".
   TPoolSnapshot = record
     ActiveConnections: Integer;  // live physical connections now (idle + in use)
-    PoolSize: Integer;           // idle connections in the queue now
+    PoolSize: Integer;           // idle connections in the pool now
     MaxConnections: Integer;
     IniConnections: Integer;
     TotalCreated: Int64;         // physical connections created since start (ramp-up + growth under load)

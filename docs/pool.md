@@ -27,6 +27,9 @@ wait a little for a connection is normal.
 
 - **Grows on demand**: when no idle connection is left, it opens a new one, up to
   `PoolMaxConnections`.
+- **Reuses the most recently released connection first** (last in, first out). The same few
+  connections do the work, and the ones a peak left behind stay idle long enough for the
+  sweep to close them.
 - **Checks old connections before reusing them**: a connection idle for 2 minutes or more gets
   the dialect's ping first, and is discarded if it fails.
 - **Discards broken connections**: a connection that dropped while in use comes back marked
