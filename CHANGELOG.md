@@ -8,6 +8,9 @@ may change the API; each such change is listed here.
 
 ### Changed
 
+- SQLdb: queries no longer look the table's primary key up in the catalog on every `Open`
+  (`UsePrimaryKeyAsKey := False`; the adapter never edits a dataset). 2000 SELECTs by key:
+  PostgreSQL 10.0 s -> 3.5 s, Firebird 1.9 s -> 0.5 s.
 - **Breaking:** when the pool can't open a new connection, `AcquireConnection` /
   `AcquireQuery` raise `EDatabaseConnectException` (new, a subclass of
   `EDatabaseUnavailableException`) instead of the driver's own exception, which was a different

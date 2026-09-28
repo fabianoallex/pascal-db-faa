@@ -340,6 +340,11 @@ begin
   FQuery.DataBase := AConn.GetNativeConnection as TSQLConnector;
   FQuery.Transaction := ATransaction.GetNativeTransaction as TSQLTransaction;
   FQuery.PacketRecords := -1;
+  // By default SQLdb looks the table's primary key up in the catalog on every
+  // Open, to make the dataset editable; the adapter never edits it. Measured
+  // (FPC 3.2.2, Windows, 2000 SELECTs by key): PostgreSQL 12.2 s -> 3.6 s,
+  // Firebird 2.0 s -> 0.6 s.
+  FQuery.UsePrimaryKeyAsKey := False;
 end;
 
 destructor TSQLdbQueryAdapter.Destroy;

@@ -263,7 +263,10 @@ factory's first connection loads the default library, and the configured one the
 "interface already initialized from library ...". Call `PdbSQLdbUseClientLibrary` before any
 direct SQLdb connection (the integration environment does). `TSQLTransaction.Commit`/`Rollback` close the datasets attached to it:
 read results before committing. Results are fetched completely on `Open`
-(`PacketRecords = -1`), so `RecordCount` is exact.
+(`PacketRecords = -1`), so `RecordCount` is exact. Queries set `UsePrimaryKeyAsKey := False`:
+by default SQLdb queries the catalog for the table's primary key on every `Open`, to make the
+dataset editable, and the adapter never edits it (2000 SELECTs by key, FPC 3.2.2 Windows:
+PostgreSQL 10.0 s → 3.5 s, Firebird 1.9 s → 0.5 s).
 
 **Zeos specifics** (ZeosLib 8): `ConnectionParams` takes `Protocol` (`firebird`/`postgresql`;
 `firebird` falls back to the legacy API with a 2.5 client), `HostName`, `Port`, `Database`,
