@@ -36,6 +36,11 @@ wait a little for a connection is normal.
   `PoolValidateIdleSeconds` or more (2 minutes by default) gets the dialect's ping first, and is
   discarded if it fails; the acquire then tries the next one. The ping has no timeout of its
   own: on a connection the network dropped silently, it waits as long as the driver does.
+- **Suspects the idle connections once one proves dead**: when a connection drops in use,
+  fails to connect or fails a ping, the idle ones probably died with it (a server restart, a
+  failover), so each gets the ping on its next acquire however recent its release (unless
+  `PoolValidateIdleSeconds` is negative). After a restart, one request fails instead of one per
+  idle connection.
 - **Discards broken connections**: a connection that dropped while in use comes back marked
   and is closed instead of queued ([guide 6](errors.md)).
 - **Sweeps idle connections** when `PoolIdleTimeoutSeconds` is set, in a background thread.

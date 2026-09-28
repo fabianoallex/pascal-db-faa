@@ -12,6 +12,10 @@ may change the API; each such change is listed here.
   FIFO, a light, steady load went round every open connection, none stayed idle for
   `PoolIdleTimeoutSeconds`, and a pool that grew in a peak never shrank back (3 connections
   and one request every 10 s: the 60 s sweep closed none; now it closes the 2 unused ones).
+- Once a connection proves dead (drops in use, fails to connect, fails a ping), every idle
+  connection gets the ping on its next acquire, however recently it was released. Before, after
+  a server restart each idle connection released less than `PoolValidateIdleSeconds` ago was
+  handed out unchecked and failed a request of its own.
 
 ### Added
 

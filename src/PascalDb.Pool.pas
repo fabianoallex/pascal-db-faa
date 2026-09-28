@@ -18,7 +18,9 @@
     (WaitMaxAttemps × WaitMilliseconds) and EPoolTimeoutException when it
     runs out;
   - liveness check (the dialect's ping) of connections idle for
-    ValidateIdleSeconds or more, and discard of dead ones;
+    ValidateIdleSeconds or more, and discard of dead ones; once any
+    connection proves dead, every idle one gets the check on its next
+    acquire (MarkIdleConnectionsSuspect);
   - sweep of idle connections (IdleTimeoutSeconds), in a dedicated thread
     (TIdleSweepThread) that never closes below IniConnections;
   - keepalive (KeepaliveSeconds): the same thread pings idle connections
@@ -227,6 +229,13 @@ type
     procedure CreateInitialConnections;
     procedure IncrementActiveConnections;
     procedure DecrementActiveConnections;
+    // A connection just proved dead (lost in use, failed to connect, failed a
+    // ping): the idle ones share its server and probably died with it (a
+    // restart, a failover). Resets their LastAlive, so each one gets the ping
+    // before it is handed out (unless ValidateIdleSeconds < 0) and is due for
+    // the next keepalive. Without it, after a restart every idle connection
+    // failed one request before being discarded.
+    procedure MarkIdleConnectionsSuspect;
     function NewConnection: IDBConnection;
     procedure StartIdleSweep;
     procedure StopIdleSweep;
@@ -1242,6 +1251,7 @@ begin
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrStaleCheckFailed;
         Notify(LEvent);
+        MarkIdleConnectionsSuspect;
       end;
     end;
   finally
@@ -1364,6 +1374,7 @@ var
     except
       Result := False;
       DecrementActiveConnections;
+      MarkIdleConnectionsSuspect;
       raise;
     end;
     PdbAtomicInc64(FTotalCreated);
@@ -1393,6 +1404,7 @@ var
           LEvent.DiscardReason := pdrConnectFailed;
           LEvent.ErrorMessage := E.Message;
           Notify(LEvent);
+          MarkIdleConnectionsSuspect;
           Exit;
         end;
       end;
@@ -1412,6 +1424,7 @@ var
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrStaleCheckFailed;
         Notify(LEvent);
+        MarkIdleConnectionsSuspect;
         Exit;
       end;
     end;
@@ -1567,6 +1580,25 @@ begin
   LEvent := BaseEvent(pekConnectionDiscarded);
   LEvent.DiscardReason := pdrBrokenAfterUse;
   Notify(LEvent);
+  MarkIdleConnectionsSuspect;
+end;
+
+procedure TConnectionPool.MarkIdleConnectionsSuspect;
+var
+  LItem: TConnectionItem;
+  I: Integer;
+begin
+  FLockPool.Enter;
+  try
+    for I := 0 to FPool.Count - 1 do
+    begin
+      LItem := FPool[I];
+      LItem.LastAlive := 0;
+      FPool[I] := LItem;
+    end;
+  finally
+    FLockPool.Leave;
+  end;
 end;
 
 procedure TConnectionPool.ReleaseQuery(var AQuery: IQuery);

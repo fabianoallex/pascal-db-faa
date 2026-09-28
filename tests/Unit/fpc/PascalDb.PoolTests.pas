@@ -323,6 +323,8 @@ type
     procedure Test_Pool_ConnectionDiscarded_IsConnectedFalseAfterException;
     procedure Test_Pool_ConnectionKept_BusinessException;
     procedure Test_Pool_ConnectionDiscarded_ExceptionWhileReadingField;
+    procedure Test_Pool_BrokenConnection_IdleOnesGetThePing;
+    procedure Test_Pool_KeepaliveFailure_IdleOnesGetThePing;
     procedure Test_EDatabaseUnavailableException_PreservesOriginalDetail;
     procedure Test_Pool_IniConnections_DatabaseOffline_DoesNotRaise;
     procedure Test_Pool_IniConnections_DatabaseOffline_RecoversOnNextAcquire;
@@ -2360,6 +2362,102 @@ begin
     TAssert.AssertEquals(Ord(pdrBrokenAfterUse), Ord(LEvents[0].DiscardReason));
   finally
     LRecorder.Free;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_BrokenConnection_IdleOnesGetThePing;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LMockFactory: TDBFactoryMock;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LConn: IDBConnection;
+  LTicker: TFakeTicker;
+begin
+  // A restart: 3 idle connections, all fresh (released 10s ago, far below
+  // ValidateIdleSeconds = 120). The first one used breaks. The other two
+  // died with it; before, each one was handed out without the ping and
+  // failed a request of its own.
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
+  try
+    LConfig := TConnectionPoolConfig.Create;
+    LConfig.IniConnections := 3;
+    LConfig.MaxConnections := 10;
+
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPool := TConnectionPool.Create(LFactory, LConfig);
+
+    LTicker.SetDefaultMs(T0Plus(10));
+    LMockFactory.RaiseOnNextQueryOpen(EAccessViolation, 'fake AV');
+    LScope := LPool.AcquireQuery(LQuery);
+    try
+      LQuery.Open;
+    except
+      on E: EDatabaseUnavailableException do
+        ; // expected: the connection broke in use
+    end;
+    LQuery := nil;
+    LScope := nil; // discarded here
+    TAssert.AssertEquals('Precondition: the broken connection was discarded', 2, LPool.GetActiveConnections);
+    TAssert.AssertEquals('Precondition: nothing pinged so far', 0, LMockFactory.TestedConnections.Count);
+
+    LConn := LPool.AcquireConnection;
+    TAssert.AssertEquals('After a connection broke, the next idle one must get the ping even if fresh', 1, LMockFactory.TestedConnections.Count);
+    LConn := nil; // released: a live connection, no longer suspect
+
+    LConn := LPool.AcquireConnection;
+    TAssert.AssertEquals('A connection released after passing the ping must not be pinged again', 1, LMockFactory.TestedConnections.Count);
+  finally
+    TTicker.Reset;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_KeepaliveFailure_IdleOnesGetThePing;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LMockFactory: TDBFactoryMock;
+  LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
+  LPool: TConnectionPool;
+  LConn1, LConn2: IDBConnection;
+  LTicker: TFakeTicker;
+begin
+  // Released at T0 and T0+50s; at T0+70s only the first is due for a 60s
+  // keepalive, and it fails. The second (20s idle) must get the ping on
+  // its next acquire.
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
+  try
+    LConfig := TConnectionPoolConfig.Create;
+    LConfig.IniConnections := 0;
+    LConfig.MaxConnections := 10;
+
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPoolIntf := TConnectionPool.Create(LFactory, LConfig);
+    LPool := LPoolIntf as TConnectionPool;
+
+    LConn1 := LPoolIntf.AcquireConnection;
+    LConn2 := LPoolIntf.AcquireConnection;
+    LConn1 := nil;
+    LTicker.SetDefaultMs(T0Plus(50));
+    LConn2 := nil;
+
+    LTicker.SetDefaultMs(T0Plus(70));
+    LMockFactory.FailNextTestConnections(1);
+    LPool.KeepaliveIdleConnections(60);
+    TAssert.AssertEquals('Precondition: only the due connection was pinged, and it was discarded', 1, LPoolIntf.GetActiveConnections);
+
+    LConn1 := LPoolIntf.AcquireConnection;
+    TAssert.AssertEquals('After the keepalive found a dead connection, the other idle one must get the ping', 2, LMockFactory.TestedConnections.Count);
+  finally
+    TTicker.Reset;
   end;
 end;
 
