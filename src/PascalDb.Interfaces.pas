@@ -90,6 +90,21 @@ type
     property OriginalMessage: string read FOriginalMessage;
   end;
 
+  // Raised by the pool's AcquireConnection/AcquireQuery when opening a new
+  // connection fails, instead of the driver's own exception (a different class
+  // for each driver, which made a retry loop depend on the adapter). A
+  // subclass of EDatabaseUnavailableException, so one handler covers "lost in
+  // use" and "could not connect"; catch this class first to tell them apart.
+  // The acquire can't tell "server down" from "wrong password" or "client
+  // library missing" portably, so the message doesn't promise that trying
+  // again helps: OriginalClassName/OriginalMessage have the driver's detail.
+  // Opening a connection outside the pool (IDBFactory.CreateConnection) still
+  // raises the driver's exception.
+  EDatabaseConnectException = class(EDatabaseUnavailableException)
+  public
+    constructor Create(AOriginalException: Exception);
+  end;
+
   // Implemented only by the wrapper the pool returns from AcquireConnection
   // (PascalDb.Pool.TConnectionWrapper) — never by the "real" adapters, which
   // know nothing about the pool. See MarkConnectionBrokenIfNeeded below: it is
@@ -520,6 +535,14 @@ begin
     FOriginalClassName := AOriginalException.ClassName;
     FOriginalMessage := AOriginalException.Message;
   end;
+end;
+
+{ EDatabaseConnectException }
+
+constructor EDatabaseConnectException.Create(AOriginalException: Exception);
+begin
+  inherited Create(AOriginalException);
+  Message := 'Could not connect to the database.';
 end;
 
 end.

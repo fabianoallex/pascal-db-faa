@@ -55,8 +55,9 @@ function SampleTarget: string;
 /// The connection settings in effect, one per line, for error messages
 /// (the password is left out).
 function SampleConnectionSummary: string;
-/// Acquires (and returns) a pooled connection; when that fails, prints the
-/// settings in use and re-raises the driver's exception.
+/// Acquires a pooled connection and gives it back; when that fails, prints
+/// the settings in use and the driver's error, and re-raises
+/// EDatabaseConnectException.
 procedure CheckSampleConnection(const AFactory: IDBFactory);
 /// The configuration for the configured database, SQL read from
 /// ASqlSource, with the samples' default pool settings; change what you need
@@ -284,11 +285,10 @@ begin
     '  client:   ' + LClient;
 end;
 
-// A failed connect raises the driver's own exception (not
-// EDatabaseUnavailableException), different for each driver and silent about
-// where the settings come from. Connecting alone, before any SQL, is the one
-// place where an exception can only mean "could not connect", so this is
-// where to say what to check.
+// A failed connect raises EDatabaseConnectException, whose Message is generic;
+// the driver's own text, which is what says what went wrong, is in
+// OriginalMessage, and neither says where the settings come from. Connecting
+// alone, before any SQL, is the place to say what to check.
 procedure CheckSampleConnection(const AFactory: IDBFactory);
 var
   LConn: IDBConnection;
@@ -297,11 +297,15 @@ begin
     LConn := AFactory.GetPool.AcquireConnection;
     LConn := nil; // back to the pool
   except
-    Writeln('Could not connect. Settings in use (PASCALDB_SAMPLE_*, see samples/README.md):');
-    Writeln(SampleConnectionSummary);
-    Writeln('Is the server running? Does the client library match this program''s bitness?');
-    Writeln;
-    raise; // the caller reports the driver's message
+    on E: EDatabaseConnectException do
+    begin
+      Writeln('Could not connect. Settings in use (PASCALDB_SAMPLE_*, see samples/README.md):');
+      Writeln(SampleConnectionSummary);
+      Writeln('Driver: ', E.OriginalClassName, ': ', E.OriginalMessage);
+      Writeln('Is the server running? Does the client library match this program''s bitness?');
+      Writeln;
+      raise; // the caller reports it too
+    end;
   end;
 end;
 

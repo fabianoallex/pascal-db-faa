@@ -19,10 +19,11 @@
   Error handling: creating the factory never fails because the server is
   down (the pool's initial connections are retried on the next acquire).
   Opening a new connection that fails (server down, wrong port, missing
-  client library) raises the driver's own exception from AcquireQuery. A
-  connection that drops while in use raises EDatabaseUnavailableException,
-  whose Message is safe to show to a user, with the driver's error kept in
-  OriginalMessage; the pool discards that connection. Any other exception
+  client library) raises EDatabaseConnectException from AcquireQuery. A
+  connection that drops while in use raises EDatabaseUnavailableException
+  (its parent class), and the pool discards that connection. Both have a
+  Message safe to show to a user, with the driver's error kept in
+  OriginalMessage. Any other exception
   (a constraint violation, a SQL error) arrives as the driver raised it.
 
   Runs against a local PostgreSQL by default:
@@ -164,6 +165,10 @@ begin
   try
     Run;
   except
+    // The subclass first: a failed connect was already explained by
+    // CheckSampleConnection (settings in use and the driver's error).
+    on E: EDatabaseConnectException do
+      ExitCode := 1;
     on E: EDatabaseUnavailableException do
     begin
       // Message is generic and safe to show; the driver's detail is for logs.

@@ -55,6 +55,12 @@ function IntegrationFactory: IDBFactory;
 /// Number of migrations IntegrationFactory applies.
 function IntegrationSchemaVersion: Integer;
 
+/// A factory with the same settings as IntegrationFactory's, except that no
+/// connection can be opened: servers get a host name that never resolves,
+/// SQLite a database file in a folder that doesn't exist. A new one on each
+/// call; nothing is created or dropped.
+function UnreachableFactory: IDBFactory;
+
 implementation
 
 uses
@@ -619,6 +625,31 @@ begin
   Result.PoolMaxConnections := 5;
   Result.PoolWaitMaxAttemps := 200;
   Result.PoolWaitMilliseconds := 10;
+end;
+
+function UnreachableFactory: IDBFactory;
+const
+  // .invalid never resolves (RFC 2606): the connect fails at once, on every
+  // driver, with no server to stop.
+  UNREACHABLE_HOST = 'pascaldb-unreachable.invalid';
+var
+  LConfig: IDatabaseConfig;
+begin
+  LConfig := BuildConfig;
+  if IsSQLite then
+    SetConnectionParams(LConfig.ConnectionParams,
+      ExtractFilePath(ParamStr(0)) + 'no-such-folder' + PathDelim + 'unreachable.sqlite')
+  else
+  begin
+    {$IF DEFINED(PASCALDB_IT_ZEOS) or DEFINED(FPC)}
+    LConfig.ConnectionParams.Values['HostName'] := UNREACHABLE_HOST;
+    {$ELSE}
+    LConfig.ConnectionParams.Values['Server'] := UNREACHABLE_HOST;
+    if not IsPostgres then
+      LConfig.ConnectionParams.Values['Protocol'] := 'TCPIP';
+    {$IFEND}
+  end;
+  Result := NewFactory(LConfig);
 end;
 
 var

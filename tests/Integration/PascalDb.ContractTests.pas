@@ -9,8 +9,9 @@
   optional columns through SQL tags, INSERT ... RETURNING, UTF-8 text,
   commit/rollback, nested scopes with savepoints, a constraint violation
   that must not discard the connection, scripts, row counts, parameters
-  after the same SQL text is assigned again, and concurrent writers (SQLite
-  allows one at a time: the others must wait for the lock, not fail).
+  after the same SQL text is assigned again, concurrent writers (SQLite
+  allows one at a time: the others must wait for the lock, not fail), and a
+  failed connect surfacing as EDatabaseConnectException whatever the driver.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
   PascalDb.DUnitXCompat). The mirror in tests/Integration/fpc is generated
@@ -58,6 +59,7 @@ type
     [Test] procedure RecordCount_CountsEveryRow;
     [Test] procedure SameSqlReassigned_ParamsStillBind;
     [Test] procedure ConcurrentWriters_AllCommit;
+    [Test] procedure Unreachable_AcquireRaisesConnectException;
   end;
 
 implementation
@@ -575,6 +577,33 @@ begin
     LScope.Rollback;
     raise;
   end;
+end;
+
+procedure TContractTests.Unreachable_AcquireRaisesConnectException;
+var
+  LFactory: IDBFactory;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LOriginal, LGot: string;
+begin
+  LFactory := UnreachableFactory;
+  LGot := 'no exception';
+  try
+    LScope := LFactory.GetPool.AcquireQuery(LQuery);
+  except
+    on E: EDatabaseConnectException do
+    begin
+      LGot := '';
+      LOriginal := E.OriginalClassName + ': ' + E.OriginalMessage;
+    end;
+    on E: Exception do
+      LGot := E.ClassName + ': ' + E.Message;
+  end;
+  TAssert.AssertEquals('AcquireQuery with no reachable database must raise EDatabaseConnectException', '', LGot);
+  TAssert.AssertTrue('OriginalMessage must keep the driver''s detail (' + LOriginal + ')',
+    Length(LOriginal) > Length(': '));
+  TAssert.AssertEquals('The failed attempt must not stay counted as active', 0,
+    LFactory.GetPool.GetActiveConnections);
 end;
 
 initialization

@@ -1295,7 +1295,11 @@ begin
         PdbAtomicInc64(FTotalDiscarded);
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrConnectFailed;
-        LEvent.ErrorMessage := E.Message;
+        // The driver's text, not EDatabaseConnectException's generic one.
+        if E is EDatabaseUnavailableException then
+          LEvent.ErrorMessage := EDatabaseUnavailableException(E).OriginalMessage
+        else
+          LEvent.ErrorMessage := E.Message;
         Notify(LEvent);
       end;
     end;
@@ -1372,10 +1376,17 @@ var
     try
       AConnection := NewConnection;
     except
-      Result := False;
-      DecrementActiveConnections;
-      MarkIdleConnectionsSuspect;
-      raise;
+      on E: Exception do
+      begin
+        Result := False;
+        DecrementActiveConnections;
+        MarkIdleConnectionsSuspect;
+        // A new exception, never "raise E" (see BuildDatabaseException in
+        // PascalDb.Interfaces); one already classified goes up as is.
+        if E is EDatabaseUnavailableException then
+          raise;
+        raise EDatabaseConnectException.Create(E);
+      end;
     end;
     PdbAtomicInc64(FTotalCreated);
     Notify(BaseEvent(pekConnectionCreated));

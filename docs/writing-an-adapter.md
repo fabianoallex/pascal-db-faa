@@ -369,7 +369,8 @@ Check them against your component's documentation, then let the suite confirm.
   pool). A component that keeps reporting `True` after the server went away gets its dead
   connection reused.
 - **`BuildConnection` returns an open connection**, and raises the driver's exception when it
-  can't open one; the pool reports that to the caller as is ([guide 6](errors.md)).
+  can't open one; the pool reports that to the caller as `EDatabaseConnectException`, with the
+  driver's class and text in `OriginalClassName` / `OriginalMessage` ([guide 6](errors.md)).
 - **`Commit` must end the transaction.** Some components commit "retaining" (the transaction
   stays open) under some conditions, and some turn a `StartTransaction` on an already open
   transaction into a savepoint, whose `Commit` only releases it. Zeos does both (see its unit

@@ -8,6 +8,12 @@ may change the API; each such change is listed here.
 
 ### Changed
 
+- **Breaking:** when the pool can't open a new connection, `AcquireConnection` /
+  `AcquireQuery` raise `EDatabaseConnectException` (new, a subclass of
+  `EDatabaseUnavailableException`) instead of the driver's own exception, which was a different
+  class for each adapter. The driver's class and text are in `OriginalClassName` /
+  `OriginalMessage`; the `pdrConnectFailed` event's `ErrorMessage` still carries the driver's
+  text. `IDBFactory.CreateConnection`, outside the pool, still raises the driver's exception.
 - The pool hands out the most recently released idle connection (LIFO); it was FIFO. With
   FIFO, a light, steady load went round every open connection, none stayed idle for
   `PoolIdleTimeoutSeconds`, and a pool that grew in a peak never shrank back (3 connections

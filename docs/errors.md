@@ -11,7 +11,7 @@ the failure happens:
 | When | What is raised | Where |
 |---|---|---|
 | Creating the factory | nothing because the server is down | the pool's initial connections that fail are retried on the next acquire |
-| Opening a **new** connection fails (server down, wrong host or port, bad credentials, missing client library) | **the driver's own exception**, different for each driver | `AcquireQuery` / `AcquireConnection` |
+| Opening a **new** connection fails (server down, wrong host or port, bad credentials, missing client library) | `EDatabaseConnectException`, a subclass of `EDatabaseUnavailableException`; the driver's detail is in `OriginalClassName` / `OriginalMessage` | `AcquireQuery` / `AcquireConnection` |
 | An **open** connection drops while in use | `EDatabaseUnavailableException` | `Open`, `ExecSql`, `StartTransaction`, `Commit`, `Rollback` |
 | A data error: constraint violation, bad SQL, wrong type | the driver's own exception, unchanged | `Open`, `ExecSql`, `Commit` |
 | No free connection within the wait limit | `EPoolTimeoutException` (unit `PascalDb.Pool`) | `AcquireQuery` / `AcquireConnection` |
@@ -35,22 +35,32 @@ churn connections for nothing.
 
 ## Connecting
 
-A failed connect is the driver's exception, not `EDatabaseUnavailableException`, and its text
-rarely says which setting was wrong. To report a bad configuration clearly, acquire a
-connection once at startup: at that point an exception can only mean "could not connect".
+When the pool can't open a connection, the acquire raises `EDatabaseConnectException`,
+whatever the driver. It is an `EDatabaseUnavailableException`, so one handler covers "lost in
+use" and "could not connect"; catch `EDatabaseConnectException` first when the two need
+different handling. Its `Message` is generic ("Could not connect to the database."): the
+acquire can't tell a server that is down from a wrong password or a missing client library, so
+it doesn't say that trying again will help. The driver's class and text are in
+`OriginalClassName` and `OriginalMessage`, and they rarely say which setting was wrong.
+
+To report a bad configuration clearly, acquire a connection once at startup: at that point the
+failure is almost always the configuration, not an outage.
 
 ```pascal
 try
   LConn := LFactory.GetPool.AcquireConnection;
   LConn := nil;   // back to the pool
 except
-  on E: Exception do
+  on E: EDatabaseConnectException do
   begin
-    Writeln('Could not connect to ', DescribeSettings, ': ', E.Message);  // your own summary
+    Writeln('Could not connect to ', DescribeSettings, ': ', E.OriginalMessage);  // your own summary
     raise;
   end;
 end;
 ```
+
+Only the pool converts the exception. `IDBFactory.CreateConnection`, which opens a connection
+outside the pool, still raises the driver's own.
 
 `TestConnection(CreateConnection)` is **not** a way to do this: `CreateConnection` already opens
 the connection on SQLdb, so it raises before `TestConnection` runs. `TestConnection` answers

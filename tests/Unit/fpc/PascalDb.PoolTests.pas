@@ -323,6 +323,7 @@ type
     procedure Test_Pool_ConnectionDiscarded_IsConnectedFalseAfterException;
     procedure Test_Pool_ConnectionKept_BusinessException;
     procedure Test_Pool_ConnectionDiscarded_ExceptionWhileReadingField;
+    procedure Test_Pool_NewConnectionFails_RaisesConnectException;
     procedure Test_Pool_BrokenConnection_IdleOnesGetThePing;
     procedure Test_Pool_KeepaliveFailure_IdleOnesGetThePing;
     procedure Test_EDatabaseUnavailableException_PreservesOriginalDetail;
@@ -917,6 +918,8 @@ begin
     begin
       TAssert.AssertEquals(Ord(pekConnectionDiscarded), Ord(LEvents[I].Kind));
       TAssert.AssertEquals(Ord(pdrConnectFailed), Ord(LEvents[I].DiscardReason));
+      TAssert.AssertEquals('The event must carry the driver''s text, not the generic message',
+        'fake connect failure (database offline)', LEvents[I].ErrorMessage);
     end;
 
     TAssert.AssertEquals(Int64(0), LPool.GetSnapshot.TotalCreated);
@@ -2363,6 +2366,46 @@ begin
   finally
     LRecorder.Free;
   end;
+end;
+
+procedure TPoolTests.Test_Pool_NewConnectionFails_RaisesConnectException;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LMockFactory: TDBFactoryMock;
+  LPool: IDBConnectionPool;
+  LConn: IDBConnection;
+  LRaised: Boolean;
+begin
+  LConfig := TConnectionPoolConfig.Create;
+  LConfig.IniConnections := 0;
+  LConfig.MaxConnections := 10;
+
+  LMockFactory := TDBFactoryMock.Create;
+  LFactory := LMockFactory;
+  LPool := TConnectionPool.Create(LFactory, LConfig);
+
+  LMockFactory.SimulateCreateConnectionFail(1);
+  LRaised := False;
+  try
+    LConn := LPool.AcquireConnection;
+  except
+    on E: EDatabaseConnectException do
+    begin
+      LRaised := True;
+      TAssert.AssertTrue('It must also be an EDatabaseUnavailableException (one handler for both)',
+        E is EDatabaseUnavailableException);
+      TAssert.AssertEquals('OriginalClassName must keep the driver''s class', 'Exception', E.OriginalClassName);
+      TAssert.AssertEquals('OriginalMessage must keep the driver''s text',
+        'fake connect failure (database offline)', E.OriginalMessage);
+      TAssert.AssertEquals('The public message must be generic', 'Could not connect to the database.', E.Message);
+    end;
+  end;
+  TAssert.AssertTrue('A failed connect on acquire must raise EDatabaseConnectException', LRaised);
+  TAssert.AssertEquals('The failed attempt must not stay counted as active', 0, LPool.GetActiveConnections);
+
+  LConn := LPool.AcquireConnection;
+  TAssert.AssertTrue('The next acquire, with the database back, must work', Assigned(LConn));
 end;
 
 procedure TPoolTests.Test_Pool_BrokenConnection_IdleOnesGetThePing;
