@@ -4,6 +4,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 follow [Semantic Versioning](https://semver.org/). While the version is 0.x, a minor version
 may change the API; each such change is listed here.
 
+## [Unreleased]
+
+### Fixed
+
+- The pool measures idle times on a monotonic clock. With the wall clock, a change of the
+  system time (daylight saving, a manual adjustment) made every idle connection look that much
+  older, sending them all to the liveness check and to the idle sweep at once.
+
+### Added
+
+- `TTicker` (`PascalDb.SystemContext`): a replaceable monotonic clock, like `TClock` and
+  `TSleep`, for tests that control the pool's idle times.
+
 ## [0.2.0] - 2026-09-27
 
 ### Changed

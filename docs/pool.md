@@ -33,6 +33,10 @@ wait a little for a connection is normal.
   and is closed instead of queued ([guide 6](errors.md)).
 - **Sweeps idle connections** when `PoolIdleTimeoutSeconds` is set, in a background thread.
 
+Idle times are measured on a monotonic clock, so changing the system time (daylight saving, a
+manual adjustment) doesn't age the connections. Tests can replace that clock with
+`TTicker.SetTicker` (`PascalDb.SystemContext`).
+
 ## Events
 
 Pass a handler to the adapter's factory constructor to hear about what isn't the happy path:

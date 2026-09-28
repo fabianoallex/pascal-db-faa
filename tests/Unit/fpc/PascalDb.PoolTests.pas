@@ -12,8 +12,8 @@
   thread), discard of a connection broken during use (including an Access
   Violation while reading a field), events, snapshot and concurrency.
 
-  Clock and Sleep are replaced through PascalDb.SystemContext (TFakeClock,
-  TFakeSleep); events are recorded by TPoolEventRecorder — a method, not a
+  The monotonic clock and Sleep are replaced through PascalDb.SystemContext
+  (TFakeTicker, TFakeSleep); events are recorded by TPoolEventRecorder — a method, not a
   closure, because TPoolEventProc is "of object" in FPC 3.2.2.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
@@ -70,19 +70,33 @@ type
     procedure Sleep(milliseconds: Cardinal);
   end;
 
-  { TFakeClock }
+  { TFakeTicker
+    Monotonic clock under the test's control: each NowMs call returns the
+    next queued reading, or the default one when the queue is empty. }
 
-  TFakeClock = class(TInterfacedObject, IClock)
+  TFakeTicker = class(TInterfacedObject, ITicker)
   private
-    FTimes: TQueue<TDateTime>;
-    FDefaultTime: TDateTime;
+    FTimes: TQueue<UInt64>;
+    FDefaultMs: UInt64;
   public
     constructor Create;
     destructor Destroy; override;
+    function NowMs: UInt64;
+    procedure EnqueueMs(AMs: UInt64);
+    procedure SetDefaultMs(AMs: UInt64);
+  end;
+
+  { TJumpingClock
+    Wall clock that moves one hour forward on every read, as if the system
+    time were changed between any two calls. The pool must not notice it. }
+
+  TJumpingClock = class(TInterfacedObject, IClock)
+  private
+    FNow: TDateTime;
+  public
+    constructor Create;
     function Now: TDateTime;
     function Date: TDateTime;
-    procedure EnqueueTime(ADateTime: TDateTime);
-    procedure SetDefaultTime(ADateTime: TDateTime);
   end;
 
   { TFakeDBConnection }
@@ -283,6 +297,8 @@ type
     procedure Test_Pool_DifferentTransactions_RecordSeparateCommands;
     procedure Test_Pool_IdleConnection120s;
     procedure Test_Pool_IdleConnectionFails;
+    procedure Test_Pool_WallClockChange_DoesNotAgeConnections;
+    procedure Test_Ticker_ElapsedMs_NeverWraps;
     procedure Test_Pool_Concurrency;
     procedure Test_Pool_IdleTimeout_Off_EvictsNothing;
     procedure Test_Pool_IdleTimeout_EvictsOnlyTheOldest;
@@ -335,41 +351,62 @@ begin
   TThread.Yield;
 end;
 
-{ TFakeClock }
+{ TFakeTicker }
 
-constructor TFakeClock.Create;
+constructor TFakeTicker.Create;
 begin
-  FTimes := TQueue<TDateTime>.Create;
-  FDefaultTime := 0;
+  FTimes := TQueue<UInt64>.Create;
+  FDefaultMs := 0;
 end;
 
-destructor TFakeClock.Destroy;
+destructor TFakeTicker.Destroy;
 begin
   FTimes.Free;
   inherited Destroy;
 end;
 
-function TFakeClock.Now: TDateTime;
+function TFakeTicker.NowMs: UInt64;
 begin
   if FTimes.Count > 0 then
     Result := FTimes.Dequeue
   else
-    Result := FDefaultTime;
+    Result := FDefaultMs;
 end;
 
-function TFakeClock.Date: TDateTime;
+procedure TFakeTicker.EnqueueMs(AMs: UInt64);
+begin
+  FTimes.Enqueue(AMs);
+end;
+
+procedure TFakeTicker.SetDefaultMs(AMs: UInt64);
+begin
+  FDefaultMs := AMs;
+end;
+
+{ TJumpingClock }
+
+constructor TJumpingClock.Create;
+begin
+  inherited Create;
+  FNow := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
+end;
+
+function TJumpingClock.Now: TDateTime;
+begin
+  FNow := FNow + (1 / 24);
+  Result := FNow;
+end;
+
+function TJumpingClock.Date: TDateTime;
 begin
   Result := Trunc(Now);
 end;
 
-procedure TFakeClock.EnqueueTime(ADateTime: TDateTime);
+// Ticker reading ASeconds after an arbitrary origin (T0), the unit the tests
+// reason in. T0 isn't 0 so that "before T0" would still be a valid reading.
+function T0Plus(ASeconds: Integer): UInt64;
 begin
-  FTimes.Enqueue(ADateTime);
-end;
-
-procedure TFakeClock.SetDefaultTime(ADateTime: TDateTime);
-begin
-  FDefaultTime := ADateTime;
+  Result := UInt64(1000000) + UInt64(ASeconds) * 1000;
 end;
 
 { TFakeDBConnection }
@@ -1119,17 +1156,14 @@ procedure TPoolTests.Test_Pool_IdleConnection120s;
     LMockFactory: TDBFactoryMock;
     LPool: IDBConnectionPool;
     LConn: IDBConnection;
-    LClock: TFakeClock;
-    BaseTime: TDateTime;
+    LTicker: TFakeTicker;
   begin
-    BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
+    LTicker := TFakeTicker.Create;
+    LTicker.SetDefaultMs(T0Plus(0));
+    LTicker.EnqueueMs(T0Plus(0));          // release in CreateInitialConnections
+    LTicker.EnqueueMs(T0Plus(ASeconds));   // check in AcquireConnection
 
-    LClock := TFakeClock.Create;
-    LClock.SetDefaultTime(BaseTime);
-    LClock.EnqueueTime(BaseTime);                                // release in CreateInitialConnections
-    LClock.EnqueueTime(BaseTime + (ASeconds / 86400));          // check in AcquireConnection
-
-    TClock.SetClock(LClock);
+    TTicker.SetTicker(LTicker);
     try
       LConfig := TConnectionPoolConfig.Create;
       LConfig.IniConnections := 1;
@@ -1145,7 +1179,7 @@ procedure TPoolTests.Test_Pool_IdleConnection120s;
 
       TAssert.AssertEquals(AMessage, AExpectedTestedCount, LMockFactory.TestedConnections.Count);
     finally
-      TClock.Reset;
+      TTicker.Reset;
     end;
   end;
 
@@ -1163,21 +1197,18 @@ var
   LMockFactory: TDBFactoryMock;
   LPool: IDBConnectionPool;
   LConn: IDBConnection;
-  LClock: TFakeClock;
-  BaseTime: TDateTime;
+  LTicker: TFakeTicker;
 begin
-  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
-
-  LClock := TFakeClock.Create;
-  LClock.SetDefaultTime(BaseTime);
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
   // Releases during CreateInitialConnections (2 connections, in index order)
-  LClock.EnqueueTime(BaseTime);                      // LastRelease conn1
-  LClock.EnqueueTime(BaseTime + (50 / 86400));       // LastRelease conn2
+  LTicker.EnqueueMs(T0Plus(0));      // LastRelease conn1
+  LTicker.EnqueueMs(T0Plus(50));     // LastRelease conn2
   // Checks in AcquireConnection
-  LClock.EnqueueTime(BaseTime + (121 / 86400));      // 121s for conn1 → tested → fails → removed
-  LClock.EnqueueTime(BaseTime + (130 / 86400));      // 80s for conn2 → not tested → used
+  LTicker.EnqueueMs(T0Plus(121));    // 121s for conn1 → tested → fails → removed
+  LTicker.EnqueueMs(T0Plus(130));    // 80s for conn2 → not tested → used
 
-  TClock.SetClock(LClock);
+  TTicker.SetTicker(LTicker);
   try
     LConfig := TConnectionPoolConfig.Create;
     LConfig.IniConnections := 2;
@@ -1197,7 +1228,64 @@ begin
 
     TAssert.AssertTrue('Must return the second (healthy) connection', Assigned(LConn));
   finally
+    TTicker.Reset;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_WallClockChange_DoesNotAgeConnections;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LMockFactory: TDBFactoryMock;
+  LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
+  LPool: TConnectionPool;
+  LConn: IDBConnection;
+  LTicker: TFakeTicker;
+begin
+  // The wall clock moves an hour on every read; the monotonic one stands
+  // still. With idle times measured on the wall clock, the acquire below
+  // pinged the connection (an hour "idle") and the sweep closed it.
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
+  TClock.SetClock(TJumpingClock.Create);
+  try
+    LConfig := TConnectionPoolConfig.Create;
+    LConfig.IniConnections := 0;
+    LConfig.MaxConnections := 10;
+
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPoolIntf := TConnectionPool.Create(LFactory, LConfig);
+    LPool := LPoolIntf as TConnectionPool;
+
+    LConn := LPoolIntf.AcquireConnection;
+    LConn := nil;
+    LConn := LPoolIntf.AcquireConnection;
+    TAssert.AssertEquals('A wall-clock change must not trigger the liveness check', 0, LMockFactory.TestedConnections.Count);
+    LConn := nil;
+
+    LPool.SweepIdleConnections(60);
+    TAssert.AssertEquals('A wall-clock change must not make the sweep close anything', 1, LPoolIntf.GetPoolSize);
+  finally
     TClock.Reset;
+    TTicker.Reset;
+  end;
+end;
+
+procedure TPoolTests.Test_Ticker_ElapsedMs_NeverWraps;
+var
+  LTicker: TFakeTicker;
+begin
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(10));
+  TTicker.SetTicker(LTicker);
+  try
+    TAssert.AssertTrue('Elapsed time from 4s before now must be 4000ms', TTicker.ElapsedMs(T0Plus(6)) = 4000);
+    TAssert.AssertTrue('Elapsed time from now must be 0', TTicker.ElapsedMs(T0Plus(10)) = 0);
+    TAssert.AssertTrue('A start ahead of now must give 0, not a wrapped UInt64', TTicker.ElapsedMs(T0Plus(20)) = 0);
+  finally
+    TTicker.Reset;
   end;
 end;
 
@@ -1301,14 +1389,12 @@ var
   // it.
   LPoolIntf: IDBConnectionPool;
   LPool: TConnectionPool;
-  LClock: TFakeClock;
+  LTicker: TFakeTicker;
   LConn1, LConn2: IDBConnection;
-  BaseTime: TDateTime;
 begin
-  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
-  LClock := TFakeClock.Create;
-  LClock.SetDefaultTime(BaseTime);
-  TClock.SetClock(LClock);
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
   try
     // IdleTimeoutSeconds not configured -> stays 0 = off (default)
     LConfig := TConnectionPoolConfig.Create;
@@ -1326,13 +1412,13 @@ begin
 
     TAssert.AssertEquals('Precondition: 2 idle connections', 2, LPoolIntf.GetPoolSize);
 
-    LClock.SetDefaultTime(BaseTime + (100000 / 86400)); // well beyond any reasonable limit
+    LTicker.SetDefaultMs(T0Plus(100000)); // well beyond any reasonable limit
     LPool.SweepIdleConnections;
 
     TAssert.AssertEquals('IdleTimeoutSeconds=0 (default): SweepIdleConnections must not remove anything', 2, LPoolIntf.GetPoolSize);
     TAssert.AssertEquals('IdleTimeoutSeconds=0 (default): the active count must not change', 2, LPoolIntf.GetActiveConnections);
   finally
-    TClock.Reset;
+    TTicker.Reset;
   end;
 end;
 
@@ -1342,18 +1428,16 @@ var
   LFactory: IDBFactory;
   LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
   LPool: TConnectionPool;
-  LClock: TFakeClock;
+  LTicker: TFakeTicker;
   LConn1, LConn2, LConn3: IDBConnection;
-  BaseTime: TDateTime;
 begin
-  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
-  LClock := TFakeClock.Create;
-  LClock.SetDefaultTime(BaseTime);
-  TClock.SetClock(LClock);
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
   try
     // IdleTimeoutSeconds stays 0 (default) on purpose: that way NO sweep
     // thread is created — the test calls SweepIdleConnections(60) directly,
-    // on the test's own thread, with TFakeClock. Deterministic, with no
+    // on the test's own thread, with TFakeTicker. Deterministic, with no
     // concurrency involved at all.
     LConfig := TConnectionPoolConfig.Create;
     LConfig.IniConnections := 0;
@@ -1368,22 +1452,22 @@ begin
     LConn3 := LPoolIntf.AcquireConnection;
     TAssert.AssertEquals('Precondition: 3 active connections', 3, LPoolIntf.GetActiveConnections);
 
-    LClock.SetDefaultTime(BaseTime);
+    LTicker.SetDefaultMs(T0Plus(0));
     LConn1 := nil; // LastRelease = T0        (65s old at the sweep below)
-    LClock.SetDefaultTime(BaseTime + (10 / 86400));
+    LTicker.SetDefaultMs(T0Plus(10));
     LConn2 := nil; // LastRelease = T0+10s     (55s old — must NOT go)
-    LClock.SetDefaultTime(BaseTime + (20 / 86400));
+    LTicker.SetDefaultMs(T0Plus(20));
     LConn3 := nil; // LastRelease = T0+20s     (45s old — must NOT go)
 
     TAssert.AssertEquals('Precondition: 3 idle connections in the pool', 3, LPoolIntf.GetPoolSize);
 
-    LClock.SetDefaultTime(BaseTime + (65 / 86400)); // "now" = T0+65s
+    LTicker.SetDefaultMs(T0Plus(65)); // "now" = T0+65s
     LPool.SweepIdleConnections(60);
 
     TAssert.AssertEquals('Only the connection released at T0 (65s old, >=60) must be removed', 2, LPoolIntf.GetPoolSize);
     TAssert.AssertEquals('FActiveConnections must follow the removal', 2, LPoolIntf.GetActiveConnections);
   finally
-    TClock.Reset;
+    TTicker.Reset;
   end;
 end;
 
@@ -1393,14 +1477,12 @@ var
   LFactory: IDBFactory;
   LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
   LPool: TConnectionPool;
-  LClock: TFakeClock;
+  LTicker: TFakeTicker;
   LConn1, LConn2, LConn3: IDBConnection;
-  BaseTime: TDateTime;
 begin
-  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
-  LClock := TFakeClock.Create;
-  LClock.SetDefaultTime(BaseTime);
-  TClock.SetClock(LClock);
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
   try
     // IdleTimeoutSeconds stays 0 (default) on purpose — see the comment in
     // Test_Pool_IdleTimeout_EvictsOnlyTheOldest.
@@ -1412,7 +1494,7 @@ begin
     LPoolIntf := TConnectionPool.Create(LFactory, LConfig);
     LPool := LPoolIntf as TConnectionPool;
 
-    // CreateInitialConnections already left 2 idle (LastRelease = BaseTime).
+    // CreateInitialConnections already left 2 idle (LastRelease = T0).
     // Drain both (reuse) and force the creation of a new 3rd one, then
     // release all 3 — to have 3 really idle connections, all old enough.
     LConn1 := LPoolIntf.AcquireConnection; // reuses one of the 2 in the pool
@@ -1424,13 +1506,13 @@ begin
     TAssert.AssertEquals('Precondition: 3 idle connections', 3, LPoolIntf.GetPoolSize);
 
     // All of them WAY past the 60s limit — without a floor, it would evict everything.
-    LClock.SetDefaultTime(BaseTime + (100000 / 86400));
+    LTicker.SetDefaultMs(T0Plus(100000));
     LPool.SweepIdleConnections(60);
 
     TAssert.AssertEquals('Must never evict below IniConnections, even with all of them old', 2, LPoolIntf.GetPoolSize);
     TAssert.AssertEquals('FActiveConnections must stop at the floor too', 2, LPoolIntf.GetActiveConnections);
   finally
-    TClock.Reset;
+    TTicker.Reset;
   end;
 end;
 
@@ -1466,7 +1548,7 @@ var
   LPool: TConnectionPool;
   LStart, LElapsed: UInt64;
 begin
-  // No TFakeClock/TFakeSleep here on purpose: we want the REAL sweep thread
+  // No TFakeTicker/TFakeSleep here on purpose: we want the REAL sweep thread
   // running, to prove Destroy neither hangs nor raises an AV with it alive.
   LConfig := TConnectionPoolConfig.Create;
   LConfig.IniConnections := 1;
@@ -1578,24 +1660,21 @@ var
   LMockFactory: TDBFactoryMock;
   LPool: IDBConnectionPool;
   LConn: IDBConnection;
-  LClock: TFakeClock;
+  LTicker: TFakeTicker;
   LEvents: TList<TPoolEvent>;
   LRecorder: TPoolEventRecorder;
-  BaseTime: TDateTime;
 begin
   // Same scenario as Test_Pool_IdleConnectionFails: 2 connections in the
   // ramp-up, the 1st fails the liveness check (>=120s idle) and is discarded,
   // the 2nd is reused.
-  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  LTicker.EnqueueMs(T0Plus(0));      // LastRelease conn1
+  LTicker.EnqueueMs(T0Plus(50));     // LastRelease conn2
+  LTicker.EnqueueMs(T0Plus(121));    // 121s for conn1 → tested → fails → removed
+  LTicker.EnqueueMs(T0Plus(130));    // 80s for conn2 → not tested → used
 
-  LClock := TFakeClock.Create;
-  LClock.SetDefaultTime(BaseTime);
-  LClock.EnqueueTime(BaseTime);                      // LastRelease conn1
-  LClock.EnqueueTime(BaseTime + (50 / 86400));       // LastRelease conn2
-  LClock.EnqueueTime(BaseTime + (121 / 86400));      // 121s for conn1 → tested → fails → removed
-  LClock.EnqueueTime(BaseTime + (130 / 86400));      // 80s for conn2 → not tested → used
-
-  TClock.SetClock(LClock);
+  TTicker.SetTicker(LTicker);
   LRecorder := TPoolEventRecorder.Create;
   LEvents := LRecorder.Events;
   try
@@ -1621,7 +1700,7 @@ begin
     TAssert.AssertEquals(Int64(2), LPool.GetSnapshot.TotalCreated);
     TAssert.AssertEquals(Int64(1), LPool.GetSnapshot.TotalDiscarded);
   finally
-    TClock.Reset;
+    TTicker.Reset;
     LRecorder.Free;
   end;
 end;
@@ -1676,18 +1755,16 @@ var
   LFactory: IDBFactory;
   LPoolIntf: IDBConnectionPool; // see the comment in Test_Pool_IdleTimeout_Off_EvictsNothing
   LPool: TConnectionPool;
-  LClock: TFakeClock;
+  LTicker: TFakeTicker;
   LConn1, LConn2, LConn3: IDBConnection;
   LEvents: TList<TPoolEvent>;
   LRecorder: TPoolEventRecorder;
-  BaseTime: TDateTime;
 begin
   // Same scenario as Test_Pool_IdleTimeout_EvictsOnlyTheOldest: only the
   // connection released the longest ago must be closed by the sweep.
-  BaseTime := EncodeDate(2025, 12, 28) + EncodeTime(11, 44, 18, 0);
-  LClock := TFakeClock.Create;
-  LClock.SetDefaultTime(BaseTime);
-  TClock.SetClock(LClock);
+  LTicker := TFakeTicker.Create;
+  LTicker.SetDefaultMs(T0Plus(0));
+  TTicker.SetTicker(LTicker);
   LRecorder := TPoolEventRecorder.Create;
   LEvents := LRecorder.Events;
   try
@@ -1704,16 +1781,16 @@ begin
     LConn2 := LPoolIntf.AcquireConnection;
     LConn3 := LPoolIntf.AcquireConnection;
 
-    LClock.SetDefaultTime(BaseTime);
+    LTicker.SetDefaultMs(T0Plus(0));
     LConn1 := nil; // LastRelease = T0        (65s old at the sweep below)
-    LClock.SetDefaultTime(BaseTime + (10 / 86400));
+    LTicker.SetDefaultMs(T0Plus(10));
     LConn2 := nil; // LastRelease = T0+10s     (55s old — must NOT go)
-    LClock.SetDefaultTime(BaseTime + (20 / 86400));
+    LTicker.SetDefaultMs(T0Plus(20));
     LConn3 := nil; // LastRelease = T0+20s     (45s old — must NOT go)
 
     LEvents.Clear; // drop the 3 pekConnectionCreated events from the growth above
 
-    LClock.SetDefaultTime(BaseTime + (65 / 86400)); // "now" = T0+65s
+    LTicker.SetDefaultMs(T0Plus(65)); // "now" = T0+65s
     LPool.SweepIdleConnections(60);
 
     TAssert.AssertEquals('A sweep that closes connections must fire exactly 1 pekIdleSweepClosed event', 1, LEvents.Count);
@@ -1722,7 +1799,7 @@ begin
 
     TAssert.AssertEquals(Int64(1), LPoolIntf.GetSnapshot.TotalIdleSwept);
   finally
-    TClock.Reset;
+    TTicker.Reset;
     LRecorder.Free;
   end;
 end;

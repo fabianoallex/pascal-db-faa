@@ -29,14 +29,14 @@
   CreateAnonymousThread), and TPoolEventProc follows PASCALDB_FUNCREFS
   (pascaldb.inc): closure or method in Delphi, method in FPC 3.2.2. Time and
   waiting go through PascalDb.SystemContext, so tests control the clock and
-  Sleep. }
+  Sleep. Idle times are measured with the monotonic TTicker, never the wall
+  clock: changing the system time must not age or rejuvenate a connection. }
 
 interface
 
 uses
   Classes,
   SysUtils,
-  DateUtils,
   Generics.Collections,
   SyncObjs,
   PascalDb.Interfaces,
@@ -56,7 +56,7 @@ type
 
   TConnectionItem = record
     Connection: IDBConnection;
-    LastRelease: TDateTime;
+    LastRelease: UInt64; // TTicker.NowMs when it came back to the pool
     class function New(AConn: IDBConnection): TConnectionItem; static;
   end;
 
@@ -212,7 +212,7 @@ type
     /// The automatic sweep thread calls the parameterless version
     /// periodically when IdleTimeoutSeconds > 0.
     /// Both are public mainly to allow deterministic tests (with a fake
-    /// IClock) without waiting for the real interval or depending on the
+    /// ITicker) without waiting for the real interval or depending on the
     /// background thread — the parameterized version doesn't even need
     /// IdleTimeoutSeconds configured (nor, therefore, any thread started).
     procedure SweepIdleConnections; overload;
@@ -827,7 +827,7 @@ end;
 class function TConnectionItem.New(AConn: IDBConnection): TConnectionItem;
 begin
   Result.Connection := AConn;
-  Result.LastRelease := TClock.Now;
+  Result.LastRelease := TTicker.NowMs;
 end;
 
 { TConnectionPoolConfig }
@@ -1048,7 +1048,7 @@ begin
       while (FPool.Count > FIniConnections) and (FPool.Count > 0) do
       begin
         LItem := FPool.Peek;
-        if SecondsBetween(TClock.Now, LItem.LastRelease) < AIdleTimeoutSeconds then
+        if TTicker.ElapsedMs(LItem.LastRelease) < UInt64(AIdleTimeoutSeconds) * 1000 then
           Break;
 
         FPool.Dequeue;
@@ -1231,7 +1231,7 @@ var
       end;
     end;
 
-    if SecondsBetween(TClock.Now, ConnectionItem.LastRelease) >= 120 then
+    if TTicker.ElapsedMs(ConnectionItem.LastRelease) >= 120 * 1000 then
     begin
       if not FFactory.TestConnection(ConnectionItem.Connection) then
       begin
