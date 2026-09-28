@@ -342,6 +342,7 @@ type
     function GetPoolWaitMilliseconds: Integer;
     function GetPoolIdleTimeoutSeconds: Integer;
     function GetPoolIdleCheckIntervalMs: Integer;
+    function GetPoolValidateIdleSeconds: Integer;
     function GetSQLDialect: string;
     procedure SetPoolIniConnections(AValue: Integer);
     procedure SetPoolMaxConnections(AValue: Integer);
@@ -349,6 +350,7 @@ type
     procedure SetPoolWaitMilliseconds(AValue: Integer);
     procedure SetPoolIdleTimeoutSeconds(AValue: Integer);
     procedure SetPoolIdleCheckIntervalMs(AValue: Integer);
+    procedure SetPoolValidateIdleSeconds(AValue: Integer);
     procedure SetSQLDialect(AValue: string);
     function GetSQLDirectory: string;
     procedure SetSQLDirectory(const AValue: string);
@@ -367,6 +369,11 @@ type
     /// PoolIdleTimeoutSeconds > 0. Values <= 0 fall back to the default
     /// (30000ms).
     property PoolIdleCheckIntervalMs: Integer read GetPoolIdleCheckIntervalMs write SetPoolIdleCheckIntervalMs;
+    /// An idle connection unused for at least this many seconds gets the
+    /// dialect's ping before it is handed out, and is discarded if the ping
+    /// fails. 120 (default); 0 = ping on every acquire (one extra round trip
+    /// each time); negative = never.
+    property PoolValidateIdleSeconds: Integer read GetPoolValidateIdleSeconds write SetPoolValidateIdleSeconds;
     property SQLDialect: string read GetSQLDialect write SetSQLDialect;
     /// Logical SQL directory handed to the factory's TSQLLoader (e.g. 'FB').
     property SQLDirectory: string read GetSQLDirectory write SetSQLDirectory;

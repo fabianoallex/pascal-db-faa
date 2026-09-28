@@ -17,7 +17,8 @@
   - on-demand growth up to MaxConnections, with bounded waiting
     (WaitMaxAttemps × WaitMilliseconds) and EPoolTimeoutException when it
     runs out;
-  - liveness check of stale connections and discard of dead ones;
+  - liveness check (the dialect's ping) of connections idle for
+    ValidateIdleSeconds or more, and discard of dead ones;
   - sweep of idle connections (IdleTimeoutSeconds), in a dedicated thread
     (TIdleSweepThread) that never closes below IniConnections.
 
@@ -79,12 +80,14 @@ type
     function GetWaitMilliseconds: Integer;
     function GetIdleTimeoutSeconds: Integer;
     function GetIdleCheckIntervalMs: Integer;
+    function GetValidateIdleSeconds: Integer;
     procedure SetIniConnections(AValue: Integer);
     procedure SetMaxConnections(AValue: Integer);
     procedure SetWaitMaxAttemps(AValue: Integer);
     procedure SetWaitMilliseconds(AValue: Integer);
     procedure SetIdleTimeoutSeconds(AValue: Integer);
     procedure SetIdleCheckIntervalMs(AValue: Integer);
+    procedure SetValidateIdleSeconds(AValue: Integer);
     property IniConnections: Integer read GetIniConnections write SetIniConnections;
     property MaxConnections: Integer read GetMaxConnections write SetMaxConnections;
     property WaitMaxAttemps: Integer read GetWaitMaxAttemps write SetWaitMaxAttemps;
@@ -95,6 +98,10 @@ type
     /// Interval between idle sweeps. Only matters when
     /// IdleTimeoutSeconds > 0. Values <= 0 fall back to the default (30000ms).
     property IdleCheckIntervalMs: Integer read GetIdleCheckIntervalMs write SetIdleCheckIntervalMs;
+    /// An idle connection unused for at least this many seconds gets the
+    /// dialect's ping before it is handed out, and is discarded if the ping
+    /// fails. 120 (default); 0 = ping on every acquire; negative = never.
+    property ValidateIdleSeconds: Integer read GetValidateIdleSeconds write SetValidateIdleSeconds;
   end;
 
   { TConnectionPoolConfig }
@@ -107,6 +114,7 @@ type
     FWaitMilliseconds: Integer;
     FIdleTimeoutSeconds: Integer;
     FIdleCheckIntervalMs: Integer;
+    FValidateIdleSeconds: Integer;
     function GetIniConnections: Integer;
     function GetMaxConnections: Integer;
     procedure SetIniConnections(AValue: Integer);
@@ -117,10 +125,12 @@ type
     function GetWaitMilliseconds: Integer;
     function GetIdleTimeoutSeconds: Integer;
     function GetIdleCheckIntervalMs: Integer;
+    function GetValidateIdleSeconds: Integer;
     procedure SetWaitMaxAttemps(AValue: Integer);
     procedure SetWaitMilliseconds(AValue: Integer);
     procedure SetIdleTimeoutSeconds(AValue: Integer);
     procedure SetIdleCheckIntervalMs(AValue: Integer);
+    procedure SetValidateIdleSeconds(AValue: Integer);
   end;
 
   // Pool events only cover what signals abnormal operation or capacity
@@ -181,6 +191,7 @@ type
     FWaitMilliseconds: Integer;
     FIdleTimeoutSeconds: Integer;
     FIdleCheckIntervalMs: Integer;
+    FValidateIdleSeconds: Integer;
     FIdleSweepThread: TThread;
     FIdleSweepWake: TEvent;
     FOnEvent: TPoolEventProc;
@@ -845,6 +856,7 @@ constructor TConnectionPoolConfig.Create;
 begin
   inherited Create;
   FIdleCheckIntervalMs := 30000; // only matters if IdleTimeoutSeconds > 0
+  FValidateIdleSeconds := 120;
 end;
 
 function TConnectionPoolConfig.GetIniConnections: Integer;
@@ -911,6 +923,16 @@ begin
     FIdleCheckIntervalMs := AValue;
 end;
 
+function TConnectionPoolConfig.GetValidateIdleSeconds: Integer;
+begin
+  Result := FValidateIdleSeconds;
+end;
+
+procedure TConnectionPoolConfig.SetValidateIdleSeconds(AValue: Integer);
+begin
+  FValidateIdleSeconds := AValue; // every value means something; see the property
+end;
+
 { TConnectionPool }
 
 constructor TConnectionPool.Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig;
@@ -933,6 +955,7 @@ begin
     FWaitMaxAttemps  := AConfig.WaitMaxAttemps;
     FIdleTimeoutSeconds := AConfig.IdleTimeoutSeconds;
     FIdleCheckIntervalMs := AConfig.IdleCheckIntervalMs;
+    FValidateIdleSeconds := AConfig.ValidateIdleSeconds;
   end
   else
   begin
@@ -942,6 +965,7 @@ begin
     FWaitMaxAttemps  := 50;
     FIdleTimeoutSeconds := 0; // off by default
     FIdleCheckIntervalMs := 30000;
+    FValidateIdleSeconds := 120;
   end;
 
   if FIdleCheckIntervalMs <= 0 then
@@ -1241,7 +1265,8 @@ var
       end;
     end;
 
-    if TTicker.ElapsedMs(ConnectionItem.LastRelease) >= 120 * 1000 then
+    if (FValidateIdleSeconds >= 0) and
+       (TTicker.ElapsedMs(ConnectionItem.LastRelease) >= UInt64(FValidateIdleSeconds) * 1000) then
     begin
       if not FFactory.TestConnection(ConnectionItem.Connection) then
       begin

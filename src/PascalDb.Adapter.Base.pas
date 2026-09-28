@@ -56,6 +56,7 @@ type
     FPoolIniConnections: Integer;
     FPoolIdleTimeoutSeconds: Integer;
     FPoolIdleCheckIntervalMs: Integer;
+    FPoolValidateIdleSeconds: Integer;
   public
     constructor Create;
     destructor Destroy; override;
@@ -65,6 +66,7 @@ type
     function GetPoolWaitMilliseconds: Integer;
     function GetPoolIdleTimeoutSeconds: Integer;
     function GetPoolIdleCheckIntervalMs: Integer;
+    function GetPoolValidateIdleSeconds: Integer;
     function GetSQLDialect: string;
     procedure SetPoolIniConnections(AValue: Integer);
     procedure SetPoolMaxConnections(AValue: Integer);
@@ -72,6 +74,7 @@ type
     procedure SetPoolWaitMilliseconds(AValue: Integer);
     procedure SetPoolIdleTimeoutSeconds(AValue: Integer);
     procedure SetPoolIdleCheckIntervalMs(AValue: Integer);
+    procedure SetPoolValidateIdleSeconds(AValue: Integer);
     procedure SetSQLDialect(AValue: string);
     function GetSQLDirectory: string;
     procedure SetSQLDirectory(const AValue: string);
@@ -313,6 +316,7 @@ begin
   FPoolWaitMaxAttemps := 50;    // a caller waits up to 50 x 100 ms for a free connection
   FPoolWaitMilliseconds := 100;
   FPoolIdleCheckIntervalMs := 30000; // only matters if PoolIdleTimeoutSeconds > 0
+  FPoolValidateIdleSeconds := 120;
 end;
 
 destructor TDatabaseConfig.Destroy;
@@ -351,6 +355,11 @@ begin
   Result := FPoolIdleCheckIntervalMs;
 end;
 
+function TDatabaseConfig.GetPoolValidateIdleSeconds: Integer;
+begin
+  Result := FPoolValidateIdleSeconds;
+end;
+
 function TDatabaseConfig.GetSQLDialect: string;
 begin
   Result := FSQLDialect;
@@ -386,6 +395,11 @@ procedure TDatabaseConfig.SetPoolIdleCheckIntervalMs(AValue: Integer);
 begin
   if AValue > 0 then
     FPoolIdleCheckIntervalMs := AValue;
+end;
+
+procedure TDatabaseConfig.SetPoolValidateIdleSeconds(AValue: Integer);
+begin
+  FPoolValidateIdleSeconds := AValue; // every value means something; see the property
 end;
 
 procedure TDatabaseConfig.SetSQLDialect(AValue: string);
@@ -1104,6 +1118,7 @@ begin
   LPoolConfig.MaxConnections := FConfig.PoolMaxConnections;
   LPoolConfig.IdleTimeoutSeconds := FConfig.PoolIdleTimeoutSeconds;
   LPoolConfig.IdleCheckIntervalMs := FConfig.PoolIdleCheckIntervalMs;
+  LPoolConfig.ValidateIdleSeconds := FConfig.PoolValidateIdleSeconds;
 
   // The provider is set before the pool: the pool's initial ramp-up already
   // calls CreateConnection.

@@ -13,16 +13,20 @@ may change the API; each such change is listed here.
   `PoolIdleTimeoutSeconds`, and a pool that grew in a peak never shrank back (3 connections
   and one request every 10 s: the 60 s sweep closed none; now it closes the 2 unused ones).
 
+### Added
+
+- `PoolValidateIdleSeconds` (`IDatabaseConfig`; `ValidateIdleSeconds` on
+  `IConnectionPoolConfig`): how long a connection must have been idle to get the ping before it
+  is handed out. The default, 120, is the value that was fixed in the code; 0 pings on every
+  acquire, a negative value never.
+- `TTicker` (`PascalDb.SystemContext`): a replaceable monotonic clock, like `TClock` and
+  `TSleep`, for tests that control the pool's idle times.
+
 ### Fixed
 
 - The pool measures idle times on a monotonic clock. With the wall clock, a change of the
   system time (daylight saving, a manual adjustment) made every idle connection look that much
   older, sending them all to the liveness check and to the idle sweep at once.
-
-### Added
-
-- `TTicker` (`PascalDb.SystemContext`): a replaceable monotonic clock, like `TClock` and
-  `TSleep`, for tests that control the pool's idle times.
 
 ## [0.2.0] - 2026-09-27
 

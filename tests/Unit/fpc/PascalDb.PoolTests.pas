@@ -300,6 +300,7 @@ type
     procedure Test_Pool_DifferentTransactions_RecordSeparateCommands;
     procedure Test_Pool_IdleConnection120s;
     procedure Test_Pool_IdleConnectionFails;
+    procedure Test_Pool_ValidateIdleSeconds_Configurable;
     procedure Test_Pool_WallClockChange_DoesNotAgeConnections;
     procedure Test_Ticker_ElapsedMs_NeverWraps;
     procedure Test_Pool_Concurrency;
@@ -1241,6 +1242,56 @@ begin
   finally
     TTicker.Reset;
   end;
+end;
+
+procedure TPoolTests.Test_Pool_ValidateIdleSeconds_Configurable;
+
+  procedure Check(const AMessage: string; AValidateIdleSeconds, AIdleSeconds: Integer;
+    AExpectedTestedCount: Integer);
+  var
+    LConfig: IConnectionPoolConfig;
+    LFactory: IDBFactory;
+    LMockFactory: TDBFactoryMock;
+    LPool: IDBConnectionPool;
+    LConn: IDBConnection;
+    LTicker: TFakeTicker;
+  begin
+    LTicker := TFakeTicker.Create;
+    LTicker.SetDefaultMs(T0Plus(0));
+    LTicker.EnqueueMs(T0Plus(0));             // release in CreateInitialConnections
+    LTicker.EnqueueMs(T0Plus(AIdleSeconds));  // check in AcquireConnection
+
+    TTicker.SetTicker(LTicker);
+    try
+      LConfig := TConnectionPoolConfig.Create;
+      LConfig.IniConnections := 1;
+      LConfig.MaxConnections := 10;
+      LConfig.ValidateIdleSeconds := AValidateIdleSeconds;
+
+      LMockFactory := TDBFactoryMock.Create;
+      LFactory := LMockFactory;
+      LPool := TConnectionPool.Create(LFactory, LConfig);
+
+      LConn := LPool.AcquireConnection;
+
+      TAssert.AssertEquals(AMessage, AExpectedTestedCount, LMockFactory.TestedConnections.Count);
+    finally
+      TTicker.Reset;
+    end;
+  end;
+
+var
+  LConfig: IConnectionPoolConfig;
+begin
+  LConfig := TConnectionPoolConfig.Create;
+  TAssert.AssertEquals('ValidateIdleSeconds must default to 120', 120, LConfig.ValidateIdleSeconds);
+  LConfig.ValidateIdleSeconds := -1;
+  TAssert.AssertEquals('A negative ValidateIdleSeconds must be kept (it means never)', -1, LConfig.ValidateIdleSeconds);
+
+  Check('0 = always: a connection idle for 0s must be tested',         0,    0, 1);
+  Check('30: idle for 30s must be tested',                            30,   30, 1);
+  Check('30: idle for 29s must not be tested',                        30,   29, 0);
+  Check('Negative = never: idle for 5280s must not be tested',        -1, 5280, 0);
 end;
 
 procedure TPoolTests.Test_Pool_WallClockChange_DoesNotAgeConnections;

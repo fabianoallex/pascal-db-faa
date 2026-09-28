@@ -18,6 +18,7 @@ All on `IDatabaseConfig`, with the defaults `TDatabaseConfig` starts with.
 | `PoolWaitMaxAttemps`, `PoolWaitMilliseconds` | 50, 100 | when all `PoolMaxConnections` are busy, a caller checks again every `PoolWaitMilliseconds`, up to `PoolWaitMaxAttemps` times, then gets `EPoolTimeoutException`. `PoolWaitMaxAttemps` = 0 means no waiting at all |
 | `PoolIdleTimeoutSeconds` | 0 | close connections idle for this long, never going below `PoolIniConnections`. 0 turns the sweep off |
 | `PoolIdleCheckIntervalMs` | 30000 | how often the sweep runs. Only matters when the sweep is on |
+| `PoolValidateIdleSeconds` | 120 | a connection idle for this long gets the dialect's ping before it is handed out. 0 pings on every acquire (one extra round trip each time); negative never pings |
 
 The samples use 1 initial, 5 max and 50 × 100 ms of waiting. Size `PoolMaxConnections` to what
 the database accepts from this program, not to the number of threads: a thread that has to
@@ -30,8 +31,10 @@ wait a little for a connection is normal.
 - **Reuses the most recently released connection first** (last in, first out). The same few
   connections do the work, and the ones a peak left behind stay idle long enough for the
   sweep to close them.
-- **Checks old connections before reusing them**: a connection idle for 2 minutes or more gets
-  the dialect's ping first, and is discarded if it fails.
+- **Checks old connections before reusing them**: a connection idle for
+  `PoolValidateIdleSeconds` or more (2 minutes by default) gets the dialect's ping first, and is
+  discarded if it fails; the acquire then tries the next one. The ping has no timeout of its
+  own: on a connection the network dropped silently, it waits as long as the driver does.
 - **Discards broken connections**: a connection that dropped while in use comes back marked
   and is closed instead of queued ([guide 6](errors.md)).
 - **Sweeps idle connections** when `PoolIdleTimeoutSeconds` is set, in a background thread.
