@@ -266,7 +266,8 @@ read results before committing. Results are fetched completely on `Open`
 (`PacketRecords = -1`), so `RecordCount` is exact. Queries set `UsePrimaryKeyAsKey := False`:
 by default SQLdb queries the catalog for the table's primary key on every `Open`, to make the
 dataset editable, and the adapter never edits it (2000 SELECTs by key, FPC 3.2.2 Windows:
-PostgreSQL 10.0 s → 3.5 s, Firebird 1.9 s → 0.5 s).
+PostgreSQL 10.0 s → 3.5 s, Firebird 1.9 s → 0.5 s). `ExecSql` prepares explicitly and keeps the statement
+prepared while the same transaction lasts (gotcha 31); `Open` leaves preparing to SQLdb.
 
 **Zeos specifics** (ZeosLib 8): `ConnectionParams` takes `Protocol` (`firebird`/`postgresql`;
 `firebird` falls back to the legacy API with a 2.5 client), `HostName`, `Port`, `Database`,
@@ -553,3 +554,14 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     / `Commit` / `Rollback`); 2000 requests 5.4 s on PostgreSQL, SQLite 3.4 s → 1.0 s, Firebird
     unchanged. Contract test `Requests_StayOnPooledConnections` (30 requests must use at most
     `PoolMaxConnections` server sessions) failed with 30 sessions before the fix.
+31. **SQLdb: a statement SQLdb prepares by itself is unprepared after it runs, and one prepared
+    explicitly belongs to the transaction it was prepared in.** 2000 INSERTs with the SQL set once,
+    PostgreSQL 17 (FPC 3.2.2, Windows): 3.7 s with SQLdb preparing on its own, 1.4 s with `Prepare`
+    called first. But the prepared statement doesn't outlive its transaction: run again after a
+    commit, it failed on Firebird with "invalid transaction handle (expecting explicit transaction
+    start)" and hung on PostgreSQL (the connector uses a server connection per transaction). And an
+    explicitly prepared `SELECT` closed and opened again raised an access violation inside
+    `TSQLQuery.Open` on Firebird, on the second `Open`. Fix: `DoExecSql` prepares explicitly and
+    unprepares when the transaction isn't active or isn't the one it prepared in (the adapter counts
+    the transactions it starts in `TSQLTransaction.Tag`); `DoOpen` unprepares first and lets SQLdb
+    prepare. Contract test `SameQuery_AcrossTransactions` (one query, three transactions in a row).

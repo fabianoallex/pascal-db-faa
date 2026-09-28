@@ -16,7 +16,8 @@
   commit/rollback, nested scopes with savepoints, a constraint violation
   that must not discard the connection, scripts, row counts, parameters
   after the same SQL text is assigned again (still bound, without the
-  previous run's values), a string parameter that grows
+  previous run's values), one query run in several transactions in a row,
+  a string parameter that grows
   while the statement stays prepared, requests staying on the pool's own
   server sessions, concurrent writers (SQLite
   allows one at a time: the others must wait for the lock, not fail), and a
@@ -65,6 +66,7 @@ type
     procedure RecordCount_CountsEveryRow;
     procedure SameSqlReassigned_ParamsStillBind;
     procedure SameSqlReassigned_PreviousValuesDontLeak;
+    procedure SameQuery_AcrossTransactions;
     procedure SameQuery_GrowingStringParam_Binds;
     procedure Requests_StayOnPooledConnections;
     procedure ConcurrentWriters_AllCommit;
@@ -600,6 +602,41 @@ begin
         (not LResult.Eof) and (LResult.Integers['QTY'] = 7));
     end;
     LScope.Rollback;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+procedure TContractTests.SameQuery_AcrossTransactions;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  I: Integer;
+begin
+  // One query, the SQL set once, run in three transactions in a row: a
+  // driver that keeps the statement prepared must still run it after the
+  // transaction it was prepared in has ended.
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LQuery.Sql := 'INSERT INTO LOG_LINES (ID, TXT) VALUES (:ID, :TXT)';
+  for I := 1 to 3 do
+  begin
+    LScope.StartTransaction;
+    try
+      LQuery.Params.Integers['ID'] := 600 + I;
+      LQuery.Params.Strings['TXT'] := 'txn ' + IntToStr(I);
+      LQuery.ExecSql;
+      LScope.Commit;
+    except
+      LScope.Rollback;
+      raise;
+    end;
+  end;
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := 'SELECT COUNT(*) AS TOTAL FROM LOG_LINES WHERE ID BETWEEN 601 AND 603';
+    TAssert.AssertEquals('Every transaction must have committed its row', 3, LQuery.Open.Integers['TOTAL']);
+    LScope.Commit;
   except
     LScope.Rollback;
     raise;

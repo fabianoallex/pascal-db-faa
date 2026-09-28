@@ -8,6 +8,8 @@ may change the API; each such change is listed here.
 
 ### Changed
 
+- SQLdb: `ExecSql` keeps the statement prepared for the next run with the same SQL in the same
+  transaction (SQLdb unprepared it after every run). 2000 INSERTs on PostgreSQL: 3.4 s -> 1.4 s.
 - Setting `IQuery.Sql` to the text it already has keeps the parameters and the prepared
   statement and clears only the values (it used to rebuild both, so FireDAC and Zeos prepared
   the statement again). 2000 SELECTs with the SQL set inside the loop, Zeos: PostgreSQL

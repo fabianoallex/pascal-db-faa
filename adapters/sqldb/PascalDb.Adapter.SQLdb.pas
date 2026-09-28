@@ -111,6 +111,7 @@ type
   TSQLdbQueryAdapter = class(TDataSetQueryBase)
   private
     FQuery: TSQLQuery;
+    FPreparedIn: PtrInt; // the transaction's Tag when DoExecSql prepared
   protected
     function DataSet: TDataSet; override;
     function SqlLines: TStrings; override;
@@ -285,7 +286,12 @@ end;
 procedure TSQLdbTransactionAdapter.DoStartTransaction;
 begin
   if not FTransaction.Active then
+  begin
     FTransaction.StartTransaction;
+    // Counts the transactions started, so a query can tell that the one it
+    // prepared a statement in has ended (see TSQLdbQueryAdapter.DoExecSql).
+    FTransaction.Tag := FTransaction.Tag + 1;
+  end;
 end;
 
 procedure TSQLdbTransactionAdapter.DoCommit;
@@ -367,6 +373,24 @@ end;
 procedure TSQLdbQueryAdapter.DoExecSql;
 begin
   try
+    // Prepared explicitly, so it stays prepared for the next ExecSql with the
+    // same SQL: a statement SQLdb prepares by itself is unprepared right after
+    // it runs (measured, 2000 INSERTs on PostgreSQL: 3.7 s implicit, 1.4 s
+    // explicit). Only here, not in DoOpen: an explicitly prepared SELECT
+    // reopened on Firebird raised an access violation inside TSQLQuery.Open
+    // (FPC 3.2.2) on the second Open.
+    // Only within one transaction: SQLdb ties a prepared statement to the
+    // transaction it was prepared in. Reused after a commit, it failed on
+    // Firebird ("invalid transaction handle") and hung on PostgreSQL (the
+    // PostgreSQL connector takes a server connection per transaction).
+    if FQuery.Prepared and ((not FQuery.SQLTransaction.Active) or
+      (FQuery.SQLTransaction.Tag <> FPreparedIn)) then
+      FQuery.UnPrepare;
+    if not FQuery.Prepared then
+    begin
+      FQuery.Prepare;
+      FPreparedIn := FQuery.SQLTransaction.Tag;
+    end;
     FQuery.ExecSQL;
   except
     on E: Exception do
@@ -381,6 +405,10 @@ end;
 
 procedure TSQLdbQueryAdapter.DoOpen;
 begin
+  // Left prepared by DoExecSql (the same SQL run with ExecSql, then opened):
+  // SQLdb must prepare it itself here, see DoExecSql.
+  if FQuery.Prepared then
+    FQuery.UnPrepare;
   try
     FQuery.Open;
   except
