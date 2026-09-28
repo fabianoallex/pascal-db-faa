@@ -141,3 +141,62 @@ the existence check with `AddResult` ([guide 5](testing-with-the-mock.md#simulat
 (`PoolWaitMaxAttemps` × `PoolWaitMilliseconds`). Its message has the pool's state ("Pool: 3/3
 active, 0 queued. Attempts: 20"). What it means is the caller's decision, often "try again
 later" (503). [Guide 7](pool.md) covers the settings and the events that show it coming.
+
+It is about capacity, not about the database being down: that raises
+`EDatabaseConnectException` or `EDatabaseUnavailableException` (below). The pool already waits
+for a free connection; to wait longer, raise `PoolWaitMaxAttemps` rather than looping around
+the acquire.
+
+## Trying again after an outage
+
+The library doesn't retry anything by itself. A statement that failed with the connection may
+or may not have run on the server (a `Commit` that failed may have committed), and the
+transaction it belonged to is gone with the connection. Only the caller knows whether the work
+can be repeated. What the pool does on its own: it discards the broken connection, pings every
+idle one before handing it out again (they probably died together), and opens new ones as
+needed.
+
+When the work is safe to repeat, repeat **the whole unit of work** (acquire, transaction,
+commit), catching `EDatabaseUnavailableException`, which also covers `EDatabaseConnectException`.
+Bound it by total time and wait longer each round:
+
+```pascal
+uses PascalDb.Threading; // PdbTickMs: a monotonic clock on both compilers
+
+procedure TOrderService.SaveWithRetry(const AOrder: TOrder);
+const
+  DEADLINE_MS = 10000;
+var
+  LStart: UInt64;
+  LDelayMs: Cardinal;
+begin
+  LStart := PdbTickMs;
+  LDelayMs := 200;
+  while True do
+    try
+      Save(AOrder); // acquires, starts the transaction, ..., commits (or rolls back and re-raises)
+      Exit;
+    except
+      on E: EDatabaseUnavailableException do
+      begin
+        if PdbTickMs - LStart + LDelayMs > DEADLINE_MS then
+          raise;
+        Sleep(LDelayMs);
+        LDelayMs := LDelayMs * 2; // 200, 400, 800 ms, ...
+      end;
+    end;
+end;
+```
+
+Things to decide before using it:
+
+- **Is the work idempotent?** A read is. An `UPDATE ... SET STATUS = 'PAID'` is. An `INSERT` with
+  a key the database generates is not: after a failed `Commit`, check whether the row is there
+  before inserting again (as in [the duplicate key section](#turning-a-duplicate-key-into-your-own-exception)),
+  or generate the key in the caller.
+- **How long can the caller wait?** Each round holds a thread. In a server, a short deadline and
+  then a 503 (letting the client or the load balancer try again) usually hold up better than
+  many threads sleeping at once.
+- **Is it a configuration error?** A wrong password or a missing client library also raises
+  `EDatabaseConnectException` and will fail every round; checking the connection at startup
+  ([Connecting](#connecting)) catches those before any retry loop runs.
