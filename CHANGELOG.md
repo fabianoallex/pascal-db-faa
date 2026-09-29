@@ -21,6 +21,14 @@ may change the API; each such change is listed here.
   recognize their driver's errors by overriding `IsLockConflictError` (`TTransactionBase`,
   `TDataSetQueryBase`). **Breaking** for a program that caught the driver's exception for a
   deadlock or an update conflict: it now gets this class.
+- Statement events: an optional `AOnStatement` handler (after `AOnPoolEvent` in every factory
+  constructor and in `TConnectionPool.Create`) is called after each `Open` / `ExecSql` of a
+  pooled query with a `TStatementInfo` (`PascalDb.Pool`): the SQL text, the time in
+  microseconds, the rows an `Open` fetched, and the error, if any. Without a handler there is no
+  cost. An exception in the handler is swallowed.
+- `PdbTickUs` (`PascalDb.Threading`): monotonic microseconds (`QueryPerformanceCounter` on
+  Windows, `CLOCK_MONOTONIC` on Linux FPC, `TStopwatch` on Delphi elsewhere). `PdbTickMs`
+  (`GetTickCount64`) advances in 15-16 ms steps on Windows.
 
 ### Fixed
 

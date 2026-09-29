@@ -258,11 +258,12 @@ type
     FComponentProvider: IDBComponentProvider;
     FContextTransactionProvider: IContextTransactionProvider;
   public
-    /// AProvider: the adapter's driver-specific part. AOnPoolEvent is passed
-    /// straight to TConnectionPool.Create (see TPoolEventKind).
+    /// AProvider: the adapter's driver-specific part. AOnPoolEvent and
+    /// AOnStatement are passed straight to TConnectionPool.Create (see
+    /// TPoolEventKind and TStatementInfo).
     constructor Create(const AConfig: IDatabaseConfig; const AProvider: IDBComponentProvider;
       const AContextTransactionProvider: IContextTransactionProvider = nil;
-      AOnPoolEvent: TPoolEventProc = nil);
+      AOnPoolEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil);
     destructor Destroy; override;
     function GetProvider: IDBComponentProvider;
     procedure SetProvider(AProvider: IDBComponentProvider);
@@ -1128,7 +1129,8 @@ end;
 { TDBFactory }
 
 constructor TDBFactory.Create(const AConfig: IDatabaseConfig; const AProvider: IDBComponentProvider;
-  const AContextTransactionProvider: IContextTransactionProvider; AOnPoolEvent: TPoolEventProc);
+  const AContextTransactionProvider: IContextTransactionProvider; AOnPoolEvent: TPoolEventProc;
+  AOnStatement: TStatementEventProc);
 var
   LPoolConfig: IConnectionPoolConfig;
 begin
@@ -1162,7 +1164,7 @@ begin
 
   // The provider is set before the pool: the pool's initial ramp-up already
   // calls CreateConnection.
-  FPool := TConnectionPool.Create(Self, LPoolConfig, AOnPoolEvent);
+  FPool := TConnectionPool.Create(Self, LPoolConfig, AOnPoolEvent, AOnStatement);
   FSqlLoader := TSQLLoader.Create(FConfig.SQLDirectory, FConfig.SqlSource);
 end;
 

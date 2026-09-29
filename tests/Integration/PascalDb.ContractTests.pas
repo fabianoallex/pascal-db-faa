@@ -16,7 +16,8 @@
   server sessions, concurrent writers (SQLite
   allows one at a time: the others must wait for the lock, not fail), a
   statement waiting for another transaction's lock giving up after
-  LockTimeoutMs with ELockConflictException, and a failed connect surfacing
+  LockTimeoutMs with ELockConflictException, statement events (the SQL, the
+  rows an Open fetched, the time, a failure), and a failed connect surfacing
   as EDatabaseConnectException whatever the driver.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
@@ -34,6 +35,7 @@ uses
   PascalDb.Optionals,
   PascalDb.Migrations,
   PascalDb.Threading,
+  PascalDb.Pool,
   PascalDb.IntegrationEnv;
 
 type
@@ -71,6 +73,7 @@ type
     [Test] procedure Requests_StayOnPooledConnections;
     [Test] procedure ConcurrentWriters_AllCommit;
     [Test] procedure LockWait_GivesUpAfterLockTimeout;
+    [Test] procedure StatementEvents_ReportSqlRowsTimeAndErrors;
     [Test] procedure Unreachable_AcquireRaisesConnectException;
   end;
 
@@ -186,6 +189,21 @@ begin
   LQuery := nil;
   LScope := nil;
   FFactory := nil;
+end;
+
+type
+  // Collects the statement events of StatementEvents_ReportSqlRowsTimeAndErrors:
+  // a method, since TStatementEventProc is "of object" on FPC 3.2.2.
+  TStatementLog = class
+  public
+    Infos: array of TStatementInfo;
+    procedure OnStatement(const AInfo: TStatementInfo);
+  end;
+
+procedure TStatementLog.OnStatement(const AInfo: TStatementInfo);
+begin
+  SetLength(Infos, Length(Infos) + 1);
+  Infos[High(Infos)] := AInfo;
 end;
 
 { TContractTests }
@@ -853,6 +871,78 @@ begin
     LElapsed >= LOCK_TIMEOUT_MS div 2);
   TAssert.AssertTrue(Format('It must give up near LockTimeoutMs (%d ms): %d ms', [LOCK_TIMEOUT_MS, Integer(LElapsed)]),
     LElapsed < HOLD_MS div 2);
+end;
+
+procedure TContractTests.StatementEvents_ReportSqlRowsTimeAndErrors;
+const
+  INSERT_SQL = 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME)';
+  SELECT_SQL = 'SELECT ID FROM ITEMS WHERE ID BETWEEN 801 AND 803';
+  BAD_SQL = 'SELECT ID FROM NO_SUCH_TABLE';
+var
+  LLog: TStatementLog;
+  LFactory: IDBFactory;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LRaised: string;
+  I: Integer;
+begin
+  LLog := TStatementLog.Create;
+  try
+    LFactory := StatementEventFactory(LLog.OnStatement);
+    LScope := LFactory.GetPool.AcquireQuery(LQuery);
+    LScope.StartTransaction;
+    try
+      LQuery.Sql := INSERT_SQL;
+      for I := 801 to 803 do
+      begin
+        LQuery.Params.Integers['ID'] := I;
+        LQuery.Params.Strings['NAME'] := 'event ' + IntToStr(I);
+        LQuery.ExecSql;
+      end;
+      LQuery.Sql := SELECT_SQL;
+      LQuery.Open;
+      LScope.Rollback;
+    except
+      LScope.Rollback;
+      raise;
+    end;
+    LQuery := nil;
+    LScope := nil;
+
+    LRaised := '';
+    LScope := LFactory.GetPool.AcquireQuery(LQuery);
+    LScope.StartTransaction;
+    try
+      LQuery.Sql := BAD_SQL;
+      LQuery.Open;
+    except
+      on E: Exception do
+        LRaised := E.ClassName;
+    end;
+    LScope.Rollback;
+    LQuery := nil;
+    LScope := nil;
+    LFactory := nil;
+
+    TAssert.AssertEquals('One event per statement', 5, Length(LLog.Infos));
+    for I := 0 to 2 do
+    begin
+      TAssert.AssertEquals(Ord(skExecSql), Ord(LLog.Infos[I].Kind));
+      TAssert.AssertEquals('The SQL as the query ran it', INSERT_SQL, LLog.Infos[I].Sql);
+      TAssert.AssertEquals('', LLog.Infos[I].ErrorClass);
+    end;
+    TAssert.AssertEquals(Ord(skOpen), Ord(LLog.Infos[3].Kind));
+    TAssert.AssertEquals(SELECT_SQL, LLog.Infos[3].Sql);
+    TAssert.AssertEquals('Open reports the rows it fetched', Int64(3), LLog.Infos[3].Rows);
+    TAssert.AssertTrue(Format('A round trip takes some time: %d us', [LLog.Infos[3].ElapsedUs]),
+      LLog.Infos[3].ElapsedUs > 0);
+    TAssert.AssertEquals(BAD_SQL, LLog.Infos[4].Sql);
+    TAssert.AssertEquals('The failure is reported with the class the caller got',
+      LRaised, LLog.Infos[4].ErrorClass);
+    TAssert.AssertTrue('The failure carries the driver''s message', LLog.Infos[4].ErrorMessage <> '');
+  finally
+    LLog.Free;
+  end;
 end;
 
 procedure TContractTests.Unreachable_AcquireRaisesConnectException;

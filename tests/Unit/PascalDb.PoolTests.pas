@@ -4,7 +4,8 @@
   transactions and queries: acquire/release, limit and timeout, ramp-up with
   the database offline, liveness check, idle sweep (fake clock and real
   thread), discard of a connection broken during use (including an Access
-  Violation while reading a field), events, snapshot and concurrency.
+  Violation while reading a field), events, statement events (AOnStatement),
+  snapshot and concurrency.
 
   The monotonic clock and Sleep are replaced through PascalDb.SystemContext
   (TFakeTicker, TFakeSleep); events are recorded by TPoolEventRecorder — a method, not a
@@ -58,6 +59,24 @@ type
     destructor Destroy; override;
     procedure OnEvent(const AEvent: TPoolEvent);
     property Events: TList<TPoolEvent> read FEvents;
+  end;
+
+  { TStatementRecorder
+
+    Records the pool's statement events (AOnStatement), with a method for
+    the same reason as TPoolEventRecorder. RaiseInCallback makes the
+    callback itself fail, to check that the statement's outcome doesn't
+    change. }
+
+  TStatementRecorder = class
+  private
+    FInfos: TList<TStatementInfo>;
+  public
+    RaiseInCallback: Boolean;
+    constructor Create;
+    destructor Destroy; override;
+    procedure OnStatement(const AInfo: TStatementInfo);
+    property Infos: TList<TStatementInfo> read FInfos;
   end;
 
   TFakeSleep = class(TInterfacedObject, ISleep)
@@ -323,6 +342,9 @@ type
     [Test] procedure Test_EDatabaseUnavailableException_PreservesOriginalDetail;
     [Test] procedure Test_Pool_IniConnections_DatabaseOffline_DoesNotRaise;
     [Test] procedure Test_Pool_IniConnections_DatabaseOffline_RecoversOnNextAcquire;
+    [Test] procedure Test_Pool_StatementEvent_ReportsOpenAndExecSql;
+    [Test] procedure Test_Pool_StatementEvent_ReportsTheFailure;
+    [Test] procedure Test_Pool_StatementEvent_FailingCallback_DoesNotChangeTheOutcome;
   private
     procedure MaxConnectionsExceeded_Method;
   end;
@@ -346,6 +368,27 @@ end;
 procedure TPoolEventRecorder.OnEvent(const AEvent: TPoolEvent);
 begin
   FEvents.Add(AEvent);
+end;
+
+{ TStatementRecorder }
+
+constructor TStatementRecorder.Create;
+begin
+  inherited Create;
+  FInfos := TList<TStatementInfo>.Create;
+end;
+
+destructor TStatementRecorder.Destroy;
+begin
+  FInfos.Free;
+  inherited;
+end;
+
+procedure TStatementRecorder.OnStatement(const AInfo: TStatementInfo);
+begin
+  FInfos.Add(AInfo);
+  if RaiseInCallback then
+    raise Exception.Create('logger failed');
 end;
 
 { TFakeSleep }
@@ -2360,6 +2403,133 @@ begin
     TAssert.AssertEquals(Ord(pekConnectionDiscarded), Ord(LEvents[0].Kind));
     TAssert.AssertEquals(Ord(pdrBrokenAfterUse), Ord(LEvents[0].DiscardReason));
   finally
+    LRecorder.Free;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_StatementEvent_ReportsOpenAndExecSql;
+var
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LRecorder: TStatementRecorder;
+begin
+  LMockFactory := TDBFactoryMock.Create;
+  LFactory := LMockFactory;
+  LRecorder := TStatementRecorder.Create;
+  try
+    LPool := TConnectionPool.Create(LFactory, nil, nil, LRecorder.OnStatement);
+    LMockFactory.SetNextQueryOpenResult(TFakeQueryResult.Create);
+    LScope := LPool.AcquireQuery(LQuery);
+    LQuery.Sql := 'SELECT 1';
+    LQuery.Open;
+    LQuery.Sql := 'UPDATE T SET A = 1';
+    LQuery.ExecSql;
+    LQuery := nil;
+    LScope := nil;
+
+    TAssert.AssertEquals('One event per statement', 2, LRecorder.Infos.Count);
+    TAssert.AssertEquals(Ord(skOpen), Ord(LRecorder.Infos[0].Kind));
+    TAssert.AssertEquals('SELECT 1', LRecorder.Infos[0].Sql);
+    TAssert.AssertEquals('Open reports the rows fetched (RecordCount)', Int64(0), LRecorder.Infos[0].Rows);
+    TAssert.AssertEquals('', LRecorder.Infos[0].ErrorClass);
+    TAssert.AssertTrue('Elapsed time is never negative', LRecorder.Infos[0].ElapsedUs >= 0);
+    TAssert.AssertEquals(Ord(skExecSql), Ord(LRecorder.Infos[1].Kind));
+    TAssert.AssertEquals('UPDATE T SET A = 1', LRecorder.Infos[1].Sql);
+    TAssert.AssertEquals('ExecSql reports no row count', Int64(-1), LRecorder.Infos[1].Rows);
+    TAssert.AssertEquals('', LRecorder.Infos[1].ErrorClass);
+  finally
+    LPool := nil;
+    LRecorder.Free;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_StatementEvent_ReportsTheFailure;
+var
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LRecorder: TStatementRecorder;
+  LRaised: string;
+begin
+  LMockFactory := TDBFactoryMock.Create;
+  LFactory := LMockFactory;
+  LRecorder := TStatementRecorder.Create;
+  try
+    LPool := TConnectionPool.Create(LFactory, nil, nil, LRecorder.OnStatement);
+    LMockFactory.RaiseOnNextQueryOpen(EConvertError, 'bad value');
+    LScope := LPool.AcquireQuery(LQuery);
+    LQuery.Sql := 'SELECT X FROM T';
+    LRaised := '';
+    try
+      LQuery.Open;
+    except
+      on E: Exception do
+        LRaised := E.ClassName;
+    end;
+    LQuery := nil;
+    LScope := nil;
+
+    TAssert.AssertEquals('The caller still gets the exception', 'EConvertError', LRaised);
+    TAssert.AssertEquals('A failed statement is reported too', 1, LRecorder.Infos.Count);
+    TAssert.AssertEquals('EConvertError', LRecorder.Infos[0].ErrorClass);
+    TAssert.AssertEquals('bad value', LRecorder.Infos[0].ErrorMessage);
+    TAssert.AssertEquals('A failed Open has no row count', Int64(-1), LRecorder.Infos[0].Rows);
+  finally
+    LPool := nil;
+    LRecorder.Free;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_StatementEvent_FailingCallback_DoesNotChangeTheOutcome;
+var
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LRecorder: TStatementRecorder;
+  LRaised: string;
+begin
+  LMockFactory := TDBFactoryMock.Create;
+  LFactory := LMockFactory;
+  LRecorder := TStatementRecorder.Create;
+  LRecorder.RaiseInCallback := True;
+  try
+    LPool := TConnectionPool.Create(LFactory, nil, nil, LRecorder.OnStatement);
+    LScope := LPool.AcquireQuery(LQuery);
+    LQuery.Sql := 'UPDATE T SET A = 1';
+    LRaised := '';
+    try
+      LQuery.ExecSql;
+    except
+      on E: Exception do
+        LRaised := E.ClassName + ': ' + E.Message;
+    end;
+    TAssert.AssertEquals('A callback that raises must not fail a statement that worked', '', LRaised);
+
+    LQuery := nil;
+    LScope := nil;
+    LMockFactory.RaiseOnNextQueryOpen(EConvertError, 'bad value');
+    LScope := LPool.AcquireQuery(LQuery);
+    LQuery.Sql := 'SELECT X FROM T';
+    try
+      LQuery.Open;
+    except
+      on E: Exception do
+        LRaised := E.ClassName + ': ' + E.Message;
+    end;
+    LQuery := nil;
+    LScope := nil;
+    TAssert.AssertEquals('A callback that raises must not replace the statement''s own exception',
+      'EConvertError: bad value', LRaised);
+    TAssert.AssertEquals('Both statements reached the callback', 2, LRecorder.Infos.Count);
+  finally
+    LPool := nil;
     LRecorder.Free;
   end;
 end;

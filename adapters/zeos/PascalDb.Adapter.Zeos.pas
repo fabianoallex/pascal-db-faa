@@ -219,7 +219,7 @@ type
   public
     constructor Create(const AConfig: IDatabaseConfig;
       const AContextTransactionProvider: IContextTransactionProvider = nil;
-      AOnPoolEvent: TPoolEventProc = nil);
+      AOnPoolEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil);
   end;
 
 /// A TZConnection (not connected) set up from Zeos-style Name=Value settings
@@ -705,9 +705,10 @@ end;
 { TZeosFactory }
 
 constructor TZeosFactory.Create(const AConfig: IDatabaseConfig;
-  const AContextTransactionProvider: IContextTransactionProvider; AOnPoolEvent: TPoolEventProc);
+  const AContextTransactionProvider: IContextTransactionProvider; AOnPoolEvent: TPoolEventProc;
+  AOnStatement: TStatementEventProc);
 begin
-  inherited Create(AConfig, TZeosProvider.Create, AContextTransactionProvider, AOnPoolEvent);
+  inherited Create(AConfig, TZeosProvider.Create, AContextTransactionProvider, AOnPoolEvent, AOnStatement);
 end;
 
 end.

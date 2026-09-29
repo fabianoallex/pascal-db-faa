@@ -48,7 +48,8 @@ interface
 uses
   Classes,
   SysUtils,
-  PascalDb.Interfaces;
+  PascalDb.Interfaces,
+  PascalDb.Pool;
 
 /// The factory the contract tests use; created (with a fresh, migrated
 /// database) on first call.
@@ -74,6 +75,11 @@ function UnreachableFactory: IDBFactory;
 /// first) with LockTimeoutMs set to AMs. A new one on each call, with no
 /// initial connections; nothing is created or dropped.
 function LockTimeoutFactory(AMs: Integer): IDBFactory;
+
+/// A factory for IntegrationFactory's database (call IntegrationFactory
+/// first) that reports every pooled statement to AOnStatement. A new one on
+/// each call; nothing is created or dropped.
+function StatementEventFactory(AOnStatement: TStatementEventProc): IDBFactory;
 
 implementation
 
@@ -388,9 +394,9 @@ begin
   end;
 end;
 
-function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
+function NewFactory(const AConfig: IDatabaseConfig; AOnStatement: TStatementEventProc = nil): IDBFactory;
 begin
-  Result := TZeosFactory.Create(AConfig);
+  Result := TZeosFactory.Create(AConfig, nil, nil, AOnStatement);
 end;
 
 {$ELSEIF DEFINED(FPC)}
@@ -480,9 +486,9 @@ begin
   end;
 end;
 
-function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
+function NewFactory(const AConfig: IDatabaseConfig; AOnStatement: TStatementEventProc = nil): IDBFactory;
 begin
-  Result := TSQLdbFactory.Create(AConfig);
+  Result := TSQLdbFactory.Create(AConfig, nil, nil, AOnStatement);
 end;
 
 {$ELSE}
@@ -616,9 +622,9 @@ begin
   end;
 end;
 
-function NewFactory(const AConfig: IDatabaseConfig): IDBFactory;
+function NewFactory(const AConfig: IDatabaseConfig; AOnStatement: TStatementEventProc = nil): IDBFactory;
 begin
-  Result := TFDFactory.Create(AConfig);
+  Result := TFDFactory.Create(AConfig, nil, nil, AOnStatement);
 end;
 
 {$IFEND}
@@ -691,6 +697,11 @@ begin
   LConfig := BuildConfig;
   LConfig.LockTimeoutMs := AMs;
   Result := NewFactory(LConfig);
+end;
+
+function StatementEventFactory(AOnStatement: TStatementEventProc): IDBFactory;
+begin
+  Result := NewFactory(BuildConfig, AOnStatement);
 end;
 
 var

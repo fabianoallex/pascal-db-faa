@@ -233,6 +233,11 @@ them the driver's quirks):
   conflict errors (expired lock wait, immediate lock conflict, update conflict, deadlock) into
   `ELockConflictException` through the adapter's `IsLockConflictError` override; each adapter
   applies `IDatabaseConfig.LockTimeoutMs` its own way (gotcha 32).
+- Statement events (`AOnStatement`, `TStatementInfo` in `PascalDb.Pool`) are raised by the
+  pool's `TQueryWrapper`, the one place every pooled `Open`/`ExecSql` goes through, so adapters
+  need nothing for them. Timed with `PdbTickUs`: `PdbTickMs` (`GetTickCount64`) moves in 15-16 ms
+  steps on Windows (measured). No parameter values on purpose (secrets in logs; `IParams` can't
+  list them).
 
 | Adapter | Compiler | Package / unit | Status |
 |---|---|---|---|

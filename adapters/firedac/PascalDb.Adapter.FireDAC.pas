@@ -201,7 +201,7 @@ type
   public
     constructor Create(const AConfig: IDatabaseConfig;
       const AContextTransactionProvider: IContextTransactionProvider = nil;
-      AOnPoolEvent: TPoolEventProc = nil);
+      AOnPoolEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil);
   end;
 
 /// Applies VendorLib to the FireDAC driver link of ADriverID (FB or PG), once
@@ -660,9 +660,10 @@ end;
 { TFDFactory }
 
 constructor TFDFactory.Create(const AConfig: IDatabaseConfig;
-  const AContextTransactionProvider: IContextTransactionProvider; AOnPoolEvent: TPoolEventProc);
+  const AContextTransactionProvider: IContextTransactionProvider; AOnPoolEvent: TPoolEventProc;
+  AOnStatement: TStatementEventProc);
 begin
-  inherited Create(AConfig, TFDProvider.Create, AContextTransactionProvider, AOnPoolEvent);
+  inherited Create(AConfig, TFDProvider.Create, AContextTransactionProvider, AOnPoolEvent, AOnStatement);
 end;
 
 initialization

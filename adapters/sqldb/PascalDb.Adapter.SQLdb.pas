@@ -166,7 +166,7 @@ type
   public
     constructor Create(const AConfig: IDatabaseConfig;
       const AContextTransactionProvider: IContextTransactionProvider = nil;
-      AOnPoolEvent: TPoolEventProc = nil);
+      AOnPoolEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil);
   end;
 
 /// Loads the client library of AConnectorType ('Firebird', 'PostgreSQL')
@@ -623,9 +623,10 @@ end;
 { TSQLdbFactory }
 
 constructor TSQLdbFactory.Create(const AConfig: IDatabaseConfig;
-  const AContextTransactionProvider: IContextTransactionProvider; AOnPoolEvent: TPoolEventProc);
+  const AContextTransactionProvider: IContextTransactionProvider; AOnPoolEvent: TPoolEventProc;
+  AOnStatement: TStatementEventProc);
 begin
-  inherited Create(AConfig, TSQLdbProvider.Create, AContextTransactionProvider, AOnPoolEvent);
+  inherited Create(AConfig, TSQLdbProvider.Create, AContextTransactionProvider, AOnPoolEvent, AOnStatement);
 end;
 
 procedure FreeLibraryLoaders;

@@ -203,6 +203,27 @@ type
   TPoolEventProc = {$IFDEF PASCALDB_FUNCREFS}reference to procedure(const AEvent: TPoolEvent)
     {$ELSE}procedure(const AEvent: TPoolEvent) of object{$ENDIF};
 
+  // One statement run through a pooled query (TQueryWrapper): Open or
+  // ExecSql, reported after it ends, successfully or not. Unlike TPoolEvent,
+  // this is the happy path, once per statement: it has its own callback
+  // (AOnStatement), nil by default, and costs nothing when unset.
+  TStatementKind = (skOpen, skExecSql);
+
+  TStatementInfo = record
+    Kind: TStatementKind;
+    Sql: string;           // the text the query ran, after SQL tags were processed
+    ElapsedUs: Int64;      // microseconds (PdbTickUs); for Open, includes fetching every row
+    Rows: Int64;           // Open: rows fetched (RecordCount); ExecSql: -1 (not reported yet)
+    ErrorClass: string;    // '' when it succeeded; otherwise the class the caller gets
+    ErrorMessage: string;  // (EDatabaseUnavailableException, ELockConflictException, the driver's)
+  end;
+
+  // See TPoolEventProc. Called on the thread that ran the statement; an
+  // exception it raises is swallowed (a broken logger must not fail the
+  // statement).
+  TStatementEventProc = {$IFDEF PASCALDB_FUNCREFS}reference to procedure(const AInfo: TStatementInfo)
+    {$ELSE}procedure(const AInfo: TStatementInfo) of object{$ENDIF};
+
   { TConnectionPool }
 
   TConnectionPool = class(TInterfacedObject, IDBConnectionPool, IDBConnectionPoolInternalActions)
@@ -222,6 +243,7 @@ type
     FIdleSweepThread: TThread;
     FIdleSweepWake: TEvent;
     FOnEvent: TPoolEventProc;
+    FOnStatement: TStatementEventProc;
     FTotalCreated: Int64;
     FTotalDiscarded: Int64;
     FTotalTimeouts: Int64;
@@ -249,8 +271,10 @@ type
     // AOnEvent is optional — without it, the pool simply doesn't notify
     // anything (see the comment on TPoolEventKind for why there is no
     // console fallback here, unlike TDBMigrationEngine).
+    // AOnStatement is optional too: when set, every Open/ExecSql of a query
+    // from AcquireQuery reports a TStatementInfo when it ends.
     constructor Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig = nil;
-      AOnEvent: TPoolEventProc = nil);
+      AOnEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil);
     destructor Destroy; override;
     function AcquireConnection: IDBConnection;
     function AcquireQuery(out AQuery: IQuery; ATransaction: ITransaction = nil): IScopeTransaction;
@@ -357,8 +381,12 @@ type
   private
     FPool: IDBConnectionPoolInternalActions;
     FInternalQuery: IQuery;
+    FOnStatement: TStatementEventProc;
+    procedure NotifyStatement(AKind: TStatementKind; AStartUs: Int64; ARows: Int64;
+      AError: Exception);
   public
-    constructor Create(APool: IDBConnectionPoolInternalActions; ARealQuery: IQuery);
+    constructor Create(APool: IDBConnectionPoolInternalActions; ARealQuery: IQuery;
+      AOnStatement: TStatementEventProc = nil);
     destructor Destroy; override;
     procedure Close;
     procedure ExecSql;
@@ -416,10 +444,39 @@ type
 
 { TQueryWrapper }
 
-constructor TQueryWrapper.Create(APool: IDBConnectionPoolInternalActions; ARealQuery: IQuery);
+constructor TQueryWrapper.Create(APool: IDBConnectionPoolInternalActions; ARealQuery: IQuery;
+  AOnStatement: TStatementEventProc);
 begin
   FPool := APool;
   FInternalQuery := ARealQuery;
+  FOnStatement := AOnStatement;
+end;
+
+procedure TQueryWrapper.NotifyStatement(AKind: TStatementKind; AStartUs: Int64; ARows: Int64;
+  AError: Exception);
+var
+  LInfo: TStatementInfo;
+begin
+  LInfo.Kind := AKind;
+  LInfo.ElapsedUs := PdbTickUs - AStartUs;
+  LInfo.Rows := ARows;
+  if Assigned(AError) then
+  begin
+    LInfo.ErrorClass := AError.ClassName;
+    LInfo.ErrorMessage := AError.Message;
+  end
+  else
+  begin
+    LInfo.ErrorClass := '';
+    LInfo.ErrorMessage := '';
+  end;
+  try
+    // TrimRight: a dataset's SQL text ends with a line break.
+    LInfo.Sql := TrimRight(FInternalQuery.GetSql);
+    FOnStatement(LInfo);
+  except
+    // See TStatementEventProc: never fail the statement because of the callback.
+  end;
 end;
 
 destructor TQueryWrapper.Destroy;
@@ -437,7 +494,11 @@ end;
 procedure TQueryWrapper.ExecSql;
 var
   LNewE: Exception;
+  LStartUs: Int64;
 begin
+  LStartUs := 0;
+  if Assigned(FOnStatement) then
+    LStartUs := PdbTickUs;
   try
     FInternalQuery.ExecSql;
   except
@@ -449,11 +510,18 @@ begin
       // It is only safe to raise a NEW exception (LNewE) or a bare "raise;",
       // lexically inside this very except block.
       LNewE := BuildDatabaseException(FInternalQuery.GetConnection, E);
+      if Assigned(FOnStatement) then
+        if Assigned(LNewE) then
+          NotifyStatement(skExecSql, LStartUs, -1, LNewE)
+        else
+          NotifyStatement(skExecSql, LStartUs, -1, E);
       if Assigned(LNewE) then
         raise LNewE;
       raise;
     end;
   end;
+  if Assigned(FOnStatement) then
+    NotifyStatement(skExecSql, LStartUs, -1, nil);
 end;
 
 function TQueryWrapper.GetConnection: IDBConnection;
@@ -480,7 +548,12 @@ function TQueryWrapper.Open: IQueryResult;
 var
   LRawResult: IQueryResult;
   LNewE: Exception;
+  LStartUs: Int64;
+  LRows: Int64;
 begin
+  LStartUs := 0;
+  if Assigned(FOnStatement) then
+    LStartUs := PdbTickUs;
   try
     LRawResult := FInternalQuery.Open;
   except
@@ -492,10 +565,27 @@ begin
       // constraint violations and other normal data errors re-raise E as is.
       // Never "raise E;" here (see the comment in TQueryWrapper.ExecSql).
       LNewE := BuildDatabaseException(FInternalQuery.GetConnection, E);
+      if Assigned(FOnStatement) then
+        if Assigned(LNewE) then
+          NotifyStatement(skOpen, LStartUs, -1, LNewE)
+        else
+          NotifyStatement(skOpen, LStartUs, -1, E);
       if Assigned(LNewE) then
         raise LNewE;
       raise;
     end;
+  end;
+  if Assigned(FOnStatement) then
+  begin
+    // Every adapter fetches the whole result on Open: RecordCount is exact.
+    LRows := -1;
+    if Assigned(LRawResult) then
+    try
+      LRows := LRawResult.RecordCount;
+    except
+      // reading it failed: the statement itself worked, report no count
+    end;
+    NotifyStatement(skOpen, LStartUs, LRows, nil);
   end;
   // The raw result doesn't go through any pool wrapper — without this, an AV
   // while reading fields (e.g. the server went down mid-fetch, after Open had
@@ -997,7 +1087,7 @@ end;
 { TConnectionPool }
 
 constructor TConnectionPool.Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig;
-  AOnEvent: TPoolEventProc);
+  AOnEvent: TPoolEventProc; AOnStatement: TStatementEventProc);
 
   // Weak reference to break the TConnectionPool <-> IDBFactory reference cycle
   procedure SetWeak(aInterfaceField: PInterface; const aValue: IInterface);
@@ -1007,6 +1097,7 @@ constructor TConnectionPool.Create(AFactory: IDBFactory; AConfig: IConnectionPoo
 
 begin
   FOnEvent := AOnEvent;
+  FOnStatement := AOnStatement;
 
   if Assigned(AConfig) then
   begin
@@ -1510,7 +1601,7 @@ begin
   end;
 
   RealQuery := FFactory.CreateQuery(LConn, LTransaction);
-  AQuery := TQueryWrapper.Create(Self, RealQuery);
+  AQuery := TQueryWrapper.Create(Self, RealQuery, FOnStatement);
   Result := FFactory.CreateScopeTransaction(LTransaction);
 end;
 

@@ -106,6 +106,57 @@ state plus counters since the pool was created:
 Events answer "what just happened"; the snapshot answers "how much, so far, and how does it
 look now".
 
+## Statement events
+
+To see what runs (which SQL, how long it took, how many rows, what failed), pass a statement
+handler after the pool one. It is called after every `Open` and `ExecSql` of a query from
+`AcquireQuery`, whether it worked or not:
+
+```pascal
+type
+  TSqlLog = class
+    procedure OnStatement(const AInfo: TStatementInfo);
+  end;
+
+procedure TSqlLog.OnStatement(const AInfo: TStatementInfo);
+begin
+  if AInfo.ErrorClass <> '' then
+    MyLog.Error(Format('%s failed after %.1f ms: %s', [AInfo.Sql, AInfo.ElapsedUs / 1000, AInfo.ErrorMessage]))
+  else if AInfo.ElapsedUs > 500000 then  // 0.5 s
+    MyLog.Warn(Format('slow: %.1f ms, %d rows: %s', [AInfo.ElapsedUs / 1000, AInfo.Rows, AInfo.Sql]));
+end;
+
+LFactory := TSQLdbFactory.Create(LConfig, nil, LMonitor.OnPoolEvent, LSqlLog.OnStatement);
+```
+
+| `TStatementInfo` field | |
+|---|---|
+| `Kind` | `skOpen` or `skExecSql` |
+| `Sql` | the text the query ran, after the SQL tags were processed (not the loader's key: the query never sees it) |
+| `ElapsedUs` | microseconds; for `Open`, including fetching every row (what the caller waited) |
+| `Rows` | `Open`: the rows fetched; `ExecSql`: -1 (rows affected aren't reported) |
+| `ErrorClass`, `ErrorMessage` | empty when it worked; otherwise the class and message the caller gets (`EDatabaseUnavailableException`, `ELockConflictException` or the driver's own) |
+
+- **Once per statement, on the happy path too.** That is why it has its own handler, apart from
+  the pool events: without one there is no cost. With one, the handler runs inside every call,
+  so keep it cheap; filter there (a threshold, only errors) instead of writing every statement.
+- **On the thread that ran the statement.** Make the handler thread-safe. It also means the
+  handler can read the caller's own context (the current request, a tenant in a `threadvar`)
+  to tag the line: the library knows nothing about it.
+- **An exception in the handler is swallowed**: a logger that fails doesn't fail the
+  statement, nor replaces its exception.
+- **No parameter values.** They would put passwords, tokens and personal data in the logs, and
+  `IParams` has no way to list them; the SQL text has the placeholders.
+- **Only pooled queries.** A query from `IDBFactory.CreateQuery`, outside the pool, and the mock
+  factory's queries aren't reported.
+- Time is measured with `PdbTickUs` (`PascalDb.Threading`): on Windows `GetTickCount64` advances
+  in 15-16 ms steps (measured), too coarse for a statement that takes 2 ms.
+
+For production, the database's own tools see every client and the query plans: PostgreSQL's
+`log_min_duration_statement` and `pg_stat_statements`, Firebird's trace API and
+`MON$STATEMENTS`. This handler is the portable, in-program view; SQLite has no server-side
+equivalent.
+
 ## Threads
 
 The pool and the factory are meant to be shared by every thread. A connection, a query and a
