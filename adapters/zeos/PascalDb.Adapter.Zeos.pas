@@ -7,8 +7,11 @@
   PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
-    Protocol         Zeos protocol (required): 'firebird', 'postgresql' and
-                     'sqlite' are the ones tested; any other Zeos protocol
+    Protocol         Zeos protocol (required): 'firebird', 'postgresql',
+                     'sqlite', 'mysql' and 'mariadb' are the ones tested
+                     (the last two load the same client libraries: MySQL's
+                     libmysql or MariaDB Connector/C's libmariadb); any other
+                     Zeos protocol
                      is passed through, with an SQL dialect registered for
                      it (docs/other-databases.md). 'firebird' uses the Firebird 3+ API when
                      the client library has it and the legacy API otherwise
@@ -17,10 +20,12 @@
                      SQLite)
     Port             server port (optional)
     Database         database path (Firebird, SQLite: the file, created on
-                     first connect) or name (PostgreSQL)
+                     first connect) or name (PostgreSQL, MySQL/MariaDB)
     User, Password
-    ClientCodepage   connection character set (e.g. UTF8)
-    LibraryLocation  full path of the client library (fbclient/libpq/sqlite3) when
+    ClientCodepage   connection character set (e.g. UTF8; MySQL/MariaDB:
+                     utf8mb4, since their utf8 has no 4-byte characters)
+    LibraryLocation  full path of the client library (fbclient/libpq/sqlite3/
+                     libmysql/libmariadb) when
                      it isn't found on the default search path (optional)
   Any other line goes to TZConnection.Properties as is (Zeos connection
   properties, e.g. CreateNewDatabase=true).
@@ -80,14 +85,19 @@
   - IDatabaseConfig.LockTimeoutMs: Firebird gets isc_tpb_wait and
     isc_tpb_lock_timeout (whole seconds, rounded up) in its transaction
     parameters; PostgreSQL a SET lock_timeout right after connecting (one
-    server session per TZConnection); SQLite the busy timeout. Without it,
+    server session per TZConnection); MySQL/MariaDB a SET SESSION
+    innodb_lock_wait_timeout (whole seconds, rounded up; the server's own
+    default is 50 s); SQLite the busy timeout. Without it,
     Zeos on Firebird doesn't wait for a lock at all: the read-committed TPB
     it builds is isc_tpb_nowait, so a statement meeting another
     transaction's lock fails at once (measured, Firebird 2.5), and that
     error is an ELockConflictException too. The driver's lock conflict
     errors (Firebird GDS isc_lock_timeout, isc_lock_conflict, isc_deadlock
     and isc_update_conflict; PostgreSQL SQLSTATE 55P03, 40P01 and 40001;
-    SQLite SQLITE_BUSY and SQLITE_LOCKED) become ELockConflictException.
+    MySQL/MariaDB ER_LOCK_WAIT_TIMEOUT and ER_LOCK_DEADLOCK; SQLite
+    SQLITE_BUSY and SQLITE_LOCKED) become ELockConflictException. On
+    MySQL/MariaDB an expired lock wait undoes only the statement, not the
+    transaction (unless the server runs with innodb_rollback_on_timeout).
     Firebird 5 reports an expired lock timeout as isc_deadlock (measured on
     Linux, Firebird 3 client API). }
 
@@ -247,10 +257,17 @@ const
   PG_LOCK_NOT_AVAILABLE = '55P03';
   PG_DEADLOCK_DETECTED = '40P01';
   PG_SERIALIZATION_FAILURE = '40001';
+  MYSQL_ER_LOCK_WAIT_TIMEOUT = 1205; // mysqld_error.h: "Lock wait timeout exceeded"
+  MYSQL_ER_LOCK_DEADLOCK = 1213;     // mysqld_error.h: "Deadlock found when trying to get lock"
 
 function IsProtocol(AConn: TZConnection; const APrefix: string): Boolean;
 begin
   Result := SameText(Copy(AConn.Protocol, 1, Length(APrefix)), APrefix);
+end;
+
+function IsMySQLProtocol(AConn: TZConnection): Boolean;
+begin
+  Result := IsProtocol(AConn, 'mysql') or IsProtocol(AConn, 'mariadb');
 end;
 
 // See the unit header: the lock timeout settings Zeos takes before connecting.
@@ -269,11 +286,16 @@ begin
     AConn.Properties.Values['busytimeout'] := IntToStr(AMs);
 end;
 
-// See the unit header: PostgreSQL's lock timeout is set on the open session.
+// See the unit header: PostgreSQL's and MySQL's lock timeouts are set on the
+// open session.
 procedure ApplyZeosLockTimeout(AConn: TZConnection; AMs: Integer);
 begin
-  if (AMs > 0) and IsProtocol(AConn, 'postgresql') then
-    AConn.ExecuteDirect('SET lock_timeout = ' + IntToStr(AMs));
+  if AMs <= 0 then
+    Exit;
+  if IsProtocol(AConn, 'postgresql') then
+    AConn.ExecuteDirect('SET lock_timeout = ' + IntToStr(AMs))
+  else if IsMySQLProtocol(AConn) then
+    AConn.ExecuteDirect('SET SESSION innodb_lock_wait_timeout = ' + IntToStr((AMs + 999) div 1000));
 end;
 
 // See the unit header: the driver's lock conflict errors.
@@ -297,6 +319,9 @@ begin
     Result := (LState = PG_LOCK_NOT_AVAILABLE) or (LState = PG_DEADLOCK_DETECTED) or
       (LState = PG_SERIALIZATION_FAILURE);
   end
+  else if IsMySQLProtocol(AConn) then
+    Result := (EZSQLThrowable(E).ErrorCode = MYSQL_ER_LOCK_WAIT_TIMEOUT) or
+      (EZSQLThrowable(E).ErrorCode = MYSQL_ER_LOCK_DEADLOCK)
   else if IsProtocol(AConn, 'sqlite') then
     Result := (EZSQLThrowable(E).ErrorCode = SQLITE_BUSY) or (EZSQLThrowable(E).ErrorCode = SQLITE_LOCKED);
 end;

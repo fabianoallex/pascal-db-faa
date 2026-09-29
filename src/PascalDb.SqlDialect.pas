@@ -5,9 +5,10 @@
 { SQL differences between databases that the library itself has to generate:
   savepoints (create, roll back to, release) via ISQLDialect, and the queries
   on the migrations control table via IMigrationDialect. Implementations for
-  PostgreSQL, Firebird and SQLite, registered in this unit's initialization
-  section under the names 'PostgreSQL', 'Firebird' and 'SQLite'; adapters
-  resolve the dialect
+  PostgreSQL, Firebird, SQLite and MySQL/MariaDB, registered in this unit's
+  initialization section under the names 'PostgreSQL', 'Firebird', 'SQLite',
+  'MySQL' and 'MariaDB' (the last two are the same class); adapters resolve
+  the dialect
   with TSQLDialectFactory.GetDialect(Config.SQLDialect). New database:
   RegisterDialect(Name, Class) in the application's composition root.
   Names are matched ignoring case, like the drivers' own names ('firebird'
@@ -78,6 +79,27 @@ type
     in sqlite_master. }
 
   TSQLiteDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
+  public
+    function GetReleaseSavepointSQL(const AName: string): string;
+    function GetRollbackToSavepointSQL(const AName: string): string;
+    function GetSavepointSQL(const AName: string): string;
+    function SupportsRelease: Boolean;
+    function GetPingSQL: string;
+    function GetMigrationTableExistsSQL: string;
+    function GetMigrationLastVersionSQL: string;
+    function GetMigrationInsertVersionSQL: string;
+  end;
+
+  { TMySQLDialect
+    MySQL and MariaDB: savepoints as in the SQL standard. Whether table names
+    are case-sensitive depends on the server (lower_case_table_names: 0 on
+    Linux, 1 on Windows), so the control table is looked up
+    case-insensitively in information_schema and always written
+    SCHEMA_MIGRATIONS, as the migrations create it (docs/migrations.md).
+    Double quotes delimit strings unless ANSI_QUOTES is on: the column alias
+    goes in backticks. }
+
+  TMySQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -289,9 +311,58 @@ begin
     'VALUES (:VERSION, CURRENT_TIMESTAMP)';
 end;
 
+{ TMySQLDialect }
+
+function TMySQLDialect.GetReleaseSavepointSQL(const AName: string): string;
+begin
+  Result := Format('RELEASE SAVEPOINT %s', [AName]);
+end;
+
+function TMySQLDialect.GetRollbackToSavepointSQL(const AName: string): string;
+begin
+  Result := Format('ROLLBACK TO SAVEPOINT %s', [AName]);
+end;
+
+function TMySQLDialect.GetSavepointSQL(const AName: string): string;
+begin
+  Result := Format('SAVEPOINT %s', [AName]);
+end;
+
+function TMySQLDialect.SupportsRelease: Boolean;
+begin
+  Result := True;
+end;
+
+function TMySQLDialect.GetPingSQL: string;
+begin
+  Result := 'SELECT 1';
+end;
+
+function TMySQLDialect.GetMigrationTableExistsSQL: string;
+begin
+  Result :=
+    'SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END AS `EXISTS` ' +
+    'FROM information_schema.tables ' +
+    'WHERE table_schema = DATABASE() AND LOWER(table_name) = ''schema_migrations''';
+end;
+
+function TMySQLDialect.GetMigrationLastVersionSQL: string;
+begin
+  Result := 'SELECT COALESCE(MAX(VERSION), 0) AS VERSION FROM SCHEMA_MIGRATIONS';
+end;
+
+function TMySQLDialect.GetMigrationInsertVersionSQL: string;
+begin
+  Result :=
+    'INSERT INTO SCHEMA_MIGRATIONS (VERSION, APPLIED_AT) ' +
+    'VALUES (:VERSION, CURRENT_TIMESTAMP)';
+end;
+
 initialization
   TSQLDialectFactory.RegisterDialect('PostgreSQL', TPostgreSQLDialect);
   TSQLDialectFactory.RegisterDialect('Firebird', TFirebirdDialect);
   TSQLDialectFactory.RegisterDialect('SQLite', TSQLiteDialect);
+  TSQLDialectFactory.RegisterDialect('MySQL', TMySQLDialect);
+  TSQLDialectFactory.RegisterDialect('MariaDB', TMySQLDialect);
 
 end.

@@ -3,17 +3,20 @@
 # database server container plus an FPC container on a private Docker network
 # (SQLite needs no server: its database is a file inside the FPC container).
 # The FPC container installs the client library from Debian (libfbclient2,
-# libpq5 or libsqlite3-0), builds the suite with plain fpc and runs it with
+# libpq5, libsqlite3-0 or libmariadb3, MariaDB Connector/C, which also talks to
+# MySQL servers), builds the suite with plain fpc and runs it with
 # heaptrc. Everything is removed at the end, even on failure. Acceptance:
 # 0 errors, 0 failures, 0 unfreed blocks.
 #
-# ENGINE:    firebird (default), postgresql or sqlite
-# ADAPTER:   sqldb (default) or zeos
+# ENGINE:    firebird (default), postgresql, sqlite, mysql or mariadb
+# ADAPTER:   sqldb (default) or zeos (mysql and mariadb: zeos only, so far)
 # ZEOSDBO:   ADAPTER=zeos only: the ZeosLib 8 folder (the one containing
 #            src/core, src/dbc, ...), mounted read-only into the FPC container
 # FPC_IMAGE: an image with FPC 3.2.2 (default: fpc322-bookworm)
 # FB_IMAGE:  Firebird server image (default: firebirdsql/firebird:5)
 # PG_IMAGE:  PostgreSQL server image (default: postgres:17)
+# MYSQL_IMAGE:   MySQL server image (default: mysql:8.4)
+# MARIADB_IMAGE: MariaDB server image (default: mariadb:11.4)
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE="${ENGINE:-firebird}"
@@ -21,6 +24,8 @@ ADAPTER="${ADAPTER:-sqldb}"
 FPC_IMAGE="${FPC_IMAGE:-fpc322-bookworm}"
 FB_IMAGE="${FB_IMAGE:-firebirdsql/firebird:5}"
 PG_IMAGE="${PG_IMAGE:-postgres:17}"
+MYSQL_IMAGE="${MYSQL_IMAGE:-mysql:8.4}"
+MARIADB_IMAGE="${MARIADB_IMAGE:-mariadb:11.4}"
 NET=pascaldb-it-net
 DB=pascaldb-it-db
 MOUNT="$ROOT"
@@ -39,7 +44,16 @@ case "$ENGINE" in
     SERVER_IMAGE=""; SERVER_ENV=""
     CLIENT_PKG=libsqlite3-0; CLIENT_GLOB='/usr/lib/*/libsqlite3.so.0'; DB_PORT=""
     IT_DATABASE=/t/pascaldb_it.sqlite; IT_PASSWORD="" ;;
-  *) echo "ENGINE must be firebird, postgresql or sqlite" >&2; exit 2 ;;
+  mysql|mariadb)
+    if [ "$ENGINE" = mysql ]; then
+      SERVER_IMAGE="$MYSQL_IMAGE"; SERVER_ENV="MYSQL_ROOT_PASSWORD=root"
+    else
+      SERVER_IMAGE="$MARIADB_IMAGE"; SERVER_ENV="MARIADB_ROOT_PASSWORD=root"
+    fi
+    CLIENT_PKG=libmariadb3; CLIENT_GLOB='/usr/lib/*/libmariadb.so.3'; DB_PORT=3306
+    IT_DATABASE=pascaldb_it; IT_PASSWORD=root
+    [ "$ADAPTER" = zeos ] || { echo "ENGINE=$ENGINE: ADAPTER=zeos only, so far" >&2; exit 2; } ;;
+  *) echo "ENGINE must be firebird, postgresql, sqlite, mysql or mariadb" >&2; exit 2 ;;
 esac
 
 ZEOS_MOUNT=""
@@ -91,7 +105,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src $ADAPTER_OPTS -Fu.. -FU/t/u -gh -gl -o/t/runner \
     $RUNNER > /t/build.log 2>&1 || { grep -iE "error|fatal" /t/build.log | head -30; exit 1; }
   if [ -n "$DB_PORT" ]; then
-    for i in $(seq 1 60); do (echo > /dev/tcp/$PASCALDB_IT_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
+    for i in $(seq 1 180); do (echo > /dev/tcp/$PASCALDB_IT_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
   fi
   cd /t
   HEAPTRC="log=/t/heap.txt" ./runner --all --format=plain > /t/run.log 2>&1 || true

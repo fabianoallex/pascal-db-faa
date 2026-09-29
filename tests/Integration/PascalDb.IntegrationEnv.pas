@@ -1,7 +1,7 @@
 ﻿unit PascalDb.IntegrationEnv;
 
 { The integration suite's environment: a fresh database per run (Firebird,
-  PostgreSQL or SQLite), migrated with the library's own migration engine, and the
+  PostgreSQL, SQLite, MySQL or MariaDB), migrated with the library's own migration engine, and the
   IDBFactory the contract tests run against. This is the only
   adapter-specific part of the integration suite: on FPC the factory is the
   SQLdb adapter's; on Delphi it is the FireDAC adapter's; with
@@ -10,22 +10,25 @@
   the same test bodies validate every adapter on every database.
 
   Settings (environment variables, all optional):
-    PASCALDB_IT_ENGINE    firebird (default), postgresql or sqlite
+    PASCALDB_IT_ENGINE    firebird (default), postgresql, sqlite, mysql or
+                          mariadb (the last two: Zeos runners only, so far)
     PASCALDB_IT_HOST      server host (default localhost, over TCP). Firebird:
                           'local' = the local protocol (path only), which
                           fails intermittently with concurrent connections on
                           Firebird 2.5 (CLAUDE.md, gotcha 29). Unused by
                           SQLite
-    PASCALDB_IT_PORT      server port (default: the driver's; PostgreSQL 5432)
+    PASCALDB_IT_PORT      server port (default: the driver's; PostgreSQL 5432,
+                          MySQL/MariaDB 3306)
     PASCALDB_IT_DATABASE  Firebird: database path on the server (default:
                           pascaldb_it.fdb next to the executable).
-                          PostgreSQL: database name (default pascaldb_it).
+                          PostgreSQL, MySQL, MariaDB: database name
+                          (default pascaldb_it).
                           SQLite: database file (default pascaldb_it.sqlite
                           next to the executable)
-    PASCALDB_IT_USER      default SYSDBA / postgres
-    PASCALDB_IT_PASSWORD  default masterkey / postgres
+    PASCALDB_IT_USER      default SYSDBA / postgres / root (MySQL, MariaDB)
+    PASCALDB_IT_PASSWORD  default masterkey / postgres / root
     PASCALDB_IT_CLIENT    full path of the client library
-                          (fbclient/libpq/sqlite3). When empty on Windows:
+                          (fbclient/libpq/sqlite3/libmysql/libmariadb). When empty on Windows:
                           Firebird, the client of a default Firebird 2.5
                           64-bit install that matches the executable's
                           bitness (bin or WOW64); PostgreSQL (64-bit only),
@@ -35,8 +38,9 @@
                           the program: no client library.
 
   The database is dropped (if it exists) and created on first use, and
-  dropped again at the end of the run. PostgreSQL databases are created and
-  dropped with SQL through a maintenance database, outside any transaction.
+  dropped again at the end of the run. PostgreSQL, MySQL and MariaDB
+  databases are created and dropped with SQL through a maintenance database
+  (postgres; mysql), outside any transaction.
   A SQLite database is a file: the first connection creates it, and dropping
   it is deleting the file (with its -journal/-wal/-shm companions).
   Zeos has no call of its own to drop a Firebird database; the Zeos runners
@@ -57,6 +61,10 @@ function IntegrationFactory: IDBFactory;
 
 /// Number of migrations IntegrationFactory applies.
 function IntegrationSchemaVersion: Integer;
+
+/// Whether the database has INSERT ... RETURNING (MySQL doesn't; MariaDB has
+/// it since 10.5).
+function SupportsReturning: Boolean;
 
 /// A SELECT returning the server's id of the current session in column SID,
 /// or '' when the database has no such thing (SQLite: no server).
@@ -109,8 +117,10 @@ const
     {$ELSE}'C:\Program Files\Firebird\Firebird_2_5\WOW64\fbclient.dll'{$IFEND};
   // PostgreSQL ships no 32-bit Windows client: 64-bit test executables only.
   PG_INSTALL_ROOT = 'C:\Program Files\PostgreSQL\';
-  // The database PostgreSQL connections use to create/drop the test database.
+  // The databases PostgreSQL and MySQL/MariaDB connections use to create/drop
+  // the test database.
   PG_MAINTENANCE_DB = 'postgres';
+  MYSQL_MAINTENANCE_DB = 'mysql';
 
 var
   GFactory: IDBFactory = nil;
@@ -123,7 +133,7 @@ begin
 end;
 
 type
-  TEngine = (engFirebird, engPostgres, engSQLite);
+  TEngine = (engFirebird, engPostgres, engSQLite, engMySQL, engMariaDB);
 
 function Engine: TEngine;
 var
@@ -136,8 +146,12 @@ begin
     Result := engPostgres
   else if LEngine = 'sqlite' then
     Result := engSQLite
+  else if LEngine = 'mysql' then
+    Result := engMySQL
+  else if LEngine = 'mariadb' then
+    Result := engMariaDB
   else
-    raise Exception.CreateFmt('PASCALDB_IT_ENGINE must be firebird, postgresql or sqlite, not "%s"', [LEngine]);
+    raise Exception.CreateFmt('PASCALDB_IT_ENGINE must be firebird, postgresql, sqlite, mysql or mariadb, not "%s"', [LEngine]);
 end;
 
 function IsPostgres: Boolean;
@@ -148,6 +162,17 @@ end;
 function IsSQLite: Boolean;
 begin
   Result := Engine = engSQLite;
+end;
+
+// MySQL or MariaDB: same SQL, same client libraries, same dialect class.
+function IsMySQL: Boolean;
+begin
+  Result := Engine in [engMySQL, engMariaDB];
+end;
+
+function SupportsReturning: Boolean;
+begin
+  Result := Engine <> engMySQL;
 end;
 
 function Host: string;
@@ -169,7 +194,7 @@ end;
 function DatabaseName: string;
 begin
   case Engine of
-    engPostgres: Result := Env('PASCALDB_IT_DATABASE', 'pascaldb_it');
+    engPostgres, engMySQL, engMariaDB: Result := Env('PASCALDB_IT_DATABASE', 'pascaldb_it');
     engSQLite: Result := Env('PASCALDB_IT_DATABASE', ExtractFilePath(ParamStr(0)) + 'pascaldb_it.sqlite');
   else
     Result := Env('PASCALDB_IT_DATABASE', ExtractFilePath(ParamStr(0)) + 'pascaldb_it.fdb');
@@ -192,6 +217,8 @@ function UserName: string;
 begin
   if IsPostgres then
     Result := Env('PASCALDB_IT_USER', 'postgres')
+  else if IsMySQL then
+    Result := Env('PASCALDB_IT_USER', 'root')
   else
     Result := Env('PASCALDB_IT_USER', 'SYSDBA');
 end;
@@ -200,6 +227,8 @@ function Password: string;
 begin
   if IsPostgres then
     Result := Env('PASCALDB_IT_PASSWORD', 'postgres')
+  else if IsMySQL then
+    Result := Env('PASCALDB_IT_PASSWORD', 'root')
   else
     Result := Env('PASCALDB_IT_PASSWORD', 'masterkey');
 end;
@@ -257,7 +286,8 @@ var
 begin
   // Firebird: the text columns are declared UTF8 (the database default
   // character set is NONE). PostgreSQL: the database encoding (UTF8 in the
-  // official images) applies to every column. SQLite stores text as UTF-8.
+  // official images) applies to every column; MySQL/MariaDB: the database's
+  // (created utf8mb4). SQLite stores text as UTF-8.
   if Engine = engFirebird then
     LUtf8 := ' CHARACTER SET UTF8'
   else
@@ -286,8 +316,7 @@ begin
       'INSERT INTO ITEMS (ID, NAME, QTY, BIG, PRICE, RATIO, CREATED_AT, ACTIVE' +
       '  [NOTE {], NOTE [} NOTE])' +
       ' VALUES (:ID, :NAME, :QTY, :BIG, :PRICE, :RATIO, :CREATED_AT, :ACTIVE' +
-      '  [NOTE {], :NOTE [} NOTE])' +
-      ' RETURNING ID, NOTE')
+      '  [NOTE {], :NOTE [} NOTE])')
     .Add(SQL_DIRECTORY, 'ITEMS.BY_ID', 'SELECT * FROM ITEMS WHERE ID = :ID');
 end;
 
@@ -302,6 +331,8 @@ begin
   case Engine of
     engPostgres: AParams.Values['Protocol'] := 'postgresql';
     engSQLite: AParams.Values['Protocol'] := 'sqlite';
+    engMySQL: AParams.Values['Protocol'] := 'mysql';
+    engMariaDB: AParams.Values['Protocol'] := 'mariadb';
   else
     AParams.Values['Protocol'] := 'firebird';
   end;
@@ -310,12 +341,15 @@ begin
   AParams.Values['Database'] := ADatabase;
   AParams.Values['User'] := UserName;
   AParams.Values['Password'] := Password;
-  AParams.Values['ClientCodepage'] := 'UTF8';
+  if IsMySQL then
+    AParams.Values['ClientCodepage'] := 'utf8mb4'
+  else
+    AParams.Values['ClientCodepage'] := 'UTF8';
   AParams.Values['LibraryLocation'] := ClientLibrary;
 end;
 
-// PostgreSQL: CREATE/DROP DATABASE through the maintenance database, with
-// the connection in auto-commit (TZConnection's default).
+// PostgreSQL, MySQL, MariaDB: CREATE/DROP DATABASE through the maintenance
+// database, with the connection in auto-commit (TZConnection's default).
 procedure ExecOnMaintenanceDb(const ASql: string);
 var
   LSettings: TStringList;
@@ -323,7 +357,10 @@ var
 begin
   LSettings := TStringList.Create;
   try
-    SetConnectionParams(LSettings, PG_MAINTENANCE_DB);
+    if IsMySQL then
+      SetConnectionParams(LSettings, MYSQL_MAINTENANCE_DB)
+    else
+      SetConnectionParams(LSettings, PG_MAINTENANCE_DB);
     LConn := PdbZeosNewConnection(LSettings);
   finally
     LSettings.Free;
@@ -344,7 +381,7 @@ begin
     DeleteSQLiteFiles;
     Exit;
   end;
-  if IsPostgres then
+  if IsPostgres or IsMySQL then
   begin
     try
       ExecOnMaintenanceDb('DROP DATABASE IF EXISTS ' + DatabaseName);
@@ -379,6 +416,8 @@ begin
   end;
   if IsPostgres then
     ExecOnMaintenanceDb('CREATE DATABASE ' + DatabaseName)
+  else if IsMySQL then
+    ExecOnMaintenanceDb('CREATE DATABASE ' + DatabaseName + ' CHARACTER SET utf8mb4')
   else
   begin
     if (Host = '') and FileExists(DatabaseName) then
@@ -404,6 +443,8 @@ end;
 procedure SetConnectionParams(AParams: TStrings; const ADatabase: string);
 begin
   // SQLdb connection settings (see PascalDb.Adapter.SQLdb)
+  if IsMySQL then
+    raise Exception.Create('PASCALDB_IT_ENGINE=mysql/mariadb: only the Zeos runners support it so far');
   case Engine of
     engPostgres: AParams.Values['ConnectorType'] := 'PostgreSQL';
     engSQLite: AParams.Values['ConnectorType'] := 'SQLite3';
@@ -496,6 +537,8 @@ end;
 procedure SetConnectionParams(AParams: TStrings; const ADatabase: string);
 begin
   // FireDAC connection definition (see PascalDb.Adapter.FireDAC)
+  if IsMySQL then
+    raise Exception.Create('PASCALDB_IT_ENGINE=mysql/mariadb: only the Zeos runners support it so far');
   if IsSQLite then
   begin
     // No server, credentials or client library: the engine is in the program.
@@ -636,6 +679,8 @@ begin
   case Engine of
     engPostgres: Result.SQLDialect := 'PostgreSQL';
     engSQLite: Result.SQLDialect := 'SQLite';
+    engMySQL: Result.SQLDialect := 'MySQL';
+    engMariaDB: Result.SQLDialect := 'MariaDB';
   else
     Result.SQLDialect := 'Firebird';
   end;
@@ -655,6 +700,7 @@ begin
   case Engine of
     engPostgres: Result := 'SELECT pg_backend_pid() AS SID';
     engSQLite: Result := '';
+    engMySQL, engMariaDB: Result := 'SELECT CONNECTION_ID() AS SID';
   else
     Result := 'SELECT CURRENT_CONNECTION AS SID FROM RDB$DATABASE';
   end;

@@ -6,13 +6,14 @@
   tests/Unit/PascalDb.ContractTests.pas (DUnitX). Do not edit by hand: edit the DUnitX
   master and run the script again. }
 
-{ Contract tests for an adapter, against a real Firebird or PostgreSQL
-  database (PascalDb.IntegrationEnv, PASCALDB_IT_ENGINE): only
+{ Contract tests for an adapter, against a real Firebird, PostgreSQL, SQLite,
+  MySQL or MariaDB database (PascalDb.IntegrationEnv, PASCALDB_IT_ENGINE): only
   IDBFactory, IQuery, IParams, IQueryResult and the scope transactions are
   used, so the same bodies validate every adapter (the factory comes from
   PascalDb.IntegrationEnv). Covered: connection ping, migrations (through the
   library's own engine), a round trip of every parameter type, typed NULLs,
-  optional columns through SQL tags, INSERT ... RETURNING, UTF-8 text,
+  optional columns through SQL tags, INSERT ... RETURNING (where the
+  database has it: not MySQL), UTF-8 text,
   commit/rollback, nested scopes with savepoints, a constraint violation
   that must not discard the connection, scripts, row counts, parameters
   after the same SQL text is assigned again (still bound, without the
@@ -394,6 +395,9 @@ begin
     LQuery.Params.DateTimes['CREATED_AT'] := Now;
     LQuery.Params.Integers['ACTIVE'] := 0;
     LQuery.Params.OptStrings['NOTE'] := LNote;
+    LQuery.ExecSql;
+    LQuery.Sql := FFactory.SqlLoader['ITEMS.BY_ID'].SQL;
+    LQuery.Params.Integers['ID'] := 3;
     TAssert.AssertEquals('The column default must apply when the tag removes it',
       'default note', LQuery.Open.Strings['NOTE']);
     LScope.Commit;
@@ -423,6 +427,9 @@ begin
     LQuery.Params.DateTimes['CREATED_AT'] := Now;
     LQuery.Params.Integers['ACTIVE'] := 0;
     LQuery.Params.OptStrings['NOTE'] := LNote;
+    LQuery.ExecSql;
+    LQuery.Sql := FFactory.SqlLoader['ITEMS.BY_ID'].SQL;
+    LQuery.Params.Integers['ID'] := 4;
     TAssert.AssertEquals('given', LQuery.Open.Strings['NOTE']);
     LScope.Commit;
   except
@@ -437,6 +444,8 @@ var
   LScope: IScopeTransaction;
   LResult: IQueryResult;
 begin
+  if not SupportsReturning then
+    Exit; // MySQL: no INSERT ... RETURNING
   LScope := FFactory.GetPool.AcquireQuery(LQuery);
   LScope.StartTransaction;
   try
