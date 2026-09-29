@@ -139,6 +139,46 @@ With `ESCAPE '\'`, SQLdb's SQLite and PostgreSQL connectors read `\'` as an esca
 looking for parameters, and every parameter after it disappears without an error, until
 binding fails with `Parameter "..." not found` (gotcha 26 in [`CLAUDE.md`](../CLAUDE.md)).
 
+## Running the same statement many times
+
+There is no `Prepare` to call: each driver prepares a statement the first time it runs, and the
+adapters keep it prepared while the same query runs it again. What decides the speed is
+**reusing one `IQuery`** for the whole loop instead of acquiring one per row:
+
+```pascal
+LScope := LFactory.GetPool.AcquireQuery(LQuery);
+LScope.StartTransaction;
+try
+  LQuery.Sql := LFactory.SqlLoader['PRODUCT.INSERT'].SQL;  // setting it inside the loop is fine too
+  for LProduct in AProducts do
+  begin
+    LQuery.Params.Strings['CODE'] := LProduct.Code;
+    LQuery.Params.Currencies['PRICE'] := LProduct.Price;
+    LQuery.ExecSql;
+  end;
+  LScope.Commit;
+except
+  LScope.Rollback;
+  raise;
+end;
+```
+
+Setting `Sql` to the text it already has keeps the statement prepared and clears only the
+parameters' values, so a parameter you don't set on a row is not sent with the previous row's
+value. The statement stays prepared within one transaction; SQLdb prepares it again in the next.
+
+Measured with 2000 `SELECT ... WHERE ID = :ID` (FPC 3.2.2 and Delphi 12 on Windows, PostgreSQL 17
+in Docker; the absolute numbers depend on the network, the ratios much less):
+
+| | one query for the loop | a new query per row |
+|---|---|---|
+| Zeos | 1.1 s | 5.0 s |
+| FireDAC | 1.1 s | 6.6 s |
+| SQLdb | 3.5 s | 5.8 s |
+
+A new query per request is what a server does anyway, and it costs a few milliseconds per request
+there; a loop is where one query pays off.
+
 ## Next
 
 [Guide 3](optionals.md): the optional and nullable types that decide which blocks to keep and
