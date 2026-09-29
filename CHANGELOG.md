@@ -4,7 +4,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 follow [Semantic Versioning](https://semver.org/). While the version is 0.x, a minor version
 may change the API; each such change is listed here.
 
-## [Unreleased]
+## [0.3.0] - 2026-09-28
 
 ### Changed
 
@@ -109,5 +109,6 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.3.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/fabianoallex/pascal-db-faa/releases/tag/v0.1.0
