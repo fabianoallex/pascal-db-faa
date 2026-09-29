@@ -336,10 +336,11 @@ prints the FPC backtrace and `test_samples_docker.sh` prints heaptrc's report.
 ## Gotchas found (Delphi × FPC 3.2.2)
 
 Format: symptom → cause → fix. Also recorded in the skill: 1–4, 7 in
-`references/rtl-gotchas.md` ("Generics / RTL collections", "Types", "Resource files"), 18
+`references/rtl-gotchas.md` ("Generics / RTL collections", "Types", "Resource files"), 33 in
+"Generics / RTL collections", 18
 in "Types", 19 in "Resource files" and 20 in "Threading / interop"; 5–6 in
 the compat adapter bullet of `SKILL.md` ("Mirrored tests"); 8 in "Encoding"; 9 in the
-`lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14, 16 and 21–31 in "Database access"; 12
+`lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14, 16 and 21–32 in "Database access"; 12
 and 15 in the tests section (`TearDown`, `finalization`). The skill links to this repository
 (https://github.com/fabianoallex/pascal-db-faa) from each of them.
 
