@@ -13,9 +13,9 @@ Free Pascal (see [`samples/README.md`](../samples/README.md)).
 | [5. Testing with the mock](testing-with-the-mock.md) | `TMockDBFactory`: canned results, recorded executions, and its lifetime | 01 |
 | [6. Errors](errors.md) | What raises what, and when: connecting, a connection lost in use, data errors, pool timeouts | 02, 05 |
 | [7. The connection pool](pool.md) | Settings, growth and waiting, idle sweep, events and snapshots, statement events, threads, database work off the UI thread | 05 |
-| [8. Adapters and databases](adapters.md) | SQLdb / FireDAC / Zeos × Firebird / PostgreSQL / SQLite: connection settings, client libraries, SQLite notes, what an FPC program must do | all |
+| [8. Adapters and databases](adapters.md) | SQLdb / FireDAC / Zeos × Firebird / PostgreSQL / SQLite / MySQL / MariaDB: connection settings, client libraries, SQLite and MySQL notes, what an FPC program must do | all |
 | [9. Writing an adapter](writing-an-adapter.md) | Supporting another connection component: the classes to write, a skeleton, what the library relies on, checking it with the contract suite | — |
-| [10. Using another database](other-databases.md) | A database other than Firebird / PostgreSQL / SQLite: the SQL dialect, the driver in each adapter, what tends to differ, running the contract suite against it | — |
+| [10. Using another database](other-databases.md) | A database other than the built-in ones: the SQL dialect, the driver in each adapter, what tends to differ, running the contract suite against it | — |
 
 ## Status
 

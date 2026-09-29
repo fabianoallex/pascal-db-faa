@@ -11,7 +11,8 @@
 
   Settings (environment variables, all optional):
     PASCALDB_IT_ENGINE    firebird (default), postgresql, sqlite, mysql or
-                          mariadb (the last two: Zeos runners only, so far)
+                          mariadb (the last two: not the FireDAC runner, so
+                          far)
     PASCALDB_IT_HOST      server host (default localhost, over TCP). Firebird:
                           'local' = the local protocol (path only), which
                           fails intermittently with concurrent connections on
@@ -102,6 +103,7 @@ uses
   , sqldb
   , ibconnection
   , pqconnection
+  , mysql80conn
   , PascalDb.Adapter.SQLdb
   {$ELSE}
   , FireDAC.Comp.Client
@@ -443,11 +445,10 @@ end;
 procedure SetConnectionParams(AParams: TStrings; const ADatabase: string);
 begin
   // SQLdb connection settings (see PascalDb.Adapter.SQLdb)
-  if IsMySQL then
-    raise Exception.Create('PASCALDB_IT_ENGINE=mysql/mariadb: only the Zeos runners support it so far');
   case Engine of
     engPostgres: AParams.Values['ConnectorType'] := 'PostgreSQL';
     engSQLite: AParams.Values['ConnectorType'] := 'SQLite3';
+    engMySQL, engMariaDB: AParams.Values['ConnectorType'] := 'MySQL 8.0';
   else
     AParams.Values['ConnectorType'] := 'Firebird';
   end;
@@ -456,8 +457,46 @@ begin
   AParams.Values['DatabaseName'] := ADatabase;
   AParams.Values['UserName'] := UserName;
   AParams.Values['Password'] := Password;
-  AParams.Values['CharSet'] := 'UTF8';
+  if IsMySQL then
+  begin
+    AParams.Values['CharSet'] := 'utf8mb4';
+    // The client is MariaDB Connector/C (see PascalDb.Adapter.SQLdb).
+    AParams.Values['SkipLibraryVersionCheck'] := 'true';
+  end
+  else
+    AParams.Values['CharSet'] := 'UTF8';
   AParams.Values['ClientLibrary'] := ClientLibrary;
+end;
+
+// MySQL/MariaDB: CREATE/DROP DATABASE on a connection to the maintenance
+// database (TMySQL80Connection.CreateDB can't set the character set).
+procedure ExecOnMySQLMaintenanceDb(const ASql: string);
+var
+  LConn: TMySQL80Connection;
+  LTransaction: TSQLTransaction;
+begin
+  // Before any direct SQLdb connection: the first client library loaded wins.
+  PdbSQLdbUseClientLibrary('MySQL 8.0', ClientLibrary);
+  LConn := TMySQL80Connection.Create(nil);
+  LTransaction := TSQLTransaction.Create(nil);
+  try
+    LConn.SkipLibraryVersionCheck := True;
+    LConn.HostName := Host;
+    if Port <> '' then
+      LConn.Params.Values['Port'] := Port;
+    LConn.DatabaseName := MYSQL_MAINTENANCE_DB;
+    LConn.UserName := UserName;
+    LConn.Password := Password;
+    LConn.LoginPrompt := False;
+    LTransaction.DataBase := LConn;
+    LConn.Open;
+    LConn.ExecuteDirect(ASql, LTransaction);
+    LTransaction.Commit;
+    LConn.Close;
+  finally
+    LTransaction.Free;
+    LConn.Free;
+  end;
 end;
 
 // A direct SQLdb connection to the test database — TIBConnection or
@@ -495,6 +534,15 @@ begin
     DeleteSQLiteFiles;
     Exit;
   end;
+  if IsMySQL then
+  begin
+    try
+      ExecOnMySQLMaintenanceDb('DROP DATABASE IF EXISTS ' + DatabaseName);
+    except
+      // server unreachable: nothing to drop
+    end;
+    Exit;
+  end;
   LConn := NewDirectConnection;
   try
     try
@@ -517,6 +565,11 @@ begin
     // The first connection creates the file.
     if FileExists(DatabaseName) then
       raise Exception.CreateFmt('Could not delete the test database left by a previous run: %s (still in use?)', [DatabaseName]);
+    Exit;
+  end;
+  if IsMySQL then
+  begin
+    ExecOnMySQLMaintenanceDb('CREATE DATABASE ' + DatabaseName + ' CHARACTER SET utf8mb4');
     Exit;
   end;
   LConn := NewDirectConnection;

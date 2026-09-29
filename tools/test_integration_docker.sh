@@ -9,7 +9,7 @@
 # 0 errors, 0 failures, 0 unfreed blocks.
 #
 # ENGINE:    firebird (default), postgresql, sqlite, mysql or mariadb
-# ADAPTER:   sqldb (default) or zeos (mysql and mariadb: zeos only, so far)
+# ADAPTER:   sqldb (default) or zeos
 # ZEOSDBO:   ADAPTER=zeos only: the ZeosLib 8 folder (the one containing
 #            src/core, src/dbc, ...), mounted read-only into the FPC container
 # FPC_IMAGE: an image with FPC 3.2.2 (default: fpc322-bookworm)
@@ -51,8 +51,7 @@ case "$ENGINE" in
       SERVER_IMAGE="$MARIADB_IMAGE"; SERVER_ENV="MARIADB_ROOT_PASSWORD=root"
     fi
     CLIENT_PKG=libmariadb3; CLIENT_GLOB='/usr/lib/*/libmariadb.so.3'; DB_PORT=3306
-    IT_DATABASE=pascaldb_it; IT_PASSWORD=root
-    [ "$ADAPTER" = zeos ] || { echo "ENGINE=$ENGINE: ADAPTER=zeos only, so far" >&2; exit 2; } ;;
+    IT_DATABASE=pascaldb_it; IT_PASSWORD=root ;;
   *) echo "ENGINE must be firebird, postgresql, sqlite, mysql or mariadb" >&2; exit 2 ;;
 esac
 

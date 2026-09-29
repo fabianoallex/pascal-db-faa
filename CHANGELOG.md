@@ -8,6 +8,12 @@ may change the API; each such change is listed here.
 
 ### Added
 
+- MySQL and MariaDB on the SQLdb and Zeos adapters: a `MySQL` SQL dialect (also registered as
+  `MariaDB`); `LockTimeoutMs` applied as `innodb_lock_wait_timeout` (whole seconds) and errors
+  1205 / 1213 raised as `ELockConflictException`. SQLdb registers the `MySQL 8.0` and
+  `MySQL 5.7` connectors and takes a `SkipLibraryVersionCheck=true` setting, needed with a client
+  library of another version than the connector's (e.g. MariaDB Connector/C). Contract suite run
+  on MySQL 8.4 and MariaDB 11.4 with FPC on Linux; FireDAC not yet.
 - `IDatabaseConfig.LockTimeoutMs`: the longest a statement waits for a lock held by another
   transaction, on every adapter (Firebird transaction parameters, whole seconds; PostgreSQL
   `lock_timeout`; SQLite busy timeout). 0 (default) keeps each database's behavior: Firebird

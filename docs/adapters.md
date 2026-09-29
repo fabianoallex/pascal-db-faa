@@ -2,15 +2,15 @@
 
 Every sample picks its adapter in one unit,
 [`common/Samples.Env.pas`](../samples/common/Samples.Env.pas): the settings below side by side,
-for all three adapters and databases.
+for all three adapters and the Firebird, PostgreSQL and SQLite databases.
 
 ## Choosing
 
-| Adapter | Compilers | Unit / Lazarus package | Firebird | PostgreSQL | SQLite |
-|---|---|---|---|---|---|
-| SQLdb | FPC | `PascalDb.Adapter.SQLdb` / `pascal_db_faa_sqldb.lpk` | yes | yes | yes |
-| FireDAC | Delphi | `PascalDb.Adapter.FireDAC` (add `adapters/firedac` to the search path) | yes | yes | yes |
-| Zeos (ZeosLib 8) | both | `PascalDb.Adapter.Zeos` / `pascal_db_faa_zeos.lpk` | yes | yes | yes |
+| Adapter | Compilers | Unit / Lazarus package | Firebird | PostgreSQL | SQLite | MySQL / MariaDB |
+|---|---|---|---|---|---|---|
+| SQLdb | FPC | `PascalDb.Adapter.SQLdb` / `pascal_db_faa_sqldb.lpk` | yes | yes | yes | yes (run on Linux only, so far) |
+| FireDAC | Delphi | `PascalDb.Adapter.FireDAC` (add `adapters/firedac` to the search path) | yes | yes | yes | not yet |
+| Zeos (ZeosLib 8) | both | `PascalDb.Adapter.Zeos` / `pascal_db_faa_zeos.lpk` | yes | yes | yes | yes (run with FPC on Linux only, so far) |
 
 - **One source for both compilers:** Zeos on both, or SQLdb on FPC and FireDAC on Delphi
   behind an `{$IFDEF FPC}` in the one unit that builds the factory (what the samples do by
@@ -29,22 +29,25 @@ Lines an adapter doesn't know go to the driver as they are.
 
 | | SQLdb | FireDAC | Zeos |
 |---|---|---|---|
-| Driver / database kind | `ConnectorType` = `Firebird`, `PostgreSQL`, `SQLite3` | `DriverID` = `FB`, `PG`, `SQLite` | `Protocol` = `firebird`, `postgresql`, `sqlite` |
+| Driver / database kind | `ConnectorType` = `Firebird`, `PostgreSQL`, `SQLite3`, `MySQL 8.0` | `DriverID` = `FB`, `PG`, `SQLite` | `Protocol` = `firebird`, `postgresql`, `sqlite`, `mysql`, `mariadb` |
 | Host, port | `HostName`, `Port` | `Server`, `Port` | `HostName`, `Port` |
 | Database | `DatabaseName` | `Database` | `Database` |
 | Credentials | `UserName`, `Password` | `User_Name`, `Password` | `User`, `Password` |
-| Character set | `CharSet=UTF8` | `CharacterSet=UTF8` | `ClientCodepage=UTF8` |
+| Character set | `CharSet=UTF8` (MySQL: `utf8mb4`) | `CharacterSet=UTF8` | `ClientCodepage=UTF8` (MySQL: `utf8mb4`) |
 | Client library path | `ClientLibrary` | `VendorLib` | `LibraryLocation` |
 
 For Firebird on FireDAC, also `Protocol=TCPIP` for a server. `SQLDialect` on the configuration
-is `Firebird`, `PostgreSQL` or `SQLite`, whatever the adapter.
+is `Firebird`, `PostgreSQL`, `SQLite`, `MySQL` or `MariaDB`, whatever the adapter.
 
-Always set the character set to UTF-8: that is the setting every test and sample runs with.
+Always set the character set to UTF-8: that is the setting every test and sample runs with. On
+MySQL and MariaDB that is `utf8mb4`: their `utf8` stores no 4-byte characters.
 
 ## Client libraries
 
-Firebird and PostgreSQL need their client library (`fbclient`, `libpq`) in every adapter;
-SQLite needs `sqlite3` on SQLdb and Zeos, while FireDAC links SQLite into the program.
+Firebird, PostgreSQL and MySQL/MariaDB need their client library (`fbclient`, `libpq`,
+`libmysqlclient` or MariaDB Connector/C's `libmariadb`, which also talks to MySQL servers) in
+every adapter; SQLite needs `sqlite3` on SQLdb and Zeos, while FireDAC links SQLite into the
+program.
 
 - **Match the program's bitness.** A 32-bit program needs a 32-bit client. PostgreSQL ships no
   32-bit client, so a Delphi program using PostgreSQL must be 64-bit.
@@ -66,6 +69,13 @@ SQLite needs `sqlite3` on SQLdb and Zeos, while FireDAC links SQLite into the pr
 - **SQLite on Windows (SQLdb, Zeos):** the DLL must export the column-metadata functions, such
   as the official one from sqlite.org. Other builds (e.g. the one shipped with Python) make every
   query fail with an access violation at `$0` (gotcha 23 in [`CLAUDE.md`](../CLAUDE.md)).
+- **MySQL on SQLdb: `SkipLibraryVersionCheck=true` unless the client matches the connector.**
+  FPC 3.2.2's `MySQL 8.0` connector accepts only a client that reports version 8.0.x (and
+  `MySQL 5.7` only 5.7.x or MariaDB 10.x). Debian's `libmariadb3` reports 3.3.19, and the first
+  connection fails with `TMySQL80Connection can not work with the installed MySQL client version:
+  Expected (8.0), got (3.3.19)`. With the setting, both connectors worked with it against MySQL
+  8.4 and MariaDB 11.4 (gotcha 34). On Linux, set `ClientLibrary` to the versioned file
+  (`libmariadb.so.3`): SQLdb looks for `libmysqlclient.so.21` by default.
 
 ## SQLite notes
 
@@ -79,6 +89,22 @@ SQLite needs `sqlite3` on SQLdb and Zeos, while FireDAC links SQLite into the pr
 - Types are loose: a `NUMERIC(15,2)` is stored as a floating-point `REAL`, so money keeps a
   `Double`'s precision, not an exact decimal.
 - `CREATE TABLE IF NOT EXISTS`, `RETURNING`, savepoints and transactional DDL all work.
+
+## MySQL and MariaDB notes
+
+- One SQL dialect for both (`SQLDialect` = `MySQL` or `MariaDB`: the same class).
+- **MySQL has no `INSERT ... RETURNING`** (MariaDB has it since 10.5). Read a generated key back
+  with `SELECT LAST_INSERT_ID()` in the same transaction, or give the key yourself.
+- **DDL isn't transactional:** every `CREATE`/`ALTER`/`DROP` commits the transaction it runs in.
+  Mark such migrations `IsDDL: True` ([guide 7](migrations.md)), as on Firebird.
+- **Table names are case-sensitive on Linux** (`lower_case_table_names=0`) and not on Windows:
+  write each table name the same way everywhere. The migrations table is `SCHEMA_MIGRATIONS`.
+- `DATETIME` and `TIMESTAMP` keep whole seconds unless declared with a precision: `DATETIME(3)`
+  for milliseconds. `DECIMAL` is exact.
+- A backslash is an escape character inside string literals (unless the server runs with
+  `NO_BACKSLASH_ESCAPES`), and SQLdb's connector escapes parameter values that way.
+- An expired lock wait (`LockTimeoutMs`) undoes only the statement, not the transaction; roll the
+  transaction back anyway, as on the other databases.
 
 ## Adapter-specific behavior you may notice
 
@@ -141,6 +167,6 @@ others. [Guide 9](writing-an-adapter.md) walks through it, with a skeleton.
 
 ## Another database
 
-A database other than the three above needs an SQL dialect registered by the program and the
+A database other than the ones above needs an SQL dialect registered by the program and the
 driver's unit linked in; the adapters pass other drivers through.
 [Guide 10](other-databases.md) covers it, and how to check it with the contract suite.

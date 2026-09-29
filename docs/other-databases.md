@@ -1,8 +1,9 @@
 # 10. Using another database
 
 Firebird, PostgreSQL and SQLite are the databases the library supports: each one passes the
-integration contract suite on every adapter, and CI runs it on every push. Another database
-(Oracle, SQL Server, MySQL, ...) goes through the same parts without changing the library, but
+integration contract suite on every adapter, and CI runs it on every push. MySQL and MariaDB
+pass it on SQLdb and Zeos (FPC, Linux; see [guide 8](adapters.md#mysql-and-mariadb-notes)).
+Another database (Oracle, SQL Server, ...) goes through the same parts without changing the library, but
 nothing here has been run against it: the contract suite is how you find out whether it works,
 and this guide ends with how to run it.
 

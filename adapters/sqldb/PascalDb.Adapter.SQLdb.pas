@@ -7,8 +7,10 @@
   from PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
-    ConnectorType  SQLdb connector name (required). 'Firebird', 'PostgreSQL'
-                   and 'SQLite3' are registered by this unit; for another
+    ConnectorType  SQLdb connector name (required). 'Firebird', 'PostgreSQL',
+                   'SQLite3', 'MySQL 8.0' and 'MySQL 5.7' are registered by
+                   this unit (the MySQL ones talk to MariaDB servers too);
+                   for another
                    one, add its connection unit to the program's uses
                    (e.g. oracleconnection for 'Oracle') and register an SQL
                    dialect for it (docs/other-databases.md)
@@ -16,15 +18,20 @@
                    SQLite)
     Port           server port (optional)
     DatabaseName   database path (Firebird, SQLite: the file, created on
-                   first connect) or name (PostgreSQL)
+                   first connect) or name (PostgreSQL, MySQL/MariaDB)
     UserName, Password
-    CharSet        connection character set (e.g. UTF8)
+    CharSet        connection character set (e.g. UTF8; MySQL/MariaDB:
+                   utf8mb4, since their utf8 has no 4-byte characters)
     BusyTimeout    SQLite only: milliseconds a statement waits for another
                    connection's write lock before failing with "database is
                    locked" (default: IDatabaseConfig.LockTimeoutMs, or 5000
                    when that is 0)
-    ClientLibrary  full path of the client library (fbclient/libpq/sqlite3) when it
-                   isn't found on the default search path (optional)
+    ClientLibrary  full path of the client library (fbclient/libpq/sqlite3/
+                   libmysqlclient/libmariadb) when it isn't found on the
+                   default search path (optional)
+    SkipLibraryVersionCheck
+                   MySQL only: true to connect with a client library of
+                   another version than the connector's (see below)
   Any other line is passed to the connection's Params as is.
 
   SQLdb specifics handled here:
@@ -53,12 +60,27 @@
     replaces the defaults); PostgreSQL through the connection string
     (options='-c lock_timeout=N'), because the PostgreSQL connector opens a
     server connection per transaction and a SET would reach only one of
-    them; SQLite as the busy timeout. The driver's lock conflict errors
-    (Firebird GDS isc_lock_timeout, isc_lock_conflict, isc_deadlock and
-    isc_update_conflict; PostgreSQL SQLSTATE 55P03, 40P01 and 40001; SQLite
+    them; MySQL/MariaDB a SET SESSION innodb_lock_wait_timeout when the
+    connection opens (whole seconds, rounded up; one server session per
+    connection); SQLite as the busy timeout. The driver's lock conflict
+    errors (Firebird GDS isc_lock_timeout, isc_lock_conflict, isc_deadlock
+    and isc_update_conflict; PostgreSQL SQLSTATE 55P03, 40P01 and 40001;
+    MySQL/MariaDB ER_LOCK_WAIT_TIMEOUT and ER_LOCK_DEADLOCK; SQLite
     SQLITE_BUSY and SQLITE_LOCKED) become ELockConflictException. Firebird 5
     reports an expired lock timeout as isc_deadlock (measured on Linux), 2.5
-    as isc_lock_timeout. }
+    as isc_lock_timeout.
+  - MySQL: FPC 3.2.2 has one connector per client version ('MySQL 8.0' wants
+    a client library that reports 8.0.x, 'MySQL 5.7' 5.7.x or a MariaDB
+    10.x) and refuses any other when connecting ("can not work with the
+    installed MySQL client version"). Debian bookworm's MariaDB
+    Connector/C (libmariadb3) reports 3.3.19 and is refused by both, and so
+    is a newer MySQL client (8.4). With SkipLibraryVersionCheck=true the
+    check is left out; measured with libmariadb 3.3.19 on Linux, both
+    connectors against MySQL 8.4 and MariaDB 11.4: connect, UTF-8 text,
+    BIGINT, DECIMAL, DOUBLE and DATETIME(3) round trips all correct.
+    Parameters are replaced in the SQL text on the client (the connector has
+    no server-side prepared statements), escaping backslashes as the server
+    expects. }
 
 interface
 
@@ -75,6 +97,8 @@ uses
   ibconnection,
   pqconnection,
   sqlite3conn,
+  mysql57conn,
+  mysql80conn,
   PascalDb.Interfaces,
   PascalDb.SqlDialect,
   PascalDb.Pool,
@@ -85,10 +109,14 @@ type
   { TPdbSQLConnector }
 
   // The native connection: a TSQLConnector that also carries the settings
-  // the transactions and a reconnect need (IDatabaseConfig.LockTimeoutMs).
+  // the transactions and a reconnect need (IDatabaseConfig.LockTimeoutMs,
+  // SkipLibraryVersionCheck).
   TPdbSQLConnector = class(TSQLConnector)
+  protected
+    procedure DoInternalConnect; override;
   public
     LockTimeoutMs: Integer;
+    SkipLibraryVersionCheck: Boolean;
   end;
 
   { TSQLdbConnectionAdapter }
@@ -169,7 +197,7 @@ type
       AOnPoolEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil);
   end;
 
-/// Loads the client library of AConnectorType ('Firebird', 'PostgreSQL')
+/// Loads the client library of AConnectorType ('Firebird', 'PostgreSQL', ...)
 /// from ALibrary, once per process. SQLdb loads a client library globally and
 /// the first load wins: any SQLdb connection opened before this (e.g. a
 /// TIBConnection used directly to create a database) loads the default
@@ -197,6 +225,29 @@ const
   PG_LOCK_NOT_AVAILABLE = '55P03';
   PG_DEADLOCK_DETECTED = '40P01';
   PG_SERIALIZATION_FAILURE = '40001';
+  MYSQL_ER_LOCK_WAIT_TIMEOUT = 1205; // mysqld_error.h: "Lock wait timeout exceeded"
+  MYSQL_ER_LOCK_DEADLOCK = 1213;     // mysqld_error.h: "Deadlock found when trying to get lock"
+
+function IsMySQLConnector(const AConnectorType: string): Boolean;
+begin
+  Result := SameText(Copy(AConnectorType, 1, 5), 'MySQL');
+end;
+
+{ TPdbSQLConnector }
+
+// See the unit header: the MySQL connectors' client version check. Set on
+// the connector's inner connection right before it connects: setting
+// ConnectorType already creates that connection, before the other settings
+// are read.
+procedure TPdbSQLConnector.DoInternalConnect;
+begin
+  CheckProxy;
+  if Proxy is TMySQL80Connection then
+    TMySQL80Connection(Proxy).SkipLibraryVersionCheck := SkipLibraryVersionCheck
+  else if Proxy is TMySQL57Connection then
+    TMySQL57Connection(Proxy).SkipLibraryVersionCheck := SkipLibraryVersionCheck;
+  inherited DoInternalConnect;
+end;
 
 // See the unit header. Runs in a throwaway transaction: SQLdb executes
 // statements only inside one.
@@ -220,6 +271,32 @@ begin
   finally
     LTransaction.Free;
   end;
+end;
+
+// See the unit header: MySQL/MariaDB get the lock timeout on the open
+// session. A throwaway transaction, as for SQLite's busy timeout.
+procedure ApplyMySQLLockTimeout(AConn: TPdbSQLConnector);
+var
+  LTransaction: TSQLTransaction;
+begin
+  if (AConn.LockTimeoutMs <= 0) or not IsMySQLConnector(AConn.ConnectorType) then
+    Exit;
+  LTransaction := TSQLTransaction.Create(nil);
+  try
+    LTransaction.DataBase := AConn;
+    AConn.ExecuteDirect('SET SESSION innodb_lock_wait_timeout = ' +
+      IntToStr((AConn.LockTimeoutMs + 999) div 1000), LTransaction);
+    LTransaction.Commit;
+  finally
+    LTransaction.Free;
+  end;
+end;
+
+// Everything a connection needs right after it opens (also on a reconnect).
+procedure ApplySessionSettings(AConn: TPdbSQLConnector);
+begin
+  ApplySQLiteBusyTimeout(AConn);
+  ApplyMySQLLockTimeout(AConn);
 end;
 
 // See the unit header: PostgreSQL gets the lock timeout as a libpq option of
@@ -267,7 +344,9 @@ begin
       Result := (LCode = ISC_LOCK_TIMEOUT) or (LCode = ISC_LOCK_CONFLICT) or
         (LCode = ISC_DEADLOCK) or (LCode = ISC_UPDATE_CONFLICT)
     else if SameText(LType, 'SQLite3') then
-      Result := (LCode = SQLITE_BUSY) or (LCode = SQLITE_LOCKED);
+      Result := (LCode = SQLITE_BUSY) or (LCode = SQLITE_LOCKED)
+    else if IsMySQLConnector(LType) then
+      Result := (LCode = MYSQL_ER_LOCK_WAIT_TIMEOUT) or (LCode = MYSQL_ER_LOCK_DEADLOCK);
   end;
 end;
 
@@ -333,7 +412,7 @@ end;
 procedure TSQLdbConnectionAdapter.Connect;
 begin
   FConnection.Open;
-  ApplySQLiteBusyTimeout(FConnection);
+  ApplySessionSettings(FConnection);
 end;
 
 procedure TSQLdbConnectionAdapter.Commit;
@@ -580,6 +659,8 @@ begin
         LConn.CharSet := LValue
       else if SameText(LName, 'ClientLibrary') then
         // handled by PdbSQLdbUseClientLibrary
+      else if SameText(LName, 'SkipLibraryVersionCheck') then
+        LConn.SkipLibraryVersionCheck := SameText(LValue, 'true') or (LValue = '1')
       // Settings with no value are left out: FPC's Values[Name] := '' keeps
       // a "Name=" line (Delphi deletes it), and PostgreSQL's connection
       // string reads the next option as the value of an empty "port=".
@@ -591,7 +672,7 @@ begin
     end;
     ApplyPostgresLockTimeout(LConn);
     LConn.Open;
-    ApplySQLiteBusyTimeout(LConn);
+    ApplySessionSettings(LConn);
   except
     LConn.Free;
     raise;

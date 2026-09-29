@@ -20,7 +20,7 @@ A database access layer for **Delphi and Lazarus/FPC from the same source code**
 Drivers live in thin adapters on top of a shared, driver-agnostic base (configuration,
 transactions and savepoints, scripts, parameter semantics, TDataSet-based queries). Available:
 **SQLdb** (Lazarus/FPC), **FireDAC** (Delphi) and **Zeos** (ZeosLib 8, both compilers), each
-for Firebird, PostgreSQL and SQLite.
+for Firebird, PostgreSQL and SQLite; SQLdb and Zeos also for MySQL and MariaDB.
 Any other driver plugs in by implementing `IDBComponentProvider`.
 
 ## A quick look
@@ -63,8 +63,10 @@ of them (FastMM / heaptrc). The same integration contract suite passes on the SQ
 FireDAC adapter (Firebird 2.5, Delphi Win32; PostgreSQL 17, Delphi Win64) and on the Zeos
 adapter (Firebird 2.5, FPC Win64 and Delphi Win32/Win64; Firebird 5 on Linux; PostgreSQL 17,
 FPC and Delphi Win64 and FPC on Linux). On SQLite it passes on SQLdb and Zeos with FPC on
-Windows and Linux, and on FireDAC and Zeos with Delphi (Win32 and Win64). CI runs the Linux FPC
-suites on every push; the Delphi side is run in the IDE.
+Windows and Linux, and on FireDAC and Zeos with Delphi (Win32 and Win64). On MySQL 8.4 and
+MariaDB 11.4 it passes on SQLdb and Zeos with FPC on Linux (MariaDB Connector/C for both servers);
+Windows, Delphi and FireDAC haven't been run there yet. CI runs the Linux FPC suites on every
+push; the Delphi side is run in the IDE.
 
 FPC programs must run with a UTF-8 default code page and, on Unix, include `cwstring`
 — see [what a Free Pascal program must do](docs/adapters.md#what-a-free-pascal-program-must-do).

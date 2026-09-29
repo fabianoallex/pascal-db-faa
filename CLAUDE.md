@@ -168,19 +168,21 @@ The FPCUnit runner does both.
   `IDBFactory`/`IQuery`/`IParams`/`IQueryResult`, so the same bodies validate every adapter;
   `tests/Integration/PascalDb.IntegrationEnv.pas` is the only adapter-specific part (which
   factory, how to create/drop the database) and documents its `PASCALDB_IT_*` environment
-  variables. `PASCALDB_IT_ENGINE` picks the database: `firebird` (default), `postgresql` or
-  `sqlite` (a file next to the runner; no server).
+  variables. `PASCALDB_IT_ENGINE` picks the database: `firebird` (default), `postgresql`,
+  `sqlite` (a file next to the runner; no server), `mysql` or `mariadb` (SQLdb and Zeos runners
+  only, so far).
   Each run creates a fresh database, migrates it with `TDBMigrationEngine` (SQL from a
   `TMemorySqlSource`) and drops it at the end. FPC on Windows: build
   `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi` (SQLdb) or
   `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos) and run it with
   `--all --format=plain`. The Zeos runners (FPC and Delphi) define `PASCALDB_IT_ZEOS` and
   reuse the same fixtures. Linux: `sh tools/test_integration_docker.sh` (`ENGINE=firebird`,
-  `postgresql` or `sqlite`; `ADAPTER=sqldb` (default) or `zeos`, the latter with `ZEOSDBO` pointing at the
+  `postgresql`, `sqlite`, `mysql` or `mariadb`; `ADAPTER=sqldb` (default) or `zeos`, the latter with `ZEOSDBO` pointing at the
   ZeosLib folder, mounted into the container; server container + FPC container on a private
   network). **CI:** `.github/workflows/ci.yml` only calls `sh tools/ci-test.sh`, which runs the
-  unit suite, then all six Linux integration combinations (SQLdb/Zeos ×
-  Firebird/PostgreSQL/SQLite) and the samples on the same six (`tools/test_samples_docker.sh`);
+  unit suite, then all ten Linux integration combinations (SQLdb/Zeos ×
+  Firebird/PostgreSQL/SQLite/MySQL/MariaDB) and the samples on the first six
+  (`tools/test_samples_docker.sh`; the samples don't cover MySQL/MariaDB yet);
   it builds its FPC image (`pascaldb-fpc322`, Debian bookworm's fpc) and, without `ZEOSDBO`,
   downloads ZeosLib 8.0.0 into `.ci/` and checks its pinned SHA-256. Run it locally before
   pushing a change to the scripts.
@@ -241,9 +243,9 @@ them the driver's quirks):
 
 | Adapter | Compiler | Package / unit | Status |
 |---|---|---|---|
-| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux), SQLite (Windows with sqlite.org's 3.53.4 DLL, Linux with Debian bookworm's libsqlite3) |
-| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32 and Win64), PostgreSQL 17 (Win64) and SQLite (Win32 and Win64, engine linked in) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
-| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32 and Win64), PostgreSQL 17 with FPC and Delphi (Win64), Firebird 5 and PostgreSQL 17 with FPC on Linux, SQLite with FPC on Windows and Linux and Delphi (Win32 and Win64) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
+| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux), SQLite (Windows with sqlite.org's 3.53.4 DLL, Linux with Debian bookworm's libsqlite3), MySQL 8.4 and MariaDB 11.4 (Linux, `MySQL 8.0` connector over Debian bookworm's libmariadb3) |
+| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32 and Win64), PostgreSQL 17 (Win64) and SQLite (Win32 and Win64, engine linked in) — `tests/Integration/PascalDb.IntegrationTests.dproj`; MySQL/MariaDB not yet |
+| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32 and Win64), PostgreSQL 17 with FPC and Delphi (Win64), Firebird 5 and PostgreSQL 17 with FPC on Linux, SQLite with FPC on Windows and Linux and Delphi (Win32 and Win64), MySQL 8.4 and MariaDB 11.4 with FPC on Linux (libmariadb3) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
 
 A third-party adapter implements `IDBComponentProvider` (usually on top of the two units
 above), and `TDBFactory` does the rest: the core never has to change for a new driver.
@@ -317,6 +319,24 @@ SQLite's types are loose: a `NUMERIC(15,2)` is stored as `REAL`, so money keeps 
 precision, not an exact decimal. `CREATE TABLE IF NOT EXISTS`, `RETURNING` and transactional
 DDL all work (the contract suite passes unchanged). `:memory:` gives each pooled connection its
 own empty database: use a file.
+
+**MySQL/MariaDB specifics** (SQLdb and Zeos; FireDAC not yet): one dialect class, registered
+as `MySQL` and `MariaDB`. SQLdb `ConnectorType=MySQL 8.0` (the adapter also registers
+`MySQL 5.7`), Zeos `Protocol=mysql` or `mariadb`; character set `utf8mb4`. Measured with MariaDB
+Connector/C (Debian bookworm's `libmariadb3`, 3.3.19) for both servers on Linux; no Oracle
+`libmysqlclient`, no Windows client yet. What the adapters add:
+- `LockTimeoutMs` as `SET SESSION innodb_lock_wait_timeout` (whole seconds, rounded up) when a
+  connection opens (both connectors use one server session per connection), and errors 1205 /
+  1213 as `ELockConflictException`. An expired lock wait undoes only the statement;
+- SQLdb: `SkipLibraryVersionCheck=true`, needed with any client whose version isn't the
+  connector's (gotcha 34).
+MySQL has no `INSERT ... RETURNING` (MariaDB has): the contract test `InsertReturning_ViaOpen`
+exits early on `ENGINE=mysql` (`SupportsReturning` in the integration environment), and the
+optional-column tests read the row back with a `SELECT` on every database. DDL commits
+implicitly, as on Firebird (the migrations' `IsDDL` mode already handles it). Table names are
+case-sensitive on Linux servers: the dialect looks the migrations table up with `LOWER(...)` in
+`information_schema` and always writes `SCHEMA_MIGRATIONS`. The SQLdb connector replaces
+parameters in the SQL text on the client (no server-side prepared statements).
 
 **Zeos on Delphi is compiled from source:** the Delphi Zeos runner finds ZeosLib through the
 `ZEOSDBO` environment variable (the folder containing `src\core`, `src\dbc`, ...), set in
@@ -610,3 +630,16 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     `port=`, took the next token (`options='-c`) as the port's value. It was harmless while
     `port=` came last in the connection string. Fix: the SQLdb adapter leaves out settings with
     no value. On Windows the runs always had a port, which hid it.
+34. **SQLdb's MySQL connectors refuse a client library of another version, and `TSQLConnector`
+    creates its inner connection as soon as `ConnectorType` is set.** FPC 3.2.2's `MySQL 8.0`
+    connector checks `mysql_get_client_info` when connecting and accepts only `8.0...` (`MySQL 5.7`:
+    `5.7...` or a MariaDB `10....`); Debian bookworm's MariaDB Connector/C reports `3.3.19`, so every
+    connection failed with `TMySQL80Connection can not work with the installed MySQL client
+    version: Expected (8.0), got (3.3.19)`, against MySQL 8.4 and MariaDB 11.4 alike. With the
+    connection's `SkipLibraryVersionCheck` set, both connectors passed a probe (UTF-8 text, BIGINT,
+    DECIMAL, DOUBLE, DATETIME(3) round trips exact) and then the contract suite on both servers.
+    The first way the adapter set it, overriding `CreateProxy`, had no effect: `SetConnectorType`
+    calls `CreateProxy` right away (`sqldb.pp`), before the other settings are read. Fix: a
+    `SkipLibraryVersionCheck=true` setting, applied to `TSQLConnector.Proxy` in an override of
+    `DoInternalConnect`, right before connecting. Not measured: Oracle's libmysqlclient 8.4 (it
+    would report 8.4 and be refused the same way), and Windows.
