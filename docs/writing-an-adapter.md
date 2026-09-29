@@ -411,6 +411,14 @@ Check them against your component's documentation, then let the suite confirm.
 - **SQLite needs a busy timeout.** With a pool, several connections write to the same file; with
   no busy timeout, the second writer fails at once with "database is locked" (gotcha 24). Every
   existing adapter sets one (5000 ms by default).
+- **Lock timeouts.** Apply `IDatabaseConfig.LockTimeoutMs` the way your driver allows
+  (transaction parameters, a session setting, the busy timeout), and override
+  `IsLockConflictError` in your `TTransactionBase` and `TDataSetQueryBase` subclasses to
+  recognize the driver's lock conflict errors (an expired lock wait, an immediate lock conflict,
+  an update conflict, a deadlock): the base classes then raise `ELockConflictException`. The
+  contract test `LockWait_GivesUpAfterLockTimeout` checks both. Measure the codes on every server
+  version you support: Firebird 2.5 reports an expired lock wait as `isc_lock_timeout`,
+  Firebird 5 as `isc_deadlock`.
 - **Dual-compiler:** if the component exists for both Delphi and Lazarus, keep the unit free of
   compiler-specific code where you can (Zeos's adapter is the example), and check
   [what a Free Pascal program must do](adapters.md#what-a-free-pascal-program-must-do).

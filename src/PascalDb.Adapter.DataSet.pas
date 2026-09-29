@@ -93,6 +93,10 @@ type
     function ResetParamValues: Boolean; virtual;
     /// The IParams over the query's parameters; called once, lazily.
     function CreateParams: IParams; virtual; abstract;
+    /// True when E is one of the driver's lock conflict errors (see
+    /// ELockConflictException); Open and ExecSql then raise
+    /// ELockConflictException instead. The default recognizes nothing.
+    function IsLockConflictError(E: Exception): Boolean; virtual;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
     // IQuery
@@ -308,7 +312,17 @@ begin
     FTransaction.StartTransaction;
   if DataSet.Active then
     DataSet.Close;
-  DoOpen;
+  try
+    DoOpen;
+  except
+    on E: Exception do
+    begin
+      // A new exception or a bare raise only (see TTransactionBase).
+      if IsLockConflictError(E) then
+        raise ELockConflictException.Create(E);
+      raise;
+    end;
+  end;
   Result := Self;
 end;
 
@@ -325,7 +339,21 @@ end;
 
 procedure TDataSetQueryBase.ExecSql;
 begin
-  DoExecSql;
+  try
+    DoExecSql;
+  except
+    on E: Exception do
+    begin
+      if IsLockConflictError(E) then
+        raise ELockConflictException.Create(E);
+      raise;
+    end;
+  end;
+end;
+
+function TDataSetQueryBase.IsLockConflictError(E: Exception): Boolean;
+begin
+  Result := False;
 end;
 
 function TDataSetQueryBase.GetConnection: IDBConnection;

@@ -20,8 +20,10 @@
   a string parameter that grows
   while the statement stays prepared, requests staying on the pool's own
   server sessions, concurrent writers (SQLite
-  allows one at a time: the others must wait for the lock, not fail), and a
-  failed connect surfacing as EDatabaseConnectException whatever the driver.
+  allows one at a time: the others must wait for the lock, not fail), a
+  statement waiting for another transaction's lock giving up after
+  LockTimeoutMs with ELockConflictException, and a failed connect surfacing
+  as EDatabaseConnectException whatever the driver.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
   PascalDb.DUnitXCompat). The mirror in tests/Integration/fpc is generated
@@ -36,6 +38,7 @@ uses
   PascalDb.Interfaces,
   PascalDb.Optionals,
   PascalDb.Migrations,
+  PascalDb.Threading,
   PascalDb.IntegrationEnv;
 
 type
@@ -70,6 +73,7 @@ type
     procedure SameQuery_GrowingStringParam_Binds;
     procedure Requests_StayOnPooledConnections;
     procedure ConcurrentWriters_AllCommit;
+    procedure LockWait_GivesUpAfterLockTimeout;
     procedure Unreachable_AcquireRaisesConnectException;
   end;
 
@@ -123,6 +127,68 @@ begin
     on E: Exception do
       FError := E.ClassName + ': ' + E.Message;
   end;
+end;
+
+type
+  // The waiting side of LockWait_GivesUpAfterLockTimeout: updates a row
+  // another transaction holds, and records how long it took and what it
+  // raised.
+  TLockWaiter = class(TThread)
+  private
+    FFactory: IDBFactory;
+    FElapsedMs: UInt64;
+    FErrorClass: string;
+    FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const AFactory: IDBFactory);
+    property ElapsedMs: UInt64 read FElapsedMs;
+    property ErrorClass: string read FErrorClass;
+    property Error: string read FError;
+  end;
+
+constructor TLockWaiter.Create(const AFactory: IDBFactory);
+begin
+  FFactory := AFactory;
+  inherited Create(False);
+end;
+
+procedure TLockWaiter.Execute;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LStart: UInt64;
+begin
+  LStart := 0;
+  try
+    LScope := FFactory.GetPool.AcquireQuery(LQuery);
+    LScope.StartTransaction;
+    try
+      LQuery.Sql := 'UPDATE ITEMS SET QTY = 2 WHERE ID = 700';
+      LStart := PdbTickMs;
+      LQuery.ExecSql;
+      FElapsedMs := PdbTickMs - LStart;
+      LScope.Commit;
+    except
+      if LStart <> 0 then
+        FElapsedMs := PdbTickMs - LStart;
+      LScope.Rollback;
+      raise;
+    end;
+  except
+    on E: Exception do
+    begin
+      FErrorClass := E.ClassName;
+      FError := E.ClassName + ': ' + E.Message;
+      if E is EDatabaseUnavailableException then
+        FError := FError + ' (' + EDatabaseUnavailableException(E).OriginalClassName + ': ' +
+          EDatabaseUnavailableException(E).OriginalMessage + ')';
+    end;
+  end;
+  LQuery := nil;
+  LScope := nil;
+  FFactory := nil;
 end;
 
 { TContractTests }
@@ -745,6 +811,51 @@ begin
     LScope.Rollback;
     raise;
   end;
+end;
+
+procedure TContractTests.LockWait_GivesUpAfterLockTimeout;
+const
+  LOCK_TIMEOUT_MS = 1000;
+  // The holder releases the row after this, so a waiter that ignores the
+  // timeout finishes (and fails the test) instead of hanging the suite.
+  HOLD_MS = 8000;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LWaiter: TLockWaiter;
+  LStart: UInt64;
+  LElapsed: UInt64;
+  LErrorClass, LError: string;
+begin
+  InsertItem(700, 'locked row');
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := 'UPDATE ITEMS SET QTY = 1 WHERE ID = 700';
+    LQuery.ExecSql; // this transaction now holds the row (SQLite: the database's write lock)
+    LWaiter := TLockWaiter.Create(LockTimeoutFactory(LOCK_TIMEOUT_MS));
+    try
+      LStart := PdbTickMs;
+      while (not LWaiter.Finished) and (PdbTickMs - LStart < HOLD_MS) do
+        Sleep(20);
+      LScope.Rollback;
+      LWaiter.WaitFor;
+      LElapsed := LWaiter.ElapsedMs;
+      LErrorClass := LWaiter.ErrorClass;
+      LError := LWaiter.Error;
+    finally
+      LWaiter.Free;
+    end;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+  TAssert.AssertEquals('The waiting UPDATE must raise ELockConflictException (got: ' + LError +
+    ', after ' + IntToStr(LElapsed) + ' ms)', 'ELockConflictException', LErrorClass);
+  TAssert.AssertTrue(Format('It must wait for the lock, not fail at once: %d ms', [Integer(LElapsed)]),
+    LElapsed >= LOCK_TIMEOUT_MS div 2);
+  TAssert.AssertTrue(Format('It must give up near LockTimeoutMs (%d ms): %d ms', [LOCK_TIMEOUT_MS, Integer(LElapsed)]),
+    LElapsed < HOLD_MS div 2);
 end;
 
 procedure TContractTests.Unreachable_AcquireRaisesConnectException;

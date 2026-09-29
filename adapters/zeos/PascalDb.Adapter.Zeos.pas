@@ -76,7 +76,20 @@
     connection that tries to write fails at once with "database is locked"
     (measured: 3 of 4 concurrent writers failed within 4 ms). SQLite
     connections get Zeos's busytimeout=5000 (milliseconds) unless the
-    settings say otherwise. }
+    settings say otherwise.
+  - IDatabaseConfig.LockTimeoutMs: Firebird gets isc_tpb_wait and
+    isc_tpb_lock_timeout (whole seconds, rounded up) in its transaction
+    parameters; PostgreSQL a SET lock_timeout right after connecting (one
+    server session per TZConnection); SQLite the busy timeout. Without it,
+    Zeos on Firebird doesn't wait for a lock at all: the read-committed TPB
+    it builds is isc_tpb_nowait, so a statement meeting another
+    transaction's lock fails at once (measured, Firebird 2.5), and that
+    error is an ELockConflictException too. The driver's lock conflict
+    errors (Firebird GDS isc_lock_timeout, isc_lock_conflict, isc_deadlock
+    and isc_update_conflict; PostgreSQL SQLSTATE 55P03, 40P01 and 40001;
+    SQLite SQLITE_BUSY and SQLITE_LOCKED) become ELockConflictException.
+    Firebird 5 reports an expired lock timeout as isc_deadlock (measured on
+    Linux, Firebird 3 client API). }
 
 interface
 
@@ -101,9 +114,12 @@ type
   private
     FConnection: TZConnection;
     FSQLDialect: ISQLDialect;
+    FLockTimeoutMs: Integer;
   public
-    /// Takes ownership of AConnection.
-    constructor Create(AConnection: TZConnection; const ASQLDialect: ISQLDialect);
+    /// Takes ownership of AConnection. ALockTimeoutMs: applied again on each
+    /// Connect where the database needs it (PostgreSQL).
+    constructor Create(AConnection: TZConnection; const ASQLDialect: ISQLDialect;
+      ALockTimeoutMs: Integer = 0);
     destructor Destroy; override;
     function GetNativeConnection: TObject;
     function IsConnected: Boolean;
@@ -127,6 +143,7 @@ type
     procedure DoCommit; override;
     procedure DoRollback; override;
     procedure DoExecSql(const ASql: string); override;
+    function IsLockConflictError(E: Exception): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection);
     destructor Destroy; override;
@@ -179,6 +196,7 @@ type
     procedure DoClearParams; override;
     function ResetParamValues: Boolean; override;
     function CreateParams: IParams; override;
+    function IsLockConflictError(E: Exception): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
     destructor Destroy; override;
@@ -218,8 +236,70 @@ procedure PdbZeosDropFirebirdDatabase(ASettings: TStrings);
 implementation
 
 uses
+  ZExceptions,
   ZDbcInterbase6,
+  ZDbcInterbase6Utils,
   ZPlainFirebirdInterbaseDriver;
+
+const
+  SQLITE_BUSY = 5;   // sqlite3.h: "The database file is locked"
+  SQLITE_LOCKED = 6; // sqlite3.h: "A table in the database is locked"
+  PG_LOCK_NOT_AVAILABLE = '55P03';
+  PG_DEADLOCK_DETECTED = '40P01';
+  PG_SERIALIZATION_FAILURE = '40001';
+
+function IsProtocol(AConn: TZConnection; const APrefix: string): Boolean;
+begin
+  Result := SameText(Copy(AConn.Protocol, 1, Length(APrefix)), APrefix);
+end;
+
+// See the unit header: the lock timeout settings Zeos takes before connecting.
+// ASettings are the configured ones, to leave alone what they set.
+procedure SetZeosLockTimeout(AConn: TZConnection; ASettings: TStrings; AMs: Integer);
+begin
+  if AMs <= 0 then
+    Exit;
+  if IsProtocol(AConn, 'firebird') and (ASettings.Values['isc_tpb_lock_timeout'] = '') then
+  begin
+    if AConn.Properties.IndexOf('isc_tpb_nowait') < 0 then
+      AConn.Properties.Add('isc_tpb_wait');
+    AConn.Properties.Values['isc_tpb_lock_timeout'] := IntToStr((AMs + 999) div 1000);
+  end
+  else if IsProtocol(AConn, 'sqlite') and (ASettings.Values['busytimeout'] = '') then
+    AConn.Properties.Values['busytimeout'] := IntToStr(AMs);
+end;
+
+// See the unit header: PostgreSQL's lock timeout is set on the open session.
+procedure ApplyZeosLockTimeout(AConn: TZConnection; AMs: Integer);
+begin
+  if (AMs > 0) and IsProtocol(AConn, 'postgresql') then
+    AConn.ExecuteDirect('SET lock_timeout = ' + IntToStr(AMs));
+end;
+
+// See the unit header: the driver's lock conflict errors.
+function IsZeosLockConflict(E: Exception; AConn: TZConnection): Boolean;
+var
+  LCode: Integer;
+  LState: string;
+begin
+  Result := False;
+  if not (E is EZSQLThrowable) then
+    Exit;
+  if EZSQLThrowable(E).SpecificData is TZIBSpecificData then
+  begin
+    LCode := TZIBSpecificData(EZSQLThrowable(E).SpecificData).IBErrorCode;
+    Result := (LCode = isc_lock_timeout) or (LCode = isc_lock_conflict) or
+      (LCode = isc_deadlock) or (LCode = isc_update_conflict);
+  end
+  else if IsProtocol(AConn, 'postgresql') then
+  begin
+    LState := EZSQLThrowable(E).StatusCode;
+    Result := (LState = PG_LOCK_NOT_AVAILABLE) or (LState = PG_DEADLOCK_DETECTED) or
+      (LState = PG_SERIALIZATION_FAILURE);
+  end
+  else if IsProtocol(AConn, 'sqlite') then
+    Result := (EZSQLThrowable(E).ErrorCode = SQLITE_BUSY) or (EZSQLThrowable(E).ErrorCode = SQLITE_LOCKED);
+end;
 
 function PdbZeosNewConnection(ASettings: TStrings): TZConnection;
 var
@@ -291,11 +371,13 @@ end;
 
 { TZeosConnectionAdapter }
 
-constructor TZeosConnectionAdapter.Create(AConnection: TZConnection; const ASQLDialect: ISQLDialect);
+constructor TZeosConnectionAdapter.Create(AConnection: TZConnection; const ASQLDialect: ISQLDialect;
+  ALockTimeoutMs: Integer);
 begin
   inherited Create;
   FConnection := AConnection;
   FSQLDialect := ASQLDialect;
+  FLockTimeoutMs := ALockTimeoutMs;
 end;
 
 destructor TZeosConnectionAdapter.Destroy;
@@ -317,6 +399,7 @@ end;
 procedure TZeosConnectionAdapter.Connect;
 begin
   FConnection.Connect;
+  ApplyZeosLockTimeout(FConnection, FLockTimeoutMs);
 end;
 
 procedure TZeosConnectionAdapter.Commit;
@@ -389,6 +472,11 @@ begin
   finally
     LQuery.Free;
   end;
+end;
+
+function TZeosTransactionAdapter.IsLockConflictError(E: Exception): Boolean;
+begin
+  Result := IsZeosLockConflict(E, FConnection);
 end;
 
 function TZeosTransactionAdapter.GetNativeTransaction: TObject;
@@ -569,6 +657,11 @@ begin
     SameText(Copy(FQuery.Connection.Protocol, 1, 6), 'sqlite'));
 end;
 
+function TZeosQueryAdapter.IsLockConflictError(E: Exception): Boolean;
+begin
+  Result := IsZeosLockConflict(E, FQuery.Connection as TZConnection);
+end;
+
 { TZeosProvider }
 
 function TZeosProvider.BuildConnection(AConfig: IDatabaseConfig): IDBConnection;
@@ -577,12 +670,15 @@ var
 begin
   LConn := PdbZeosNewConnection(AConfig.ConnectionParams);
   try
+    SetZeosLockTimeout(LConn, AConfig.ConnectionParams, AConfig.LockTimeoutMs);
     LConn.Connect;
+    ApplyZeosLockTimeout(LConn, AConfig.LockTimeoutMs);
   except
     LConn.Free;
     raise;
   end;
-  Result := TZeosConnectionAdapter.Create(LConn, TSQLDialectFactory.GetDialect(AConfig.SQLDialect));
+  Result := TZeosConnectionAdapter.Create(LConn, TSQLDialectFactory.GetDialect(AConfig.SQLDialect),
+    AConfig.LockTimeoutMs);
 end;
 
 function TZeosProvider.BuildTransaction(AConn: IDBConnection): ITransaction;

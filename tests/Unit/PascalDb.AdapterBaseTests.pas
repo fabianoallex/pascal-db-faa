@@ -358,6 +358,9 @@ begin
   TAssert.AssertEquals('PoolIdleTimeoutSeconds', 0, LConfig.PoolIdleTimeoutSeconds);
   TAssert.AssertEquals('PoolValidateIdleSeconds', 120, LConfig.PoolValidateIdleSeconds);
   TAssert.AssertEquals('PoolKeepaliveSeconds', 0, LConfig.PoolKeepaliveSeconds);
+  TAssert.AssertEquals('LockTimeoutMs', 0, LConfig.LockTimeoutMs);
+  LConfig.LockTimeoutMs := -1;
+  TAssert.AssertEquals('A negative LockTimeoutMs must be ignored', 0, LConfig.LockTimeoutMs);
 end;
 
 procedure TAdapterBaseTests.Factory_PoolMaxZero_RaisesClearError;

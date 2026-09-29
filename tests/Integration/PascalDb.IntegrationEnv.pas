@@ -70,6 +70,11 @@ function IntegrationPoolMax: Integer;
 /// call; nothing is created or dropped.
 function UnreachableFactory: IDBFactory;
 
+/// A factory for IntegrationFactory's database (call IntegrationFactory
+/// first) with LockTimeoutMs set to AMs. A new one on each call, with no
+/// initial connections; nothing is created or dropped.
+function LockTimeoutFactory(AMs: Integer): IDBFactory;
+
 implementation
 
 uses
@@ -676,6 +681,15 @@ begin
       LConfig.ConnectionParams.Values['Protocol'] := 'TCPIP';
     {$IFEND}
   end;
+  Result := NewFactory(LConfig);
+end;
+
+function LockTimeoutFactory(AMs: Integer): IDBFactory;
+var
+  LConfig: IDatabaseConfig;
+begin
+  LConfig := BuildConfig;
+  LConfig.LockTimeoutMs := AMs;
   Result := NewFactory(LConfig);
 end;
 

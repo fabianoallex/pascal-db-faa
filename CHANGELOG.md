@@ -4,6 +4,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 follow [Semantic Versioning](https://semver.org/). While the version is 0.x, a minor version
 may change the API; each such change is listed here.
 
+## [Unreleased]
+
+### Added
+
+- `IDatabaseConfig.LockTimeoutMs`: the longest a statement waits for a lock held by another
+  transaction, on every adapter (Firebird transaction parameters, whole seconds; PostgreSQL
+  `lock_timeout`; SQLite busy timeout). 0 (default) keeps each database's behavior: Firebird
+  and PostgreSQL wait until the lock is released. **Breaking** for a custom `IDatabaseConfig`
+  implementation: the interface has two new methods.
+- `ELockConflictException` (`PascalDb.Interfaces`): raised by `Open` / `ExecSql` instead of the
+  driver's exception when another transaction stopped the statement: a lock wait longer than
+  `LockTimeoutMs`, an immediate lock conflict (Zeos and FireDAC on Firebird don't wait), an update
+  conflict or a deadlock (Firebird 5 reports an expired lock wait with the same codes as an
+  update conflict). The driver's detail is in `OriginalClassName` / `OriginalMessage`. Adapters
+  recognize their driver's errors by overriding `IsLockConflictError` (`TTransactionBase`,
+  `TDataSetQueryBase`). **Breaking** for a program that caught the driver's exception for a
+  deadlock or an update conflict: it now gets this class.
+
+### Fixed
+
+- SQLdb: settings with no value in `ConnectionParams` are no longer passed to the driver. FPC's
+  `Values[Name] := ''` keeps a `Name=` line, and on PostgreSQL an empty `port=` made libpq read
+  the next option of the connection string as the port.
+
 ## [0.3.0] - 2026-09-28
 
 ### Changed

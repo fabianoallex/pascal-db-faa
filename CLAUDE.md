@@ -229,6 +229,10 @@ them the driver's quirks):
   `TDataSetQueryBase` over the driver's query dataset. Non-nullable getters use `TField`
   semantics (NULL reads as `''`/`0`/`False`); booleans convert through Variant, so a Firebird
   2.5 SMALLINT flag reads as a Boolean.
+- `TTransactionBase.ExecSql` and `TDataSetQueryBase.Open`/`ExecSql` turn the driver's lock
+  conflict errors (expired lock wait, immediate lock conflict, update conflict, deadlock) into
+  `ELockConflictException` through the adapter's `IsLockConflictError` override; each adapter
+  applies `IDatabaseConfig.LockTimeoutMs` its own way (gotcha 32).
 
 | Adapter | Compiler | Package / unit | Status |
 |---|---|---|---|
@@ -565,3 +569,38 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     unprepares when the transaction isn't active or isn't the one it prepared in (the adapter counts
     the transactions it starts in `TSQLTransaction.Tag`); `DoOpen` unprepares first and lets SQLdb
     prepare. Contract test `SameQuery_AcrossTransactions` (one query, three transactions in a row).
+32. **Zeos 8 (and FireDAC) + Firebird: a statement meeting another transaction's row lock fails at once;
+    SQLdb waits forever.** Found writing the contract test `LockWait_GivesUpAfterLockTimeout`
+    (FPC 3.2.2, Windows, Firebird 2.5): Zeos failed after 0.1 s with "lock conflict on no wait
+    transaction" (GDS 335544345), while SQLdb waited until the other transaction ended (the 8 s
+    the test held the row), as did both adapters on PostgreSQL; SQLite gave up after its 5 s busy
+    timeout. Cause: the Zeos adapter sets `tiReadCommitted`, and Zeos's `GenerateTPB`
+    (`ZDbcFirebirdInterbase.pas`) makes read committed `isc_tpb_nowait`; SQLdb sends an empty
+    TPB, whose Firebird default is `wait`. Fix: `IDatabaseConfig.LockTimeoutMs` gives every
+    adapter the same bounded wait (Firebird: `isc_tpb_wait` + `isc_tpb_lock_timeout`, whole
+    seconds; PostgreSQL: `lock_timeout`, through the connection string on SQLdb because its
+    PostgreSQL connector opens a server connection per transaction, `SET` after connecting on
+    Zeos/FireDAC; SQLite: busy timeout), and the driver's error becomes `ELockConflictException`.
+    With 1000 ms, SQLdb and Zeos gave up after ~1.1 s on all three databases (Windows) and on
+    Firebird 5 (Linux). The expired wait's code differs by server version: Firebird 2.5 gives
+    `isc_lock_timeout` (335544510, measured on SQLdb and FireDAC), Firebird 5 gives `isc_deadlock`
+    (335544336) + `isc_update_conflict` + `isc_concurrent_transaction`, the same codes as a real
+    update conflict (measured on SQLdb and Zeos, Linux, Firebird 3 client). So the exception is a
+    general lock *conflict* (also `isc_lock_conflict`; PostgreSQL SQLSTATE `55P03`, `40P01`,
+    `40001`; SQLite `SQLITE_BUSY`, `SQLITE_LOCKED`), not a timeout. The default (0) keeps each
+    driver's waiting behavior. FireDAC (Delphi 12 CE, measured through
+    `MON$TRANSACTIONS.MON$LOCK_TIMEOUT` of the waiting transaction, no driver source): its Firebird
+    transactions are `nowait` by default too (`UpdateOptions.LockWait = False`); the lock timeout
+    only takes with the short names (`wait`, `lock_timeout=N`, not `isc_tpb_*`) in the
+    `TFDTransaction`'s own `Options.Params` (the connection's `TxOptions.Params` alone is
+    ignored); and its lock errors come as kind `ekOther`, not `ekRecordLocked`, so they are
+    recognized by code (GDS code in `TFDDBError.ErrorCode`, SQLSTATE in `TFDPgError.ErrorCode`).
+    Every adapter now passes the test on Windows (FPC and Delphi Win32/Win64) and Linux.
+33. **FPC: `TStrings.Values[Name] := ''` keeps a `Name=` line; Delphi deletes it.** Found when the
+    SQLdb adapter added `options='-c lock_timeout=N'` for PostgreSQL: on Linux every connection
+    failed with `invalid connection option "lock_timeout"`, on Windows none did. The integration
+    environment writes `Values['Port'] := Port`, empty on Linux; FPC 3.2.2's `TStrings.SetValue`
+    adds `Port=` (`stringl.inc`), the adapter passed it on as `port=`, and libpq, after an empty
+    `port=`, took the next token (`options='-c`) as the port's value. It was harmless while
+    `port=` came last in the connection string. Fix: the SQLdb adapter leaves out settings with
+    no value. On Windows the runs always had a port, which hid it.

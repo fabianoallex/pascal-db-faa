@@ -29,7 +29,8 @@
     SharedCache=False   with FireDAC's default (True), a second writer failed
                         at once with "database table is locked" (a table
                         lock, which the busy timeout doesn't wait for);
-    BusyTimeout=5000    and UpdateOptions.LockWait = True: with SharedCache
+    BusyTimeout=5000    (or IDatabaseConfig.LockTimeoutMs when set)
+                        and UpdateOptions.LockWait = True: with SharedCache
                         off, a second writer still failed at once, with
                         "database is locked"; with both of these set it
                         waited for the lock (which of the two was needed
@@ -43,7 +44,25 @@
   consumer doesn't hit "Object factory ... missing". Connections run with
   ResourceOptions.SilentMode, so no wait-cursor unit is required either.
   Queries fetch the whole result on Open (FetchOptions.Mode = fmAll), so
-  RecordCount is the real row count, as on the other adapters. }
+  RecordCount is the real row count, as on the other adapters.
+
+  IDatabaseConfig.LockTimeoutMs: connections get UpdateOptions.LockWait =
+  True; Firebird transactions get wait and lock_timeout (whole seconds,
+  rounded up) in their Options.Params; PostgreSQL a SET lock_timeout right
+  after connecting; SQLite the busy timeout. Measured on Firebird 2.5
+  (Delphi 12 CE, Win64, MON$TRANSACTIONS.MON$LOCK_TIMEOUT of the waiting
+  transaction): the short names work and the isc_tpb_ ones are ignored, and
+  only in the TFDTransaction's Options.Params, not in the connection's
+  TxOptions alone. Without LockTimeoutMs, FireDAC's Firebird transactions
+  don't wait at all (MON$LOCK_TIMEOUT = 0: UpdateOptions.LockWait is False
+  by default).
+  FireDAC doesn't give the lock errors of Firebird and PostgreSQL the kind
+  ekRecordLocked (measured: ekOther), so they are recognized by code: the
+  GDS code in TFDDBError.ErrorCode (Firebird), the SQLSTATE in
+  TFDPgError.ErrorCode (PostgreSQL); ekRecordLocked still covers SQLite.
+  Those become ELockConflictException (see the codes in
+  PascalDb.Adapter.SQLdb). The Community Edition has no source for the
+  drivers: these came from measurement and the names in the compiled units. }
 
 interface
 
@@ -81,9 +100,12 @@ type
   private
     FConnection: TFDConnection;
     FSQLDialect: ISQLDialect;
+    FLockTimeoutMs: Integer;
   public
-    /// Takes ownership of AConnection.
-    constructor Create(AConnection: TFDConnection; const ASQLDialect: ISQLDialect);
+    /// Takes ownership of AConnection. ALockTimeoutMs: applied again on each
+    /// Connect where the database needs it (PostgreSQL).
+    constructor Create(AConnection: TFDConnection; const ASQLDialect: ISQLDialect;
+      ALockTimeoutMs: Integer = 0);
     destructor Destroy; override;
     function GetNativeConnection: TObject;
     function IsConnected: Boolean;
@@ -106,6 +128,7 @@ type
     procedure DoCommit; override;
     procedure DoRollback; override;
     procedure DoExecSql(const ASql: string); override;
+    function IsLockConflictError(E: Exception): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection);
     destructor Destroy; override;
@@ -155,6 +178,7 @@ type
     procedure DoClearParams; override;
     function ResetParamValues: Boolean; override;
     function CreateParams: IParams; override;
+    function IsLockConflictError(E: Exception): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
     destructor Destroy; override;
@@ -187,8 +211,55 @@ procedure PdbFireDACUseVendorLib(const ADriverID, AVendorLib: string);
 
 implementation
 
+uses
+  FireDAC.Stan.Error,
+  FireDAC.Phys.PGWrapper;
+
+const
+  // iberror.h; see PascalDb.Adapter.SQLdb
+  ISC_DEADLOCK = 335544336;
+  ISC_LOCK_CONFLICT = 335544345;
+  ISC_UPDATE_CONFLICT = 335544451;
+  ISC_LOCK_TIMEOUT = 335544510;
+
 var
   GDriverLinks: TObjectList<TFDPhysDriverLink> = nil;
+
+// See the unit header: PostgreSQL's lock timeout is set on the open session.
+procedure ApplyFireDACLockTimeout(AConn: TFDConnection; AMs: Integer);
+begin
+  if (AMs > 0) and SameText(AConn.Params.Values['DriverID'], 'PG') then
+    AConn.ExecSQL('SET lock_timeout = ' + IntToStr(AMs));
+end;
+
+// See the unit header.
+function IsFireDACLockConflict(E: Exception): Boolean;
+var
+  LError: EFDDBEngineException;
+  LItem: TFDDBError;
+  LState: string;
+  I: Integer;
+begin
+  Result := False;
+  if not (E is EFDDBEngineException) then
+    Exit;
+  LError := EFDDBEngineException(E);
+  if LError.Kind = ekRecordLocked then
+    Exit(True);
+  for I := 0 to LError.ErrorCount - 1 do
+  begin
+    LItem := LError.Errors[I];
+    if LItem is TFDPgError then
+    begin
+      LState := TFDPgError(LItem).ErrorCode;
+      if (LState = '55P03') or (LState = '40P01') or (LState = '40001') then
+        Exit(True);
+    end
+    else if (LItem.ErrorCode = ISC_LOCK_TIMEOUT) or (LItem.ErrorCode = ISC_LOCK_CONFLICT) or
+      (LItem.ErrorCode = ISC_DEADLOCK) or (LItem.ErrorCode = ISC_UPDATE_CONFLICT) then
+      Exit(True);
+  end;
+end;
 
 procedure PdbFireDACUseVendorLib(const ADriverID, AVendorLib: string);
 var
@@ -221,11 +292,13 @@ end;
 
 { TFDConnectionAdapter }
 
-constructor TFDConnectionAdapter.Create(AConnection: TFDConnection; const ASQLDialect: ISQLDialect);
+constructor TFDConnectionAdapter.Create(AConnection: TFDConnection; const ASQLDialect: ISQLDialect;
+  ALockTimeoutMs: Integer);
 begin
   inherited Create;
   FConnection := AConnection;
   FSQLDialect := ASQLDialect;
+  FLockTimeoutMs := ALockTimeoutMs;
 end;
 
 destructor TFDConnectionAdapter.Destroy;
@@ -247,6 +320,7 @@ end;
 procedure TFDConnectionAdapter.Connect;
 begin
   FConnection.Open;
+  ApplyFireDACLockTimeout(FConnection, FLockTimeoutMs);
 end;
 
 procedure TFDConnectionAdapter.Commit;
@@ -274,6 +348,10 @@ begin
   inherited Create(AConn);
   FTransaction := TFDTransaction.Create(nil);
   FTransaction.Connection := AConn.GetNativeConnection as TFDConnection;
+  // The Firebird lock timeout BuildConnection put in the connection's
+  // TxOptions: FireDAC reads it only from the transaction's own options
+  // (see the unit header).
+  FTransaction.Options.Params.Assign(FTransaction.Connection.TxOptions.Params);
 end;
 
 destructor TFDTransactionAdapter.Destroy;
@@ -314,6 +392,11 @@ begin
   finally
     LQuery.Free;
   end;
+end;
+
+function TFDTransactionAdapter.IsLockConflictError(E: Exception): Boolean;
+begin
+  Result := IsFireDACLockConflict(E);
 end;
 
 function TFDTransactionAdapter.GetNativeTransaction: TObject;
@@ -494,6 +577,11 @@ begin
   Result := TFDParamsAdapter.Create(FQuery);
 end;
 
+function TFDQueryAdapter.IsLockConflictError(E: Exception): Boolean;
+begin
+  Result := IsFireDACLockConflict(E);
+end;
+
 { TFDProvider }
 
 function TFDProvider.BuildConnection(AConfig: IDatabaseConfig): IDBConnection;
@@ -522,15 +610,30 @@ begin
       if LConn.Params.Values['StringFormat'] = '' then
         LConn.Params.Values['StringFormat'] := 'Unicode';
       if LConn.Params.Values['BusyTimeout'] = '' then
-        LConn.Params.Values['BusyTimeout'] := '5000';
+        if AConfig.LockTimeoutMs > 0 then
+          LConn.Params.Values['BusyTimeout'] := IntToStr(AConfig.LockTimeoutMs)
+        else
+          LConn.Params.Values['BusyTimeout'] := '5000';
       LConn.UpdateOptions.LockWait := True;
     end;
+    // Lock timeout: see the unit header.
+    if AConfig.LockTimeoutMs > 0 then
+    begin
+      LConn.UpdateOptions.LockWait := True;
+      if SameText(LParams.Values['DriverID'], 'FB') then
+      begin
+        LConn.TxOptions.Params.Add('wait');
+        LConn.TxOptions.Params.Add('lock_timeout=' + IntToStr((AConfig.LockTimeoutMs + 999) div 1000));
+      end;
+    end;
     LConn.Connected := True;
+    ApplyFireDACLockTimeout(LConn, AConfig.LockTimeoutMs);
   except
     LConn.Free;
     raise;
   end;
-  Result := TFDConnectionAdapter.Create(LConn, TSQLDialectFactory.GetDialect(AConfig.SQLDialect));
+  Result := TFDConnectionAdapter.Create(LConn, TSQLDialectFactory.GetDialect(AConfig.SQLDialect),
+    AConfig.LockTimeoutMs);
 end;
 
 function TFDProvider.BuildTransaction(AConn: IDBConnection): ITransaction;

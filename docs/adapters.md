@@ -87,6 +87,11 @@ SQLite needs `sqlite3` on SQLdb and Zeos, while FireDAC links SQLite into the pr
   pattern does).
 - Zeos on Firebird uses hard commits (`hard_commit=true`) unless the settings say otherwise;
   without it a `Commit` after an `INSERT ... RETURNING` could loop forever (gotcha 16).
+- Zeos and FireDAC on Firebird don't wait for a row another transaction holds: the statement
+  fails at once with `ELockConflictException`, where SQLdb and PostgreSQL wait until the lock is
+  released.
+  `LockTimeoutMs` makes every adapter wait up to the same limit
+  ([guide 6](errors.md#locks-and-conflicts-elockconflictexception); gotcha 32).
 - On Delphi, the adapters bind strings as Unicode; a plain `AsString` on a FireDAC or Data.DB
   parameter would turn characters outside the ANSI code page into `?` (gotcha 13).
 

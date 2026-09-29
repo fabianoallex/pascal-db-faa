@@ -14,6 +14,7 @@ the failure happens:
 | Opening a **new** connection fails (server down, wrong host or port, bad credentials, missing client library) | `EDatabaseConnectException`, a subclass of `EDatabaseUnavailableException`; the driver's detail is in `OriginalClassName` / `OriginalMessage` | `AcquireQuery` / `AcquireConnection` |
 | An **open** connection drops while in use | `EDatabaseUnavailableException` | `Open`, `ExecSql`, `StartTransaction`, `Commit`, `Rollback` |
 | A data error: constraint violation, bad SQL, wrong type | the driver's own exception, unchanged | `Open`, `ExecSql`, `Commit` |
+| Another transaction holds or changed the data: a lock wait longer than `LockTimeoutMs`, an update conflict, a deadlock | `ELockConflictException`; the driver's detail is in `OriginalClassName` / `OriginalMessage` | `Open`, `ExecSql` |
 | No free connection within the wait limit | `EPoolTimeoutException` (unit `PascalDb.Pool`) | `AcquireQuery` / `AcquireConnection` |
 | A SQL key that doesn't exist | `ESQLLoaderException` | `SqlLoader['KEY']` |
 | A `.sql` file or resource with non-ASCII text while an FPC program's code page isn't UTF-8 | `ESqlSourceException` | `SqlLoader['KEY']` |
@@ -134,6 +135,50 @@ no `ON CONFLICT`.
 
 To test this without a database, make the mock fail the `INSERT` with `AddFailure` and answer
 the existence check with `AddResult` ([guide 5](testing-with-the-mock.md#simulating-a-database-error)).
+
+## Locks and conflicts: `ELockConflictException`
+
+A statement that changes a row another transaction has changed and not yet committed waits
+for that transaction to end. On Firebird and PostgreSQL it waits **as long as it takes**: a
+transaction left open by a stuck request holds every later writer of the same rows, and each
+of them holds a pooled connection while it waits. `IDatabaseConfig.LockTimeoutMs` bounds that
+wait:
+
+```pascal
+LConfig.LockTimeoutMs := 5000;  // give up after 5 s
+```
+
+The statement then fails with `ELockConflictException`, whatever the driver. The same class
+covers the other ways another transaction can stop a change: Zeos and FireDAC on Firebird not
+waiting at all, an **update conflict** (the row was changed by a transaction that committed while this one
+waited, on Firebird's snapshot isolation), a **deadlock**, and PostgreSQL's serialization
+failure. They share one class because the databases don't tell them apart reliably (Firebird 5
+reports an expired lock timeout with the same codes as an update conflict) and because the
+remedy is the same: roll the transaction back (on PostgreSQL nothing else runs in it after an
+error) and, when the work is safe to repeat, repeat the whole unit of work later, as in
+[trying again after an outage](#trying-again-after-an-outage). A layer on top would usually
+answer 409.
+
+`Message` ("The data is locked or was changed by another transaction.") is safe to show; the
+driver's detail is in `OriginalClassName` / `OriginalMessage`. The connection is healthy and
+stays in the pool.
+
+| Database | How `LockTimeoutMs` is applied | With `LockTimeoutMs` = 0 (default) | Recognized as a conflict |
+|---|---|---|---|
+| Firebird | transaction parameters (`isc_tpb_wait` + `isc_tpb_lock_timeout`), **whole seconds**: the value is rounded up | SQLdb waits until the lock is released; **Zeos and FireDAC don't wait at all** (their transactions are `nowait`, so the statement fails at once) | GDS `isc_lock_timeout`, `isc_lock_conflict`, `isc_deadlock`, `isc_update_conflict` |
+| PostgreSQL | `lock_timeout` of each server session | waits until the lock is released | SQLSTATE `55P03`, `40P01`, `40001` |
+| SQLite | the busy timeout, for the database's single write lock | 5000 ms (the adapters' busy timeout); an explicit `BusyTimeout` / `busytimeout` setting wins over `LockTimeoutMs` | `SQLITE_BUSY`, `SQLITE_LOCKED` |
+
+What `LockTimeoutMs` doesn't cover: a slow query that isn't waiting for anyone (a full scan, a
+big report) runs to the end, and a plain `SELECT` rarely waits for a lock at all (Firebird and
+PostgreSQL read the last committed version of the row).
+
+Measured with the contract test `LockWait_GivesUpAfterLockTimeout` (1000 ms): every adapter
+gave up after about 1 s — SQLdb and Zeos on Firebird 2.5, PostgreSQL 17 and SQLite (Windows) and
+on Firebird 5 (Linux), FireDAC and Zeos on Delphi (Win32 and Win64; PostgreSQL Win64 only).
+Without the setting, PostgreSQL and SQLdb on Firebird waited the full 8 s the test held the lock,
+Zeos on Firebird failed at once (FireDAC's transactions showed the same `nowait` in
+`MON$TRANSACTIONS`), and SQLite gave up after 5 s.
 
 ## Pool timeouts
 

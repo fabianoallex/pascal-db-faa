@@ -105,6 +105,30 @@ type
     constructor Create(AOriginalException: Exception);
   end;
 
+  // Raised by Open/ExecSql instead of the driver's exception when a statement
+  // couldn't change data because of another transaction: it waited for that
+  // transaction's lock longer than IDatabaseConfig.LockTimeoutMs, the driver
+  // doesn't wait at all (Zeos on Firebird without LockTimeoutMs), the row was
+  // changed by a transaction that committed meanwhile (update conflict), or
+  // the database detected a deadlock. One class for all of them because
+  // Firebird 3+ reports an expired lock timeout with the same codes as an
+  // update conflict (deadlock, update conflict, concurrent transaction), and
+  // the remedy is the same: roll back and, if it makes sense, repeat the
+  // whole unit of work. The database is fine and the connection stays in
+  // the pool. Each adapter recognizes its driver's errors (Firebird GDS
+  // codes, PostgreSQL SQLSTATE 55P03/40P01/40001, SQLite SQLITE_BUSY and
+  // SQLITE_LOCKED); OriginalClassName/OriginalMessage keep the driver's
+  // detail. An HTTP layer would typically answer 409.
+  ELockConflictException = class(Exception)
+  private
+    FOriginalClassName: string;
+    FOriginalMessage: string;
+  public
+    constructor Create(AOriginalException: Exception);
+    property OriginalClassName: string read FOriginalClassName;
+    property OriginalMessage: string read FOriginalMessage;
+  end;
+
   // Implemented only by the wrapper the pool returns from AcquireConnection
   // (PascalDb.Pool.TConnectionWrapper) — never by the "real" adapters, which
   // know nothing about the pool. See MarkConnectionBrokenIfNeeded below: it is
@@ -359,6 +383,7 @@ type
     function GetPoolIdleCheckIntervalMs: Integer;
     function GetPoolValidateIdleSeconds: Integer;
     function GetPoolKeepaliveSeconds: Integer;
+    function GetLockTimeoutMs: Integer;
     function GetSQLDialect: string;
     procedure SetPoolIniConnections(AValue: Integer);
     procedure SetPoolMaxConnections(AValue: Integer);
@@ -368,6 +393,7 @@ type
     procedure SetPoolIdleCheckIntervalMs(AValue: Integer);
     procedure SetPoolValidateIdleSeconds(AValue: Integer);
     procedure SetPoolKeepaliveSeconds(AValue: Integer);
+    procedure SetLockTimeoutMs(AValue: Integer);
     procedure SetSQLDialect(AValue: string);
     function GetSQLDirectory: string;
     procedure SetSQLDirectory(const AValue: string);
@@ -397,6 +423,13 @@ type
     /// for this many seconds, and discards the ones that fail. Checked every
     /// PoolIdleCheckIntervalMs. 0 (default) = off; negative values are ignored.
     property PoolKeepaliveSeconds: Integer read GetPoolKeepaliveSeconds write SetPoolKeepaliveSeconds;
+    /// The longest a statement waits for a lock held by another transaction
+    /// (a row being updated, SQLite's write lock) before failing with
+    /// ELockConflictException. 0 (default) = each database's own behavior:
+    /// Firebird and PostgreSQL wait until the lock is released, SQLite waits
+    /// the adapter's busy timeout (5000 ms). Firebird counts whole seconds,
+    /// so the value is rounded up. Negative values are ignored.
+    property LockTimeoutMs: Integer read GetLockTimeoutMs write SetLockTimeoutMs;
     property SQLDialect: string read GetSQLDialect write SetSQLDialect;
     /// Logical SQL directory handed to the factory's TSQLLoader (e.g. 'FB').
     property SQLDirectory: string read GetSQLDirectory write SetSQLDirectory;
@@ -530,6 +563,18 @@ end;
 constructor EDatabaseUnavailableException.Create(AOriginalException: Exception);
 begin
   inherited Create('Database unavailable or connection lost. Please try again shortly.');
+  if Assigned(AOriginalException) then
+  begin
+    FOriginalClassName := AOriginalException.ClassName;
+    FOriginalMessage := AOriginalException.Message;
+  end;
+end;
+
+{ ELockConflictException }
+
+constructor ELockConflictException.Create(AOriginalException: Exception);
+begin
+  inherited Create('The data is locked or was changed by another transaction.');
   if Assigned(AOriginalException) then
   begin
     FOriginalClassName := AOriginalException.ClassName;

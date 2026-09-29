@@ -21,7 +21,8 @@
     CharSet        connection character set (e.g. UTF8)
     BusyTimeout    SQLite only: milliseconds a statement waits for another
                    connection's write lock before failing with "database is
-                   locked" (default 5000)
+                   locked" (default: IDatabaseConfig.LockTimeoutMs, or 5000
+                   when that is 0)
     ClientLibrary  full path of the client library (fbclient/libpq/sqlite3) when it
                    isn't found on the default search path (optional)
   Any other line is passed to the connection's Params as is.
@@ -45,7 +46,19 @@
     connection that tries to write fails at once with "database is locked"
     (measured: 3 of 4 concurrent writers failed within 4 ms). Every SQLite
     connection gets PRAGMA busy_timeout (BusyTimeout, default 5000 ms) when
-    it opens. }
+    it opens.
+  - IDatabaseConfig.LockTimeoutMs: Firebird gets it in every transaction's
+    TPB (isc_tpb_lock_timeout, whole seconds, rounded up, with SQLdb's
+    default concurrency/wait/write spelled out, since a TPB with any item
+    replaces the defaults); PostgreSQL through the connection string
+    (options='-c lock_timeout=N'), because the PostgreSQL connector opens a
+    server connection per transaction and a SET would reach only one of
+    them; SQLite as the busy timeout. The driver's lock conflict errors
+    (Firebird GDS isc_lock_timeout, isc_lock_conflict, isc_deadlock and
+    isc_update_conflict; PostgreSQL SQLSTATE 55P03, 40P01 and 40001; SQLite
+    SQLITE_BUSY and SQLITE_LOCKED) become ELockConflictException. Firebird 5
+    reports an expired lock timeout as isc_deadlock (measured on Linux), 2.5
+    as isc_lock_timeout. }
 
 interface
 
@@ -69,15 +82,24 @@ uses
   PascalDb.Adapter.DataSet;
 
 type
+  { TPdbSQLConnector }
+
+  // The native connection: a TSQLConnector that also carries the settings
+  // the transactions and a reconnect need (IDatabaseConfig.LockTimeoutMs).
+  TPdbSQLConnector = class(TSQLConnector)
+  public
+    LockTimeoutMs: Integer;
+  end;
+
   { TSQLdbConnectionAdapter }
 
   TSQLdbConnectionAdapter = class(TInterfacedObject, IDBConnection)
   private
-    FConnection: TSQLConnector;
+    FConnection: TPdbSQLConnector;
     FSQLDialect: ISQLDialect;
   public
     /// Takes ownership of AConnection.
-    constructor Create(AConnection: TSQLConnector; const ASQLDialect: ISQLDialect);
+    constructor Create(AConnection: TPdbSQLConnector; const ASQLDialect: ISQLDialect);
     destructor Destroy; override;
     function GetNativeConnection: TObject;
     function IsConnected: Boolean;
@@ -100,6 +122,7 @@ type
     procedure DoCommit; override;
     procedure DoRollback; override;
     procedure DoExecSql(const ASql: string); override;
+    function IsLockConflictError(E: Exception): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection);
     destructor Destroy; override;
@@ -120,6 +143,7 @@ type
     procedure DoClearParams; override;
     function ResetParamValues: Boolean; override;
     function CreateParams: IParams; override;
+    function IsLockConflictError(E: Exception): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
     destructor Destroy; override;
@@ -162,24 +186,88 @@ var
 
 const
   SQLITE_SCHEMA = 17; // sqlite3.h: "The database schema changed"
+  SQLITE_BUSY = 5;    // sqlite3.h: "The database file is locked"
+  SQLITE_LOCKED = 6;  // sqlite3.h: "A table in the database is locked"
   DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5000;
+  // iberror.h
+  ISC_DEADLOCK = 335544336;        // "deadlock" (also an expired lock timeout on Firebird 3+)
+  ISC_LOCK_CONFLICT = 335544345;   // "lock conflict on no wait transaction"
+  ISC_UPDATE_CONFLICT = 335544451; // "update conflicts with concurrent update"
+  ISC_LOCK_TIMEOUT = 335544510;    // "lock time-out on wait transaction"
+  PG_LOCK_NOT_AVAILABLE = '55P03';
+  PG_DEADLOCK_DETECTED = '40P01';
+  PG_SERIALIZATION_FAILURE = '40001';
 
 // See the unit header. Runs in a throwaway transaction: SQLdb executes
 // statements only inside one.
-procedure ApplySQLiteBusyTimeout(AConn: TSQLConnector);
+procedure ApplySQLiteBusyTimeout(AConn: TPdbSQLConnector);
 var
   LTransaction: TSQLTransaction;
+  LDefault: Integer;
 begin
   if not SameText(AConn.ConnectorType, 'SQLite3') then
     Exit;
+  if AConn.LockTimeoutMs > 0 then
+    LDefault := AConn.LockTimeoutMs
+  else
+    LDefault := DEFAULT_SQLITE_BUSY_TIMEOUT_MS;
   LTransaction := TSQLTransaction.Create(nil);
   try
     LTransaction.DataBase := AConn;
     AConn.ExecuteDirect('PRAGMA busy_timeout = ' +
-      IntToStr(StrToIntDef(AConn.Params.Values['BusyTimeout'], DEFAULT_SQLITE_BUSY_TIMEOUT_MS)), LTransaction);
+      IntToStr(StrToIntDef(AConn.Params.Values['BusyTimeout'], LDefault)), LTransaction);
     LTransaction.Commit;
   finally
     LTransaction.Free;
+  end;
+end;
+
+// See the unit header: PostgreSQL gets the lock timeout as a libpq option of
+// the connection string, next to any options the settings already have.
+procedure ApplyPostgresLockTimeout(AConn: TPdbSQLConnector);
+var
+  LOptions: string;
+begin
+  if (AConn.LockTimeoutMs <= 0) or not SameText(AConn.ConnectorType, 'PostgreSQL') then
+    Exit;
+  LOptions := Trim(AConn.Params.Values['options']);
+  if (Length(LOptions) >= 2) and (LOptions[1] = '''') and (LOptions[Length(LOptions)] = '''') then
+    LOptions := Copy(LOptions, 2, Length(LOptions) - 2);
+  AConn.Params.Values['options'] := '''' +
+    Trim(LOptions + ' -c lock_timeout=' + IntToStr(AConn.LockTimeoutMs)) + '''';
+end;
+
+// See the unit header: the TPB of a Firebird transaction with a lock timeout.
+function FirebirdLockTimeoutTPB(AConn: TPdbSQLConnector): string;
+begin
+  Result := '';
+  if (AConn.LockTimeoutMs > 0) and SameText(AConn.ConnectorType, 'Firebird') then
+    Result := 'isc_tpb_write,isc_tpb_concurrency,isc_tpb_wait,isc_tpb_lock_timeout=' +
+      IntToStr((AConn.LockTimeoutMs + 999) div 1000);
+end;
+
+// See the unit header: the driver's lock conflict errors.
+function IsSQLdbLockConflict(E: Exception; ADataBase: TDatabase): Boolean;
+var
+  LType: string;
+  LCode: Integer;
+begin
+  Result := False;
+  if not (ADataBase is TSQLConnector) then
+    Exit;
+  LType := TSQLConnector(ADataBase).ConnectorType;
+  if E is EPQDatabaseError then
+    Result := (EPQDatabaseError(E).SQLSTATE = PG_LOCK_NOT_AVAILABLE) or
+      (EPQDatabaseError(E).SQLSTATE = PG_DEADLOCK_DETECTED) or
+      (EPQDatabaseError(E).SQLSTATE = PG_SERIALIZATION_FAILURE)
+  else if E is ESQLDatabaseError then
+  begin
+    LCode := ESQLDatabaseError(E).ErrorCode;
+    if SameText(LType, 'Firebird') then
+      Result := (LCode = ISC_LOCK_TIMEOUT) or (LCode = ISC_LOCK_CONFLICT) or
+        (LCode = ISC_DEADLOCK) or (LCode = ISC_UPDATE_CONFLICT)
+    else if SameText(LType, 'SQLite3') then
+      Result := (LCode = SQLITE_BUSY) or (LCode = SQLITE_LOCKED);
   end;
 end;
 
@@ -219,7 +307,7 @@ end;
 
 { TSQLdbConnectionAdapter }
 
-constructor TSQLdbConnectionAdapter.Create(AConnection: TSQLConnector; const ASQLDialect: ISQLDialect);
+constructor TSQLdbConnectionAdapter.Create(AConnection: TPdbSQLConnector; const ASQLDialect: ISQLDialect);
 begin
   inherited Create;
   FConnection := AConnection;
@@ -273,6 +361,8 @@ begin
   inherited Create(AConn);
   FTransaction := TSQLTransaction.Create(nil);
   FTransaction.DataBase := AConn.GetNativeConnection as TSQLConnector;
+  if FTransaction.DataBase is TPdbSQLConnector then
+    FTransaction.Params.CommaText := FirebirdLockTimeoutTPB(TPdbSQLConnector(FTransaction.DataBase));
 end;
 
 destructor TSQLdbTransactionAdapter.Destroy;
@@ -331,6 +421,11 @@ begin
   finally
     LQuery.Free;
   end;
+end;
+
+function TSQLdbTransactionAdapter.IsLockConflictError(E: Exception): Boolean;
+begin
+  Result := IsSQLdbLockConflict(E, FTransaction.DataBase);
 end;
 
 function TSQLdbTransactionAdapter.GetNativeTransaction: TObject;
@@ -444,11 +539,16 @@ begin
   Result := TDBParams.Create(FQuery.Params);
 end;
 
+function TSQLdbQueryAdapter.IsLockConflictError(E: Exception): Boolean;
+begin
+  Result := IsSQLdbLockConflict(E, FQuery.DataBase);
+end;
+
 { TSQLdbProvider }
 
 function TSQLdbProvider.BuildConnection(AConfig: IDatabaseConfig): IDBConnection;
 var
-  LConn: TSQLConnector;
+  LConn: TPdbSQLConnector;
   LParams: TStrings;
   I: Integer;
   LName, LValue: string;
@@ -458,9 +558,10 @@ begin
     raise EDatabaseError.Create('PascalDb.Adapter.SQLdb: ConnectionParams must set ConnectorType (the SQLdb connector name, e.g. Firebird, PostgreSQL or SQLite3)');
   PdbSQLdbUseClientLibrary(LParams.Values['ConnectorType'], LParams.Values['ClientLibrary']);
 
-  LConn := TSQLConnector.Create(nil);
+  LConn := TPdbSQLConnector.Create(nil);
   try
     LConn.LoginPrompt := False;
+    LConn.LockTimeoutMs := AConfig.LockTimeoutMs;
     for I := 0 to LParams.Count - 1 do
     begin
       LName := LParams.Names[I];
@@ -477,13 +578,18 @@ begin
         LConn.Password := LValue
       else if SameText(LName, 'CharSet') then
         LConn.CharSet := LValue
-      else if SameText(LName, 'Port') then
-        LConn.Params.Values['port'] := LValue
       else if SameText(LName, 'ClientLibrary') then
         // handled by PdbSQLdbUseClientLibrary
+      // Settings with no value are left out: FPC's Values[Name] := '' keeps
+      // a "Name=" line (Delphi deletes it), and PostgreSQL's connection
+      // string reads the next option as the value of an empty "port=".
+      else if LValue = '' then
+      else if SameText(LName, 'Port') then
+        LConn.Params.Values['port'] := LValue
       else if LName <> '' then
         LConn.Params.Values[LName] := LValue;
     end;
+    ApplyPostgresLockTimeout(LConn);
     LConn.Open;
     ApplySQLiteBusyTimeout(LConn);
   except

@@ -58,6 +58,7 @@ type
     FPoolIdleCheckIntervalMs: Integer;
     FPoolValidateIdleSeconds: Integer;
     FPoolKeepaliveSeconds: Integer;
+    FLockTimeoutMs: Integer;
   public
     constructor Create;
     destructor Destroy; override;
@@ -69,6 +70,7 @@ type
     function GetPoolIdleCheckIntervalMs: Integer;
     function GetPoolValidateIdleSeconds: Integer;
     function GetPoolKeepaliveSeconds: Integer;
+    function GetLockTimeoutMs: Integer;
     function GetSQLDialect: string;
     procedure SetPoolIniConnections(AValue: Integer);
     procedure SetPoolMaxConnections(AValue: Integer);
@@ -78,6 +80,7 @@ type
     procedure SetPoolIdleCheckIntervalMs(AValue: Integer);
     procedure SetPoolValidateIdleSeconds(AValue: Integer);
     procedure SetPoolKeepaliveSeconds(AValue: Integer);
+    procedure SetLockTimeoutMs(AValue: Integer);
     procedure SetSQLDialect(AValue: string);
     function GetSQLDirectory: string;
     procedure SetSQLDirectory(const AValue: string);
@@ -97,6 +100,10 @@ type
     procedure DoCommit; virtual; abstract;
     procedure DoRollback; virtual; abstract;
     procedure DoExecSql(const ASql: string); virtual; abstract;
+    /// True when E is one of the driver's lock conflict errors (see
+    /// ELockConflictException); ExecSql then raises ELockConflictException
+    /// instead. The default recognizes nothing.
+    function IsLockConflictError(E: Exception): Boolean; virtual;
   public
     constructor Create(const AConn: IDBConnection);
     procedure StartTransaction;
@@ -368,6 +375,11 @@ begin
   Result := FPoolKeepaliveSeconds;
 end;
 
+function TDatabaseConfig.GetLockTimeoutMs: Integer;
+begin
+  Result := FLockTimeoutMs;
+end;
+
 function TDatabaseConfig.GetSQLDialect: string;
 begin
   Result := FSQLDialect;
@@ -414,6 +426,12 @@ procedure TDatabaseConfig.SetPoolKeepaliveSeconds(AValue: Integer);
 begin
   if AValue >= 0 then
     FPoolKeepaliveSeconds := AValue;
+end;
+
+procedure TDatabaseConfig.SetLockTimeoutMs(AValue: Integer);
+begin
+  if AValue >= 0 then
+    FLockTimeoutMs := AValue;
 end;
 
 procedure TDatabaseConfig.SetSQLDialect(AValue: string);
@@ -525,12 +543,19 @@ begin
   except
     on E: Exception do
     begin
+      if IsLockConflictError(E) then
+        raise ELockConflictException.Create(E);
       LNewE := BuildDatabaseException(FConn, E);
       if Assigned(LNewE) then
         raise LNewE;
       raise;
     end;
   end;
+end;
+
+function TTransactionBase.IsLockConflictError(E: Exception): Boolean;
+begin
+  Result := False;
 end;
 
 function TTransactionBase.InTransaction: Boolean;
