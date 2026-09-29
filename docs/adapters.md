@@ -2,7 +2,7 @@
 
 Every sample picks its adapter in one unit,
 [`common/Samples.Env.pas`](../samples/common/Samples.Env.pas): the settings below side by side,
-for all three adapters and the Firebird, PostgreSQL and SQLite databases.
+for all three adapters and databases.
 
 ## Choosing
 

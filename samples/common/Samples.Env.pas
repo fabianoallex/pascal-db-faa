@@ -8,18 +8,24 @@ unit Samples.Env;
   (queries, transactions, the repository) is driver-agnostic.
 
   Settings (environment variables, all optional):
-    PASCALDB_SAMPLE_ENGINE    postgresql (default), firebird or sqlite
+    PASCALDB_SAMPLE_ENGINE    postgresql (default), firebird, sqlite, mysql or
+                              mariadb
     PASCALDB_SAMPLE_HOST      default localhost (unused by SQLite)
-    PASCALDB_SAMPLE_PORT      default: the driver's (5432 / 3050)
+    PASCALDB_SAMPLE_PORT      default: the driver's (5432 / 3050 / 3306)
     PASCALDB_SAMPLE_DATABASE  PostgreSQL: database name (default postgres).
+                              MySQL/MariaDB: name of an existing database
+                              (default samples).
                               Firebird: path of an existing database on the
                               server (required). SQLite: the database file,
                               created on first connect (default
                               pascaldb_samples.sqlite in the current folder)
-    PASCALDB_SAMPLE_USER      default postgres / SYSDBA (unused by SQLite)
-    PASCALDB_SAMPLE_PASSWORD  default postgres / masterkey (unused by SQLite)
+    PASCALDB_SAMPLE_USER      default postgres / SYSDBA / root (unused by
+                              SQLite)
+    PASCALDB_SAMPLE_PASSWORD  default postgres / masterkey / root (unused by
+                              SQLite)
     PASCALDB_SAMPLE_CLIENT    full path of the client library (libpq /
-                              fbclient / sqlite3) when it isn't found on the
+                              fbclient / sqlite3 / libmariadb or libmysql)
+                              when it isn't found on the
                               default search path, e.g.
                               C:\Program Files\PostgreSQL\17\bin\libpq.dll.
                               FireDAC links SQLite into the program: no
@@ -28,8 +34,9 @@ unit Samples.Env;
   Each adapter has its own names for the connection settings (see the
   adapter units); SetConnectionParams below is the whole difference.
 
-  The SQL directory follows the engine ('PG', 'FB' or 'SQLITE'), so a
-  program can keep one version of a script per database under the same key. }
+  The SQL directory follows the engine ('PG', 'FB', 'SQLITE' or 'MYSQL', for
+  MySQL and MariaDB alike), so a program can keep one version of a script per
+  database under the same key. }
 
 {$IFDEF FPC}{$MODE DELPHI}{$H+}{$ENDIF}
 
@@ -42,12 +49,13 @@ uses
   PascalDb.Pool;
 
 type
-  TSampleEngine = (sePostgreSQL, seFirebird, seSQLite);
+  TSampleEngine = (sePostgreSQL, seFirebird, seSQLite, seMySQL, seMariaDB);
 
 const
   SQL_DIR_POSTGRESQL = 'PG';
   SQL_DIR_FIREBIRD = 'FB';
   SQL_DIR_SQLITE = 'SQLITE';
+  SQL_DIR_MYSQL = 'MYSQL'; // MySQL and MariaDB
 
 function SampleEngine: TSampleEngine;
 /// Human-readable description of the target, e.g. 'PostgreSQL on localhost (SQLdb adapter)'.
@@ -101,8 +109,17 @@ begin
     Result := seFirebird
   else if LEngine = 'sqlite' then
     Result := seSQLite
+  else if LEngine = 'mysql' then
+    Result := seMySQL
+  else if LEngine = 'mariadb' then
+    Result := seMariaDB
   else
-    raise Exception.CreateFmt('PASCALDB_SAMPLE_ENGINE must be postgresql, firebird or sqlite, not "%s"', [LEngine]);
+    raise Exception.CreateFmt('PASCALDB_SAMPLE_ENGINE must be postgresql, firebird, sqlite, mysql or mariadb, not "%s"', [LEngine]);
+end;
+
+function IsMySQL: Boolean;
+begin
+  Result := SampleEngine in [seMySQL, seMariaDB];
 end;
 
 function Host: string;
@@ -122,6 +139,8 @@ begin
       Result := Env('PASCALDB_SAMPLE_DATABASE', 'postgres');
     seSQLite:
       Result := ExpandFileName(Env('PASCALDB_SAMPLE_DATABASE', 'pascaldb_samples.sqlite'));
+    seMySQL, seMariaDB:
+      Result := Env('PASCALDB_SAMPLE_DATABASE', 'samples');
   else
     Result := Env('PASCALDB_SAMPLE_DATABASE', '');
     if Result = '' then
@@ -133,6 +152,8 @@ function UserName: string;
 begin
   if SampleEngine = seFirebird then
     Result := Env('PASCALDB_SAMPLE_USER', 'SYSDBA')
+  else if IsMySQL then
+    Result := Env('PASCALDB_SAMPLE_USER', 'root')
   else
     Result := Env('PASCALDB_SAMPLE_USER', 'postgres');
 end;
@@ -141,6 +162,8 @@ function Password: string;
 begin
   if SampleEngine = seFirebird then
     Result := Env('PASCALDB_SAMPLE_PASSWORD', 'masterkey')
+  else if IsMySQL then
+    Result := Env('PASCALDB_SAMPLE_PASSWORD', 'root')
   else
     Result := Env('PASCALDB_SAMPLE_PASSWORD', 'postgres');
 end;
@@ -161,6 +184,8 @@ begin
     sePostgreSQL: AParams.Values['Protocol'] := 'postgresql';
     seFirebird: AParams.Values['Protocol'] := 'firebird';
     seSQLite: AParams.Values['Protocol'] := 'sqlite';
+    seMySQL: AParams.Values['Protocol'] := 'mysql';
+    seMariaDB: AParams.Values['Protocol'] := 'mariadb';
   end;
   if SampleEngine <> seSQLite then
   begin
@@ -170,7 +195,10 @@ begin
     AParams.Values['Password'] := Password;
   end;
   AParams.Values['Database'] := DatabaseName;
-  AParams.Values['ClientCodepage'] := 'UTF8';
+  if IsMySQL then
+    AParams.Values['ClientCodepage'] := 'utf8mb4' // MySQL's utf8 has no 4-byte characters
+  else
+    AParams.Values['ClientCodepage'] := 'UTF8';
   AParams.Values['LibraryLocation'] := ClientLibrary;
 end;
 
@@ -190,6 +218,13 @@ begin
     sePostgreSQL: AParams.Values['ConnectorType'] := 'PostgreSQL';
     seFirebird: AParams.Values['ConnectorType'] := 'Firebird';
     seSQLite: AParams.Values['ConnectorType'] := 'SQLite3';
+    // With MariaDB Connector/C (the usual client for both servers): the 5.7
+    // connector, without its client version check (see the adapter unit).
+    seMySQL, seMariaDB:
+      begin
+        AParams.Values['ConnectorType'] := 'MySQL 5.7';
+        AParams.Values['SkipLibraryVersionCheck'] := 'true';
+      end;
   end;
   if SampleEngine <> seSQLite then
   begin
@@ -197,7 +232,10 @@ begin
     AParams.Values['Port'] := Port;
     AParams.Values['UserName'] := UserName;
     AParams.Values['Password'] := Password;
-    AParams.Values['CharSet'] := 'UTF8';
+    if IsMySQL then
+      AParams.Values['CharSet'] := 'utf8mb4'
+    else
+      AParams.Values['CharSet'] := 'UTF8';
   end;
   AParams.Values['DatabaseName'] := DatabaseName;
   AParams.Values['ClientLibrary'] := ClientLibrary;
@@ -224,6 +262,8 @@ begin
   end;
   if SampleEngine = sePostgreSQL then
     AParams.Values['DriverID'] := 'PG'
+  else if IsMySQL then
+    AParams.Values['DriverID'] := 'MySQL'
   else
   begin
     AParams.Values['DriverID'] := 'FB';
@@ -235,7 +275,10 @@ begin
   AParams.Values['Database'] := DatabaseName;
   AParams.Values['User_Name'] := UserName;
   AParams.Values['Password'] := Password;
-  AParams.Values['CharacterSet'] := 'UTF8';
+  if IsMySQL then
+    AParams.Values['CharacterSet'] := 'utf8mb4'
+  else
+    AParams.Values['CharacterSet'] := 'UTF8';
   AParams.Values['VendorLib'] := ClientLibrary;
 end;
 
@@ -251,6 +294,8 @@ begin
   case SampleEngine of
     sePostgreSQL: Result := Format('PostgreSQL on %s', [Host]);
     seFirebird: Result := Format('Firebird on %s', [Host]);
+    seMySQL: Result := Format('MySQL on %s', [Host]);
+    seMariaDB: Result := Format('MariaDB on %s', [Host]);
   else
     Result := Format('SQLite file %s', [DatabaseName]);
   end;
@@ -273,10 +318,12 @@ begin
   end;
   LPort := Port;
   if LPort = '' then
-    if SampleEngine = sePostgreSQL then
-      LPort := '5432 (default)'
+    case SampleEngine of
+      sePostgreSQL: LPort := '5432 (default)';
+      seMySQL, seMariaDB: LPort := '3306 (default)';
     else
       LPort := '3050 (default)';
+    end;
   Result :=
     '  host:     ' + Host + sLineBreak +
     '  port:     ' + LPort + sLineBreak +
@@ -330,6 +377,11 @@ begin
       begin
         LConfig.SQLDialect := 'SQLite';
         LConfig.SQLDirectory := SQL_DIR_SQLITE;
+      end;
+    seMySQL, seMariaDB:
+      begin
+        LConfig.SQLDialect := 'MySQL'; // 'MariaDB' names the same dialect
+        LConfig.SQLDirectory := SQL_DIR_MYSQL;
       end;
   end;
   LConfig.SqlSource := ASqlSource;

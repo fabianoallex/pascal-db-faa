@@ -57,18 +57,22 @@ begin
   LSource := TMemorySqlSource.Create;
   Result := LSource;
   // PostgreSQL: the database encoding applies to every column. SQLite: text
-  // is UTF-8.
+  // is UTF-8. MySQL/MariaDB: the database's character set (utf8mb4 on
+  // current servers).
   LSource.Add(SQL_DIR_POSTGRESQL, 'SCHEMA.CREATE',
     'CREATE TABLE IF NOT EXISTS SAMPLE_CITIES ' + Format(TABLE_COLUMNS, ['']));
   LSource.Add(SQL_DIR_SQLITE, 'SCHEMA.CREATE',
     'CREATE TABLE IF NOT EXISTS SAMPLE_CITIES ' + Format(TABLE_COLUMNS, ['']));
+  // MySQL/MariaDB: utf8mb4 declared, since a server's default varies.
+  LSource.Add(SQL_DIR_MYSQL, 'SCHEMA.CREATE',
+    'CREATE TABLE IF NOT EXISTS SAMPLE_CITIES ' + Format(TABLE_COLUMNS, ['']) + ' DEFAULT CHARSET=utf8mb4');
   // Firebird has no CREATE TABLE IF NOT EXISTS; RECREATE drops and creates.
   // Text columns declare UTF8 because a database's default character set
   // may be NONE.
   LSource.Add(SQL_DIR_FIREBIRD, 'SCHEMA.CREATE',
     'RECREATE TABLE SAMPLE_CITIES ' + Format(TABLE_COLUMNS, [' CHARACTER SET UTF8']));
-  // The rest is standard SQL: the same text for both.
-  for LDir in TArray<string>.Create(SQL_DIR_POSTGRESQL, SQL_DIR_FIREBIRD, SQL_DIR_SQLITE) do
+  // The rest is standard SQL: the same text for all.
+  for LDir in TArray<string>.Create(SQL_DIR_POSTGRESQL, SQL_DIR_FIREBIRD, SQL_DIR_SQLITE, SQL_DIR_MYSQL) do
     LSource
       .Add(LDir, 'CITY.DELETE_ALL', 'DELETE FROM SAMPLE_CITIES')
       .Add(LDir, 'CITY.INSERT', 'INSERT INTO SAMPLE_CITIES (CODE, NAME, STATE) VALUES (:CODE, :NAME, :STATE)')

@@ -9,13 +9,15 @@
 # and reports 0 unfreed blocks. SQLite needs no server: its database is a file
 # inside the FPC container.
 #
-# ENGINE:    postgresql (default), firebird or sqlite
+# ENGINE:    postgresql (default), firebird, sqlite, mysql or mariadb
 # ADAPTER:   sqldb (default) or zeos
 # ZEOSDBO:   ADAPTER=zeos only: the ZeosLib 8 folder (the one containing
 #            src/core, src/dbc, ...), mounted read-only into the FPC container
 # FPC_IMAGE: an image with FPC 3.2.2 (default: fpc322-bookworm)
 # FB_IMAGE:  Firebird server image (default: firebirdsql/firebird:5)
 # PG_IMAGE:  PostgreSQL server image (default: postgres:17)
+# MYSQL_IMAGE:   MySQL server image (default: mysql:8.4)
+# MARIADB_IMAGE: MariaDB server image (default: mariadb:11.4)
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE="${ENGINE:-postgresql}"
@@ -23,6 +25,8 @@ ADAPTER="${ADAPTER:-sqldb}"
 FPC_IMAGE="${FPC_IMAGE:-fpc322-bookworm}"
 FB_IMAGE="${FB_IMAGE:-firebirdsql/firebird:5}"
 PG_IMAGE="${PG_IMAGE:-postgres:17}"
+MYSQL_IMAGE="${MYSQL_IMAGE:-mysql:8.4}"
+MARIADB_IMAGE="${MARIADB_IMAGE:-mariadb:11.4}"
 NET=pascaldb-samples-net
 DB=pascaldb-samples-db
 MOUNT="$ROOT"
@@ -43,7 +47,17 @@ case "$ENGINE" in
     SERVER_IMAGE=""; SERVER_ENV=""; SERVER_ENV2=""
     CLIENT_PKG=libsqlite3-0; CLIENT_GLOB='/usr/lib/*/libsqlite3.so.0'; DB_PORT=""
     SAMPLE_DATABASE=/t/samples.sqlite; SAMPLE_PASSWORD="" ;;
-  *) echo "ENGINE must be postgresql, firebird or sqlite" >&2; exit 2 ;;
+  mysql)
+    # The image creates MYSQL_DATABASE on first start (sample 02 needs an
+    # existing database). Client: MariaDB Connector/C, for both servers.
+    SERVER_IMAGE="$MYSQL_IMAGE"; SERVER_ENV="MYSQL_ROOT_PASSWORD=root"; SERVER_ENV2="MYSQL_DATABASE=samples"
+    CLIENT_PKG=libmariadb3; CLIENT_GLOB='/usr/lib/*/libmariadb.so.3'; DB_PORT=3306
+    SAMPLE_DATABASE=samples; SAMPLE_PASSWORD=root ;;
+  mariadb)
+    SERVER_IMAGE="$MARIADB_IMAGE"; SERVER_ENV="MARIADB_ROOT_PASSWORD=root"; SERVER_ENV2="MARIADB_DATABASE=samples"
+    CLIENT_PKG=libmariadb3; CLIENT_GLOB='/usr/lib/*/libmariadb.so.3'; DB_PORT=3306
+    SAMPLE_DATABASE=samples; SAMPLE_PASSWORD=root ;;
+  *) echo "ENGINE must be postgresql, firebird, sqlite, mysql or mariadb" >&2; exit 2 ;;
 esac
 
 ZEOS_MOUNT=""
@@ -111,7 +125,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   build 05-pool PoolUnderLoad u5 "$ADAPTER_OPTS"
   run MockRepository
   if [ -n "$DB_PORT" ]; then
-    for i in $(seq 1 60); do (echo > /dev/tcp/$PASCALDB_SAMPLE_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
+    for i in $(seq 1 180); do (echo > /dev/tcp/$PASCALDB_SAMPLE_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
   fi
   # Firebird creates the database only after the port opens: retry briefly,
   # but only while the sample cannot connect.

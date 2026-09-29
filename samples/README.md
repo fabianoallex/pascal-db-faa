@@ -14,7 +14,7 @@ concepts each one shows.
 | [05-pool](05-pool/PoolUnderLoad.dpr) | The connection pool under concurrent load (worker threads): growth up to the limit, callers waiting their turn, `EPoolTimeoutException` when the wait runs out, the idle sweep; observed through its events (thread-safe handler) and `GetSnapshot` | Yes |
 
 01 and 02 share `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
-and against PostgreSQL, Firebird or SQLite in 02.
+and against PostgreSQL, Firebird, SQLite, MySQL or MariaDB in 02.
 
 ## Running samples 02 to 05
 
@@ -37,13 +37,25 @@ On Windows, point `PASCALDB_SAMPLE_CLIENT` at the client library when it isn't o
 PostgreSQL ships no 32-bit client). For Firebird, set `PASCALDB_SAMPLE_ENGINE=firebird`
 and `PASCALDB_SAMPLE_DATABASE` to an existing database.
 
+For MySQL or MariaDB, `PASCALDB_SAMPLE_ENGINE=mysql` (or `mariadb`); the database `samples`
+must exist (the images create it):
+
+```
+docker run -d --name pascaldb-sample-mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=samples mysql:8.4
+```
+
+The client is MariaDB Connector/C for both servers (`libmariadb.dll` from its installer, with
+the `plugin` folder next to it, which MySQL 8's default authentication needs; `libmariadb.so.3`
+on Linux). See the MySQL notes in [docs/adapters.md](../docs/adapters.md#mysql-and-mariadb-notes).
+
 On PostgreSQL, from the second run on, the client library prints
 `NOTICE: relation "sample_cities" already exists, skipping` to stderr: it comes from
 `CREATE TABLE IF NOT EXISTS` and is harmless.
 
 ## Sample 03: SQL files
 
-The `.sql` files under `03-migrations/sql/PG`, `sql/FB` and `sql/SQLITE` are linked into the program
+The `.sql` files under `03-migrations/sql/PG`, `sql/FB`, `sql/SQLITE` and `sql/MYSQL` (MySQL and
+MariaDB) are linked into the program
 through `sql/MigrationsSql.res`. After editing one, rebuild the `.res` (the test script
 checks it's up to date):
 
@@ -74,5 +86,6 @@ UTF-8.
 
 `sh tools/test_samples_docker.sh` builds the samples on Linux FPC and runs them against
 a PostgreSQL container (`ENGINE=firebird` for Firebird 5, `ENGINE=sqlite` for SQLite with no
-server, `ADAPTER=zeos` with `ZEOSDBO` for Zeos); each must exit with 0 and report 0 unfreed
+server, `ENGINE=mysql` / `mariadb` for MySQL 8.4 / MariaDB 11.4, `ADAPTER=zeos` with `ZEOSDBO`
+for Zeos); each must exit with 0 and report 0 unfreed
 blocks.

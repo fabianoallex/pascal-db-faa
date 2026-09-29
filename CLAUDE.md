@@ -180,8 +180,8 @@ The FPCUnit runner does both.
   ZeosLib folder, mounted into the container; server container + FPC container on a private
   network). **CI:** `.github/workflows/ci.yml` only calls `sh tools/ci-test.sh`, which runs the
   unit suite, then all ten Linux integration combinations (SQLdb/Zeos ×
-  Firebird/PostgreSQL/SQLite/MySQL/MariaDB) and the samples on the first six
-  (`tools/test_samples_docker.sh`; the samples don't cover MySQL/MariaDB yet);
+  Firebird/PostgreSQL/SQLite/MySQL/MariaDB) and the samples on the same ten
+  (`tools/test_samples_docker.sh`);
   it builds its FPC image (`pascaldb-fpc322`, Debian bookworm's fpc) and, without `ZEOSDBO`,
   downloads ZeosLib 8.0.0 into `.ci/` and checks its pinned SHA-256. Run it locally before
   pushing a change to the scripts.
