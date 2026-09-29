@@ -179,6 +179,63 @@ in Docker; the absolute numbers depend on the network, the ratios much less):
 A new query per request is what a server does anyway, and it costs a few milliseconds per request
 there; a loop is where one query pays off.
 
+### Loading many rows
+
+There is no bulk-insert API. What makes a load slow, in this order:
+
+1. **A commit per row.** Every commit waits for the database to make it durable. Put the whole
+   load (or large chunks of it) in one transaction.
+2. **A round trip per row.** With the statement prepared, each `ExecSql` still waits for the
+   server's answer; the cost is the latency, not the library.
+3. Only then, the statement itself.
+
+Measured with 20 000 rows of three columns (SQLdb, FPC 3.2.2 on Windows; Firebird 2.5 on the same
+machine, PostgreSQL 17 in Docker reached through its forwarded port; the commit-per-row column
+with 2 000 rows):
+
+| | a commit per row | one transaction, one row per `ExecSql` | one transaction, many rows per statement |
+|---|---|---|---|
+| SQLite | 234 rows/s | 425 000 rows/s | 128 000 rows/s (100 per statement) |
+| PostgreSQL | 255 rows/s | 1 500 rows/s | 42 600 rows/s (100 per statement) |
+| Firebird | 1 100 rows/s | 5 800 rows/s | 32 800 rows/s (50 per statement) |
+
+At those rates, 100 000 rows with a commit each take several minutes on every database, and
+seconds (SQLite: a quarter of a second) in one transaction. Sending many rows per statement
+cuts the round trips: 28 times faster on PostgreSQL, 5.7 on Firebird, and nothing on SQLite,
+which has no server to talk to. The farther the server, the more it pays.
+
+A statement with many rows is plain SQL with numbered parameters, sent through the same loop.
+PostgreSQL and SQLite take a list of rows:
+
+```sql
+INSERT INTO PRODUCTS (CODE, NAME) VALUES (:C1, :N1), (:C2, :N2), (:C3, :N3)
+```
+
+Firebird has no multi-row `VALUES` (neither 2.5 nor 5); select the rows from `RDB$DATABASE`, with
+a `CAST` on each parameter so the server knows its type (measured on 2.5):
+
+```sql
+INSERT INTO PRODUCTS (CODE, NAME)
+  SELECT CAST(:C1 AS VARCHAR(20)), CAST(:N1 AS VARCHAR(60)) FROM RDB$DATABASE
+  UNION ALL SELECT CAST(:C2 AS VARCHAR(20)), CAST(:N2 AS VARCHAR(60)) FROM RDB$DATABASE
+```
+
+Build the text once for a batch size, set it once, and bind row by row (`'C' + IntToStr(J)`);
+send the last, shorter batch with a statement of its own size. What it costs:
+
+- **A failure rejects the whole batch**, and the database doesn't say which row caused it. One
+  row per `ExecSql` tells you exactly which one failed; for a load that must report or skip bad
+  rows, keep it, or rerun a failed batch row by row.
+- **Limits per statement:** PostgreSQL 65 535 parameters, SQLite 32 766 (999 before 3.32),
+  Firebird 2.5 64 KB of SQL text. The table used 50 and 100 rows per statement; larger batches
+  weren't measured.
+- On SQLite it is slower, not faster (the table above): stay with one row per `ExecSql` in one
+  transaction.
+
+When the rows are already in the database, none of this applies: `INSERT INTO ... SELECT ...`
+runs as one `ExecSql`. Driver-specific paths (PostgreSQL's `COPY`, FireDAC's Array DML) go
+further, but the adapters don't expose them.
+
 ## Next
 
 [Guide 3](optionals.md): the optional and nullable types that decide which blocks to keep and
