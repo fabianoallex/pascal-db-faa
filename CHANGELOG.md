@@ -6,6 +6,8 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-29
+
 ### Added
 
 - MySQL and MariaDB on every adapter (SQLdb, Zeos, FireDAC): a `MySQL` SQL dialect (also registered as
@@ -18,7 +20,8 @@ may change the API; each such change is listed here.
   `caching_sha2_password` authentication lives. Contract suite run on MySQL 8.4 and MariaDB 11.4
   with FPC on Windows (Win64) and Linux, and with Delphi (FireDAC and Zeos, Win32 and Win64).
   FireDAC has no connection parameter for the plugin folder: it sets `MARIADB_PLUGIN_DIR` /
-  `LIBMYSQL_PLUGIN_DIR` for the process instead (when not set already).
+  `LIBMYSQL_PLUGIN_DIR` for the process instead (when not set already). The samples run on
+  MySQL and MariaDB too (`PASCALDB_SAMPLE_ENGINE=mysql` / `mariadb`).
 - `IDatabaseConfig.LockTimeoutMs`: the longest a statement waits for a lock held by another
   transaction, on every adapter (Firebird transaction parameters, whole seconds; PostgreSQL
   `lock_timeout`; SQLite busy timeout). 0 (default) keeps each database's behavior: Firebird
@@ -152,6 +155,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.4.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/fabianoallex/pascal-db-faa/releases/tag/v0.1.0
