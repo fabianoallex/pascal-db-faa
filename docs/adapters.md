@@ -8,9 +8,9 @@ for all three adapters and the Firebird, PostgreSQL and SQLite databases.
 
 | Adapter | Compilers | Unit / Lazarus package | Firebird | PostgreSQL | SQLite | MySQL / MariaDB |
 |---|---|---|---|---|---|---|
-| SQLdb | FPC | `PascalDb.Adapter.SQLdb` / `pascal_db_faa_sqldb.lpk` | yes | yes | yes | yes (run on Linux only, so far) |
-| FireDAC | Delphi | `PascalDb.Adapter.FireDAC` (add `adapters/firedac` to the search path) | yes | yes | yes | not yet |
-| Zeos (ZeosLib 8) | both | `PascalDb.Adapter.Zeos` / `pascal_db_faa_zeos.lpk` | yes | yes | yes | yes (run with FPC on Linux only, so far) |
+| SQLdb | FPC | `PascalDb.Adapter.SQLdb` / `pascal_db_faa_sqldb.lpk` | yes | yes | yes | yes |
+| FireDAC | Delphi | `PascalDb.Adapter.FireDAC` (add `adapters/firedac` to the search path) | yes | yes | yes | yes |
+| Zeos (ZeosLib 8) | both | `PascalDb.Adapter.Zeos` / `pascal_db_faa_zeos.lpk` | yes | yes | yes | yes |
 
 - **One source for both compilers:** Zeos on both, or SQLdb on FPC and FireDAC on Delphi
   behind an `{$IFDEF FPC}` in the one unit that builds the factory (what the samples do by
@@ -29,11 +29,11 @@ Lines an adapter doesn't know go to the driver as they are.
 
 | | SQLdb | FireDAC | Zeos |
 |---|---|---|---|
-| Driver / database kind | `ConnectorType` = `Firebird`, `PostgreSQL`, `SQLite3`, `MySQL 8.0` | `DriverID` = `FB`, `PG`, `SQLite` | `Protocol` = `firebird`, `postgresql`, `sqlite`, `mysql`, `mariadb` |
+| Driver / database kind | `ConnectorType` = `Firebird`, `PostgreSQL`, `SQLite3`, `MySQL 5.7` | `DriverID` = `FB`, `PG`, `SQLite`, `MySQL` | `Protocol` = `firebird`, `postgresql`, `sqlite`, `mysql`, `mariadb` |
 | Host, port | `HostName`, `Port` | `Server`, `Port` | `HostName`, `Port` |
 | Database | `DatabaseName` | `Database` | `Database` |
 | Credentials | `UserName`, `Password` | `User_Name`, `Password` | `User`, `Password` |
-| Character set | `CharSet=UTF8` (MySQL: `utf8mb4`) | `CharacterSet=UTF8` | `ClientCodepage=UTF8` (MySQL: `utf8mb4`) |
+| Character set | `CharSet=UTF8` (MySQL: `utf8mb4`) | `CharacterSet=UTF8` (MySQL: `utf8mb4`) | `ClientCodepage=UTF8` (MySQL: `utf8mb4`) |
 | Client library path | `ClientLibrary` | `VendorLib` | `LibraryLocation` |
 
 For Firebird on FireDAC, also `Protocol=TCPIP` for a server. `SQLDialect` on the configuration
@@ -69,13 +69,22 @@ program.
 - **SQLite on Windows (SQLdb, Zeos):** the DLL must export the column-metadata functions, such
   as the official one from sqlite.org. Other builds (e.g. the one shipped with Python) make every
   query fail with an access violation at `$0` (gotcha 23 in [`CLAUDE.md`](../CLAUDE.md)).
-- **MySQL on SQLdb: `SkipLibraryVersionCheck=true` unless the client matches the connector.**
-  FPC 3.2.2's `MySQL 8.0` connector accepts only a client that reports version 8.0.x (and
-  `MySQL 5.7` only 5.7.x or MariaDB 10.x). Debian's `libmariadb3` reports 3.3.19, and the first
-  connection fails with `TMySQL80Connection can not work with the installed MySQL client version:
-  Expected (8.0), got (3.3.19)`. With the setting, both connectors worked with it against MySQL
-  8.4 and MariaDB 11.4 (gotcha 34). On Linux, set `ClientLibrary` to the versioned file
-  (`libmariadb.so.3`): SQLdb looks for `libmysqlclient.so.21` by default.
+- **MySQL/MariaDB client: MariaDB Connector/C works for both servers.** On Windows, take
+  `libmariadb.dll` from its installer (an administrative install, `msiexec /a`, extracts it
+  without installing) and keep the `plugin` folder next to it: MySQL 8's default authentication
+  (`caching_sha2_password`) is a plugin, and without it every connection to MySQL fails with
+  `Plugin caching_sha2_password could not be loaded`. When the library is given by full path,
+  SQLdb and Zeos point the client at that folder (`MYSQL_PLUGIN_DIR`); FireDAC has no such
+  parameter, so it sets `MARIADB_PLUGIN_DIR` / `LIBMYSQL_PLUGIN_DIR` for the process, unless
+  they are set already. Match the program's bitness: Connector/C ships 32- and 64-bit installers.
+- **MySQL on SQLdb: `ConnectorType=MySQL 5.7` and `SkipLibraryVersionCheck=true` with MariaDB
+  Connector/C.** FPC 3.2.2's connectors accept only a client that reports their own version
+  (`MySQL 5.7`: 5.7.x or MariaDB 10.x); MariaDB Connector/C reports 3.x, and the first connection
+  fails with `TMySQL57Connection can not work with the installed MySQL client version`. The
+  setting leaves the check out (gotcha 34). `MySQL 8.0` numbers the connection options as MySQL
+  8.0 does, which libmariadb doesn't: with any option set, connections fail with `Server connect
+  failed` (gotcha 35). On Linux, set `ClientLibrary` to the versioned file (`libmariadb.so.3`):
+  SQLdb looks for `libmysqlclient.so.20` by default.
 
 ## SQLite notes
 

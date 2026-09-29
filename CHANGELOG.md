@@ -8,12 +8,17 @@ may change the API; each such change is listed here.
 
 ### Added
 
-- MySQL and MariaDB on the SQLdb and Zeos adapters: a `MySQL` SQL dialect (also registered as
+- MySQL and MariaDB on every adapter (SQLdb, Zeos, FireDAC): a `MySQL` SQL dialect (also registered as
   `MariaDB`); `LockTimeoutMs` applied as `innodb_lock_wait_timeout` (whole seconds) and errors
-  1205 / 1213 raised as `ELockConflictException`. SQLdb registers the `MySQL 8.0` and
-  `MySQL 5.7` connectors and takes a `SkipLibraryVersionCheck=true` setting, needed with a client
-  library of another version than the connector's (e.g. MariaDB Connector/C). Contract suite run
-  on MySQL 8.4 and MariaDB 11.4 with FPC on Linux; FireDAC not yet.
+  1205 / 1213 raised as `ELockConflictException`. SQLdb registers the `MySQL 5.7` and
+  `MySQL 8.0` connectors (use `MySQL 5.7` with MariaDB Connector/C) and takes a
+  `SkipLibraryVersionCheck=true` setting, needed with a client library of another version than
+  the connector's. `PdbMySQLPluginDir` (`PascalDb.Adapter.Base`): SQLdb and Zeos point the client
+  at the `plugin` folder next to a client library given by full path, where MySQL 8's
+  `caching_sha2_password` authentication lives. Contract suite run on MySQL 8.4 and MariaDB 11.4
+  with FPC on Windows (Win64) and Linux, and with Delphi (FireDAC and Zeos, Win32 and Win64).
+  FireDAC has no connection parameter for the plugin folder: it sets `MARIADB_PLUGIN_DIR` /
+  `LIBMYSQL_PLUGIN_DIR` for the process instead (when not set already).
 - `IDatabaseConfig.LockTimeoutMs`: the longest a statement waits for a lock held by another
   transaction, on every adapter (Firebird transaction parameters, whole seconds; PostgreSQL
   `lock_timeout`; SQLite busy timeout). 0 (default) keeps each database's behavior: Firebird

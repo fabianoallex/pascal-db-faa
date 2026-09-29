@@ -8,8 +8,9 @@
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
     ConnectorType  SQLdb connector name (required). 'Firebird', 'PostgreSQL',
-                   'SQLite3', 'MySQL 8.0' and 'MySQL 5.7' are registered by
-                   this unit (the MySQL ones talk to MariaDB servers too);
+                   'SQLite3', 'MySQL 5.7' and 'MySQL 8.0' are registered by
+                   this unit (the MySQL ones talk to MariaDB servers too;
+                   with MariaDB Connector/C use 'MySQL 5.7', see below);
                    for another
                    one, add its connection unit to the program's uses
                    (e.g. oracleconnection for 'Oracle') and register an SQL
@@ -32,6 +33,10 @@
     SkipLibraryVersionCheck
                    MySQL only: true to connect with a client library of
                    another version than the connector's (see below)
+    MYSQL_PLUGIN_DIR
+                   MySQL only: the client's plugin folder (default: the
+                   plugin folder next to ClientLibrary, if there is one;
+                   see PdbMySQLPluginDir)
   Any other line is passed to the connection's Params as is.
 
   SQLdb specifics handled here:
@@ -78,6 +83,19 @@
     check is left out; measured with libmariadb 3.3.19 on Linux, both
     connectors against MySQL 8.4 and MariaDB 11.4: connect, UTF-8 text,
     BIGINT, DECIMAL, DOUBLE and DATETIME(3) round trips all correct.
+    The connectors also differ in how they number mysql_options: FPC's
+    'MySQL 8.0' header follows MySQL 8.0, which dropped five options from
+    the middle of the list, while MariaDB Connector/C keeps 5.7's numbering.
+    Any connection option set through the 8.0 connector reaches libmariadb
+    as another option: with MYSQL_PLUGIN_DIR set, every connection failed
+    with "Server connect failed" (FPC 3.2.2, Windows, libmariadb 3.4.11,
+    MySQL 8.4 and MariaDB 11.4), and with 'MySQL 5.7' all passed. So with
+    MariaDB Connector/C use 'MySQL 5.7'; 'MySQL 8.0' is for Oracle's 8.0
+    libmysqlclient.
+    MYSQL_PLUGIN_DIR defaults to the plugin folder next to ClientLibrary
+    (PdbMySQLPluginDir): the client looks for its authentication plugins
+    (caching_sha2_password, MySQL 8's default) in a folder fixed when it was
+    built.
     Parameters are replaced in the SQL text on the client (the connector has
     no server-side prepared statements), escaping backslashes as the server
     expects. }
@@ -671,6 +689,9 @@ begin
         LConn.Params.Values[LName] := LValue;
     end;
     ApplyPostgresLockTimeout(LConn);
+    if IsMySQLConnector(LConn.ConnectorType) and (LParams.Values['MYSQL_PLUGIN_DIR'] = '') and
+      (PdbMySQLPluginDir(LParams.Values['ClientLibrary']) <> '') then
+      LConn.Params.Values['MYSQL_PLUGIN_DIR'] := PdbMySQLPluginDir(LParams.Values['ClientLibrary']);
     LConn.Open;
     ApplySessionSettings(LConn);
   except

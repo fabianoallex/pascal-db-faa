@@ -7,19 +7,21 @@
   from PascalDb.Adapter.Base / PascalDb.Adapter.DataSet.
 
   Connection settings (IDatabaseConfig.ConnectionParams): FireDAC connection
-  definition parameters as Name=Value — DriverID (FB, PG or SQLite; another
+  definition parameters as Name=Value — DriverID (FB, PG, SQLite or MySQL,
+  which also serves MariaDB servers; another
   driver works when the program links its FireDAC.Phys.* unit and registers
   an SQL dialect for it, see docs/other-databases.md),
   Database, Server, Port, User_Name, Password, CharacterSet, ... — passed
   to TFDConnection.Params as is, except:
-    VendorLib  full path of the client library (fbclient/libpq), applied
-               once per process through the driver link (TFDPhysFBDriverLink /
-               TFDPhysPgDriverLink) instead of a connection parameter. A
+    VendorLib  full path of the client library (fbclient/libpq/libmysql/
+               libmariadb), applied once per process through the driver link
+               (TFDPhysFBDriverLink / TFDPhysPgDriverLink /
+               TFDPhysMySQLDriverLink) instead of a connection parameter. A
                32-bit program needs the 32-bit client (Firebird 2.5 64-bit
                installs it in the WOW64 folder). Not for SQLite: its engine
                is linked into the program (FireDAC.Phys.SQLiteWrapper.Stat),
-               so there is no client library. For a driver other than FB
-               and PG, leave VendorLib out and set it on that driver's link
+               so there is no client library. For a driver other than FB,
+               PG and MySQL, leave VendorLib out and set it on that driver's link
                in the program (e.g. a TFDPhysOracleDriverLink).
   SQLite (Database = the file, created on first connect). Unless the
   settings say otherwise, connections here use:
@@ -39,8 +41,24 @@
                         as 'São Paulo ? ok': VARCHAR columns were handled as
                         ANSI strings.
 
+  MySQL/MariaDB (CharacterSet=utf8mb4: their utf8 has no 4-byte
+  characters). The client loads its authentication plugins (among them
+  caching_sha2_password, MySQL 8's default) from a folder fixed when it was
+  built, and FireDAC has no connection parameter for another one: with a
+  MariaDB Connector/C copied elsewhere, every connection to MySQL 8.4 failed
+  with "Plugin caching_sha2_password could not be loaded" (measured with
+  SQLdb and Zeos on Windows). So when VendorLib has a "plugin" folder next to
+  it (PdbMySQLPluginDir), PdbFireDACUseVendorLib sets the process's
+  MARIADB_PLUGIN_DIR (MariaDB Connector/C) and LIBMYSQL_PLUGIN_DIR (MySQL's
+  client) to it before the library loads, unless they are set already.
+  Measured with an FPC program on Windows, libmariadb 3.4.11: the variable
+  set by the process itself is seen by the library (without it, "Server
+  connect failed"; with it, connected); then the contract suite on MySQL 8.4
+  and MariaDB 11.4 (Delphi 12 CE, Win32 and Win64). A driver link loads its
+  library once per process, so the variables are set once, too.
+
   The FireDAC runtime units every FireDAC program needs (Stan.Def,
-  Stan.Async, DApt, the FB, PG and SQLite drivers) are used here, so a
+  Stan.Async, DApt, the FB, PG, SQLite and MySQL drivers) are used here, so a
   consumer doesn't hit "Object factory ... missing". Connections run with
   ResourceOptions.SilentMode, so no wait-cursor unit is required either.
   Queries fetch the whole result on Open (FetchOptions.Mode = fmAll), so
@@ -49,7 +67,9 @@
   IDatabaseConfig.LockTimeoutMs: connections get UpdateOptions.LockWait =
   True; Firebird transactions get wait and lock_timeout (whole seconds,
   rounded up) in their Options.Params; PostgreSQL a SET lock_timeout right
-  after connecting; SQLite the busy timeout. Measured on Firebird 2.5
+  after connecting; MySQL/MariaDB a SET SESSION innodb_lock_wait_timeout
+  (whole seconds, rounded up) right after connecting; SQLite the busy
+  timeout. Measured on Firebird 2.5
   (Delphi 12 CE, Win64, MON$TRANSACTIONS.MON$LOCK_TIMEOUT of the waiting
   transaction): the short names work and the isc_tpb_ ones are ignored, and
   only in the TFDTransaction's Options.Params, not in the connection's
@@ -59,7 +79,9 @@
   FireDAC doesn't give the lock errors of Firebird and PostgreSQL the kind
   ekRecordLocked (measured: ekOther), so they are recognized by code: the
   GDS code in TFDDBError.ErrorCode (Firebird), the SQLSTATE in
-  TFDPgError.ErrorCode (PostgreSQL); ekRecordLocked still covers SQLite.
+  TFDPgError.ErrorCode (PostgreSQL), the server's error number in
+  TFDMySQLError.ErrorCode (MySQL/MariaDB: 1205 ER_LOCK_WAIT_TIMEOUT, 1213
+  ER_LOCK_DEADLOCK); ekRecordLocked still covers SQLite.
   Those become ELockConflictException (see the codes in
   PascalDb.Adapter.SQLdb). The Community Edition has no source for the
   drivers: these came from measurement and the names in the compiled units. }
@@ -84,6 +106,7 @@ uses
   FireDAC.Phys,
   FireDAC.Phys.FB,
   FireDAC.Phys.PG,
+  FireDAC.Phys.MySQL,
   FireDAC.Phys.SQLite,
   FireDAC.Phys.SQLiteWrapper.Stat,
   FireDAC.Comp.Client,
@@ -204,7 +227,7 @@ type
       AOnPoolEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil);
   end;
 
-/// Applies VendorLib to the FireDAC driver link of ADriverID (FB or PG), once
+/// Applies VendorLib to the FireDAC driver link of ADriverID (FB, PG or MySQL), once
 /// per process. Called by the provider; public so a program can set it before
 /// creating anything else.
 procedure PdbFireDACUseVendorLib(const ADriverID, AVendorLib: string);
@@ -212,8 +235,12 @@ procedure PdbFireDACUseVendorLib(const ADriverID, AVendorLib: string);
 implementation
 
 uses
+  {$IFDEF MSWINDOWS}
+  Winapi.Windows,
+  {$ENDIF}
   FireDAC.Stan.Error,
-  FireDAC.Phys.PGWrapper;
+  FireDAC.Phys.PGWrapper,
+  FireDAC.Phys.MySQLWrapper;
 
 const
   // iberror.h; see PascalDb.Adapter.SQLdb
@@ -221,15 +248,40 @@ const
   ISC_LOCK_CONFLICT = 335544345;
   ISC_UPDATE_CONFLICT = 335544451;
   ISC_LOCK_TIMEOUT = 335544510;
+  MYSQL_ER_LOCK_WAIT_TIMEOUT = 1205; // mysqld_error.h: "Lock wait timeout exceeded"
+  MYSQL_ER_LOCK_DEADLOCK = 1213;     // mysqld_error.h: "Deadlock found when trying to get lock"
 
 var
   GDriverLinks: TObjectList<TFDPhysDriverLink> = nil;
 
-// See the unit header: PostgreSQL's lock timeout is set on the open session.
+// See the unit header: PostgreSQL's and MySQL's lock timeouts are set on the
+// open session.
 procedure ApplyFireDACLockTimeout(AConn: TFDConnection; AMs: Integer);
 begin
-  if (AMs > 0) and SameText(AConn.Params.Values['DriverID'], 'PG') then
-    AConn.ExecSQL('SET lock_timeout = ' + IntToStr(AMs));
+  if AMs <= 0 then
+    Exit;
+  if SameText(AConn.Params.Values['DriverID'], 'PG') then
+    AConn.ExecSQL('SET lock_timeout = ' + IntToStr(AMs))
+  else if SameText(AConn.Params.Values['DriverID'], 'MySQL') then
+    AConn.ExecSQL('SET SESSION innodb_lock_wait_timeout = ' + IntToStr((AMs + 999) div 1000));
+end;
+
+// See the unit header: the client's plugin folder, through the environment.
+procedure UseMySQLPluginDir(const AVendorLib: string);
+{$IFDEF MSWINDOWS}
+var
+  LDir: string;
+{$ENDIF}
+begin
+  {$IFDEF MSWINDOWS}
+  LDir := PdbMySQLPluginDir(AVendorLib);
+  if LDir = '' then
+    Exit;
+  if System.SysUtils.GetEnvironmentVariable('MARIADB_PLUGIN_DIR') = '' then
+    SetEnvironmentVariable('MARIADB_PLUGIN_DIR', PChar(LDir));
+  if System.SysUtils.GetEnvironmentVariable('LIBMYSQL_PLUGIN_DIR') = '' then
+    SetEnvironmentVariable('LIBMYSQL_PLUGIN_DIR', PChar(LDir));
+  {$ENDIF}
 end;
 
 // See the unit header.
@@ -253,6 +305,11 @@ begin
     begin
       LState := TFDPgError(LItem).ErrorCode;
       if (LState = '55P03') or (LState = '40P01') or (LState = '40001') then
+        Exit(True);
+    end
+    else if LItem is TFDMySQLError then
+    begin
+      if (LItem.ErrorCode = MYSQL_ER_LOCK_WAIT_TIMEOUT) or (LItem.ErrorCode = MYSQL_ER_LOCK_DEADLOCK) then
         Exit(True);
     end
     else if (LItem.ErrorCode = ISC_LOCK_TIMEOUT) or (LItem.ErrorCode = ISC_LOCK_CONFLICT) or
@@ -280,9 +337,14 @@ begin
     LLink := TFDPhysFBDriverLink.Create(nil)
   else if SameText(ADriverID, 'PG') then
     LLink := TFDPhysPgDriverLink.Create(nil)
+  else if SameText(ADriverID, 'MySQL') then
+  begin
+    UseMySQLPluginDir(AVendorLib);
+    LLink := TFDPhysMySQLDriverLink.Create(nil);
+  end
   else
     raise EDatabaseError.CreateFmt('PascalDb.Adapter.FireDAC: VendorLib in ConnectionParams is only applied for ' +
-      'FB and PG, not %s. Leave it out and set VendorLib on that driver''s link in your program (e.g. ' +
+      'FB, PG and MySQL, not %s. Leave it out and set VendorLib on that driver''s link in your program (e.g. ' +
       'TFDPhysOracleDriverLink.VendorLib) before the first connection; SQLite needs none (it is linked in)',
       [ADriverID]);
   PdbPreloadClientLibrary(AVendorLib);

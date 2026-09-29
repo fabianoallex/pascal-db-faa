@@ -26,6 +26,8 @@
   - PdbPreloadClientLibrary — makes a client library given by full path
     loadable on Windows even when its own dependencies aren't on the search
     path.
+  - PdbMySQLPluginDir — the plugin folder next to a MySQL/MariaDB client
+    library given by full path.
 
   Nothing here references a database driver or Data.DB/db; the TDataSet-based
   pieces live in PascalDb.Adapter.DataSet. }
@@ -291,6 +293,17 @@ type
 /// loaded, and outside Windows. A failure is left for the driver to report.
 procedure PdbPreloadClientLibrary(const ALibrary: string);
 
+/// The "plugin" folder next to ALibrary, a MySQL/MariaDB client library given
+/// by full path, when it exists; '' otherwise. The client loads its
+/// authentication plugins from there (MariaDB Connector/C and MySQL both
+/// install them in lib\plugin, next to the library), but looks in a folder
+/// fixed when it was built: a MySQL 8.4 server, whose default authentication
+/// is caching_sha2_password, refused every connection from a MariaDB
+/// Connector/C 3.4.11 copied to another folder ("Plugin caching_sha2_password
+/// could not be loaded", measured on Windows). Adapters pass it as the
+/// MYSQL_PLUGIN_DIR connection option unless the settings give one.
+function PdbMySQLPluginDir(const ALibrary: string): string;
+
 implementation
 
 uses
@@ -312,6 +325,16 @@ begin
   if GetModuleHandleW(PWideChar(LPath)) = 0 then
     LoadLibraryExW(PWideChar(LPath), 0, LOAD_WITH_ALTERED_SEARCH_PATH);
   {$ENDIF}
+end;
+
+function PdbMySQLPluginDir(const ALibrary: string): string;
+begin
+  Result := '';
+  if ExtractFilePath(ALibrary) = '' then
+    Exit;
+  Result := ExtractFilePath(ALibrary) + 'plugin';
+  if not DirectoryExists(Result) then
+    Result := '';
 end;
 
 { TDatabaseConfig }

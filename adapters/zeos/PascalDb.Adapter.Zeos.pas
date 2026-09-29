@@ -28,7 +28,9 @@
                      libmysql/libmariadb) when
                      it isn't found on the default search path (optional)
   Any other line goes to TZConnection.Properties as is (Zeos connection
-  properties, e.g. CreateNewDatabase=true).
+  properties, e.g. CreateNewDatabase=true). MySQL/MariaDB: MYSQL_PLUGIN_DIR,
+  the client's plugin folder, defaults to the plugin folder next to
+  LibraryLocation, if there is one (see PdbMySQLPluginDir).
 
   Zeos specifics handled here:
   - Zeos 8 queries use its own TZParams, not Data.DB's TParams, so the
@@ -365,6 +367,9 @@ begin
       Result.Properties.Values['hard_commit'] := 'true';
     if SameText(Copy(Result.Protocol, 1, 6), 'sqlite') and (Result.Properties.Values['busytimeout'] = '') then
       Result.Properties.Values['busytimeout'] := '5000';
+    if IsMySQLProtocol(Result) and (Result.Properties.Values['MYSQL_PLUGIN_DIR'] = '') and
+      (PdbMySQLPluginDir(Result.LibraryLocation) <> '') then
+      Result.Properties.Values['MYSQL_PLUGIN_DIR'] := PdbMySQLPluginDir(Result.LibraryLocation);
   except
     Result.Free;
     raise;

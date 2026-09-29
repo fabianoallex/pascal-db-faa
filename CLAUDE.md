@@ -169,8 +169,7 @@ The FPCUnit runner does both.
   `tests/Integration/PascalDb.IntegrationEnv.pas` is the only adapter-specific part (which
   factory, how to create/drop the database) and documents its `PASCALDB_IT_*` environment
   variables. `PASCALDB_IT_ENGINE` picks the database: `firebird` (default), `postgresql`,
-  `sqlite` (a file next to the runner; no server), `mysql` or `mariadb` (SQLdb and Zeos runners
-  only, so far).
+  `sqlite` (a file next to the runner; no server), `mysql` or `mariadb`.
   Each run creates a fresh database, migrates it with `TDBMigrationEngine` (SQL from a
   `TMemorySqlSource`) and drops it at the end. FPC on Windows: build
   `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi` (SQLdb) or
@@ -243,9 +242,9 @@ them the driver's quirks):
 
 | Adapter | Compiler | Package / unit | Status |
 |---|---|---|---|
-| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux), SQLite (Windows with sqlite.org's 3.53.4 DLL, Linux with Debian bookworm's libsqlite3), MySQL 8.4 and MariaDB 11.4 (Linux, `MySQL 8.0` connector over Debian bookworm's libmariadb3) |
-| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32 and Win64), PostgreSQL 17 (Win64) and SQLite (Win32 and Win64, engine linked in) — `tests/Integration/PascalDb.IntegrationTests.dproj`; MySQL/MariaDB not yet |
-| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32 and Win64), PostgreSQL 17 with FPC and Delphi (Win64), Firebird 5 and PostgreSQL 17 with FPC on Linux, SQLite with FPC on Windows and Linux and Delphi (Win32 and Win64), MySQL 8.4 and MariaDB 11.4 with FPC on Linux (libmariadb3) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
+| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux), SQLite (Windows with sqlite.org's 3.53.4 DLL, Linux with Debian bookworm's libsqlite3), MySQL 8.4 and MariaDB 11.4 (`MySQL 5.7` connector; Windows with MariaDB Connector/C 3.4.11, Linux with Debian bookworm's libmariadb3) |
+| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32 and Win64), PostgreSQL 17 (Win64) and SQLite (Win32 and Win64, engine linked in), MySQL 8.4 and MariaDB 11.4 (Win32 and Win64, MariaDB Connector/C 3.4.11) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
+| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32 and Win64), PostgreSQL 17 with FPC and Delphi (Win64), Firebird 5 and PostgreSQL 17 with FPC on Linux, SQLite with FPC on Windows and Linux and Delphi (Win32 and Win64), MySQL 8.4 and MariaDB 11.4 with FPC on Windows (Win64) and Linux and Delphi (Win32 and Win64) (MariaDB Connector/C) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
 
 A third-party adapter implements `IDBComponentProvider` (usually on top of the two units
 above), and `TDBFactory` does the rest: the core never has to change for a new driver.
@@ -320,16 +319,32 @@ precision, not an exact decimal. `CREATE TABLE IF NOT EXISTS`, `RETURNING` and t
 DDL all work (the contract suite passes unchanged). `:memory:` gives each pooled connection its
 own empty database: use a file.
 
-**MySQL/MariaDB specifics** (SQLdb and Zeos; FireDAC not yet): one dialect class, registered
-as `MySQL` and `MariaDB`. SQLdb `ConnectorType=MySQL 8.0` (the adapter also registers
-`MySQL 5.7`), Zeos `Protocol=mysql` or `mariadb`; character set `utf8mb4`. Measured with MariaDB
-Connector/C (Debian bookworm's `libmariadb3`, 3.3.19) for both servers on Linux; no Oracle
-`libmysqlclient`, no Windows client yet. What the adapters add:
+**MySQL/MariaDB specifics:** one dialect class, registered
+as `MySQL` and `MariaDB`. SQLdb `ConnectorType=MySQL 5.7` (the adapter also registers
+`MySQL 8.0`, for Oracle's 8.0 client only: gotcha 35), Zeos `Protocol=mysql` or `mariadb`,
+FireDAC `DriverID=MySQL` (`FireDAC.Phys.MySQL`, in the Community Edition too);
+character set `utf8mb4`. Measured with MariaDB Connector/C for both servers: Debian bookworm's
+`libmariadb3` (3.3.19) on Linux, 3.4.11 on Windows (`.deps/mariadb-connector-c-3.4.11/{x64,x86}`,
+git-ignored, extracted from the signed MSIs in `msi/` with `msiexec /a`; SHA-256 x64
+`3faa123d...a71c8`, x86 `603a09c1...55ae2`). Windows runs: `docker run -d --name
+pascaldb-it-mysql -p 33306:3306 -e MYSQL_ROOT_PASSWORD=root mysql:8.4` (MariaDB:
+`pascaldb-it-mariadb`, 33307, `MARIADB_ROOT_PASSWORD`), then `PASCALDB_IT_ENGINE=mysql`,
+`PASCALDB_IT_PORT=33306`, `PASCALDB_IT_CLIENT=<the x64 libmariadb.dll>`. No Oracle
+`libmysqlclient` measured. What the adapters add:
 - `LockTimeoutMs` as `SET SESSION innodb_lock_wait_timeout` (whole seconds, rounded up) when a
   connection opens (both connectors use one server session per connection), and errors 1205 /
   1213 as `ELockConflictException`. An expired lock wait undoes only the statement;
 - SQLdb: `SkipLibraryVersionCheck=true`, needed with any client whose version isn't the
-  connector's (gotcha 34).
+  connector's (gotcha 34);
+- `MYSQL_PLUGIN_DIR` defaults to the `plugin` folder next to a client library given by full
+  path (`PdbMySQLPluginDir`): MySQL 8.4's default authentication, `caching_sha2_password`, is a
+  client plugin, and MariaDB Connector/C copied out of its install folder didn't find it ("Plugin
+  caching_sha2_password could not be loaded", every connection to MySQL, SQLdb and Zeos on
+  Windows; MariaDB servers don't use it). Debian's package finds its own plugins. FireDAC has
+  no parameter for it, so `PdbFireDACUseVendorLib` sets the process's `MARIADB_PLUGIN_DIR` and
+  `LIBMYSQL_PLUGIN_DIR` before the library loads (unless set): measured first with an FPC probe
+  (the library sees a variable the process set itself; without it, "Server connect failed"),
+  then with the Delphi FireDAC runners on MySQL 8.4, Win32 and Win64.
 MySQL has no `INSERT ... RETURNING` (MariaDB has): the contract test `InsertReturning_ViaOpen`
 exits early on `ENGINE=mysql` (`SupportsReturning` in the integration environment), and the
 optional-column tests read the row back with a `SELECT` on every database. DDL commits
@@ -642,4 +657,14 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     calls `CreateProxy` right away (`sqldb.pp`), before the other settings are read. Fix: a
     `SkipLibraryVersionCheck=true` setting, applied to `TSQLConnector.Proxy` in an override of
     `DoInternalConnect`, right before connecting. Not measured: Oracle's libmysqlclient 8.4 (it
-    would report 8.4 and be refused the same way), and Windows.
+    would report 8.4 and be refused the same way).
+35. **SQLdb's `MySQL 8.0` connector numbers `mysql_options` as MySQL 8.0 does; MariaDB
+    Connector/C numbers them as 5.7.** MySQL 8.0 removed five options from the middle of the enum
+    (`MYSQL_OPT_USE_REMOTE_CONNECTION` ... `MYSQL_SECURE_AUTH`), and FPC 3.2.2's `mysql.inc`
+    follows it under `MYSQL80`: `MYSQL_PLUGIN_DIR` is 16 there and 22 in 5.7 and in libmariadb.
+    Found when the adapter started setting `MYSQL_PLUGIN_DIR` (Windows, FPC 3.2.2, libmariadb
+    3.4.11): with `MySQL 8.0` every connection failed with "Server connect failed", against MySQL
+    8.4 and MariaDB 11.4 alike (MariaDB had passed without the option); with `MySQL 5.7`, all four
+    combinations passed, and Linux too. Without any option set, `MySQL 8.0` had passed on Linux,
+    which is how it went unnoticed. Fix: `MySQL 5.7` with MariaDB Connector/C (tests and docs);
+    `MySQL 8.0` only with Oracle's 8.0 client. Not measured: that client.

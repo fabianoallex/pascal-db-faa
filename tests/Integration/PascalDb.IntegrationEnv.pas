@@ -11,8 +11,7 @@
 
   Settings (environment variables, all optional):
     PASCALDB_IT_ENGINE    firebird (default), postgresql, sqlite, mysql or
-                          mariadb (the last two: not the FireDAC runner, so
-                          far)
+                          mariadb
     PASCALDB_IT_HOST      server host (default localhost, over TCP). Firebird:
                           'local' = the local protocol (path only), which
                           fails intermittently with concurrent connections on
@@ -103,7 +102,7 @@ uses
   , sqldb
   , ibconnection
   , pqconnection
-  , mysql80conn
+  , mysql57conn
   , PascalDb.Adapter.SQLdb
   {$ELSE}
   , FireDAC.Comp.Client
@@ -448,7 +447,9 @@ begin
   case Engine of
     engPostgres: AParams.Values['ConnectorType'] := 'PostgreSQL';
     engSQLite: AParams.Values['ConnectorType'] := 'SQLite3';
-    engMySQL, engMariaDB: AParams.Values['ConnectorType'] := 'MySQL 8.0';
+    // MySQL 5.7, not 8.0: the client is MariaDB Connector/C, whose
+    // mysql_options numbering is 5.7's (see PascalDb.Adapter.SQLdb).
+    engMySQL, engMariaDB: AParams.Values['ConnectorType'] := 'MySQL 5.7';
   else
     AParams.Values['ConnectorType'] := 'Firebird';
   end;
@@ -469,15 +470,15 @@ begin
 end;
 
 // MySQL/MariaDB: CREATE/DROP DATABASE on a connection to the maintenance
-// database (TMySQL80Connection.CreateDB can't set the character set).
+// database (TMySQL57Connection.CreateDB can't set the character set).
 procedure ExecOnMySQLMaintenanceDb(const ASql: string);
 var
-  LConn: TMySQL80Connection;
+  LConn: TMySQL57Connection;
   LTransaction: TSQLTransaction;
 begin
   // Before any direct SQLdb connection: the first client library loaded wins.
-  PdbSQLdbUseClientLibrary('MySQL 8.0', ClientLibrary);
-  LConn := TMySQL80Connection.Create(nil);
+  PdbSQLdbUseClientLibrary('MySQL 5.7', ClientLibrary);
+  LConn := TMySQL57Connection.Create(nil);
   LTransaction := TSQLTransaction.Create(nil);
   try
     LConn.SkipLibraryVersionCheck := True;
@@ -488,6 +489,8 @@ begin
     LConn.UserName := UserName;
     LConn.Password := Password;
     LConn.LoginPrompt := False;
+    if PdbMySQLPluginDir(ClientLibrary) <> '' then
+      LConn.Params.Values['MYSQL_PLUGIN_DIR'] := PdbMySQLPluginDir(ClientLibrary);
     LTransaction.DataBase := LConn;
     LConn.Open;
     LConn.ExecuteDirect(ASql, LTransaction);
@@ -590,8 +593,6 @@ end;
 procedure SetConnectionParams(AParams: TStrings; const ADatabase: string);
 begin
   // FireDAC connection definition (see PascalDb.Adapter.FireDAC)
-  if IsMySQL then
-    raise Exception.Create('PASCALDB_IT_ENGINE=mysql/mariadb: only the Zeos runners support it so far');
   if IsSQLite then
   begin
     // No server, credentials or client library: the engine is in the program.
@@ -601,12 +602,14 @@ begin
   end;
   if IsPostgres then
     AParams.Values['DriverID'] := 'PG'
+  else if IsMySQL then
+    AParams.Values['DriverID'] := 'MySQL'
   else
     AParams.Values['DriverID'] := 'FB';
   if Host <> '' then
   begin
     AParams.Values['Server'] := Host;
-    if not IsPostgres then
+    if Engine = engFirebird then
       AParams.Values['Protocol'] := 'TCPIP';
   end;
   if Port <> '' then
@@ -614,7 +617,10 @@ begin
   AParams.Values['Database'] := ADatabase;
   AParams.Values['User_Name'] := UserName;
   AParams.Values['Password'] := Password;
-  AParams.Values['CharacterSet'] := 'UTF8';
+  if IsMySQL then
+    AParams.Values['CharacterSet'] := 'utf8mb4'
+  else
+    AParams.Values['CharacterSet'] := 'UTF8';
   AParams.Values['VendorLib'] := ClientLibrary;
 end;
 
@@ -633,8 +639,9 @@ begin
     Result.Params.Add(AExtra);
 end;
 
-// PostgreSQL: CREATE/DROP DATABASE through the maintenance database;
-// TFDConnection.ExecSQL outside an explicit transaction runs in auto-commit.
+// PostgreSQL, MySQL, MariaDB: CREATE/DROP DATABASE through the maintenance
+// database; TFDConnection.ExecSQL outside an explicit transaction runs in
+// auto-commit.
 procedure ExecOnMaintenanceDb(const ASql: string);
 var
   LSettings: TStringList;
@@ -642,7 +649,10 @@ var
 begin
   LSettings := TStringList.Create;
   try
-    SetConnectionParams(LSettings, PG_MAINTENANCE_DB);
+    if IsMySQL then
+      SetConnectionParams(LSettings, MYSQL_MAINTENANCE_DB)
+    else
+      SetConnectionParams(LSettings, PG_MAINTENANCE_DB);
     LConn := NewFDConnection(LSettings, '');
   finally
     LSettings.Free;
@@ -667,7 +677,7 @@ begin
     DeleteSQLiteFiles;
     Exit;
   end;
-  if IsPostgres then
+  if IsPostgres or IsMySQL then
   begin
     try
       ExecOnMaintenanceDb('DROP DATABASE IF EXISTS ' + DatabaseName);
@@ -707,6 +717,11 @@ begin
   if IsPostgres then
   begin
     ExecOnMaintenanceDb('CREATE DATABASE ' + DatabaseName);
+    Exit;
+  end;
+  if IsMySQL then
+  begin
+    ExecOnMaintenanceDb('CREATE DATABASE ' + DatabaseName + ' CHARACTER SET utf8mb4');
     Exit;
   end;
   LConn := NewFDConnection(AConfig.ConnectionParams, 'CreateDatabase=Yes');
@@ -782,7 +797,7 @@ begin
     LConfig.ConnectionParams.Values['HostName'] := UNREACHABLE_HOST;
     {$ELSE}
     LConfig.ConnectionParams.Values['Server'] := UNREACHABLE_HOST;
-    if not IsPostgres then
+    if Engine = engFirebird then
       LConfig.ConnectionParams.Values['Protocol'] := 'TCPIP';
     {$IFEND}
   end;

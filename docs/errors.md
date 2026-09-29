@@ -177,7 +177,8 @@ PostgreSQL read the last committed version of the row).
 Measured with the contract test `LockWait_GivesUpAfterLockTimeout` (1000 ms): every adapter
 gave up after about 1 s — SQLdb and Zeos on Firebird 2.5, PostgreSQL 17 and SQLite (Windows) and
 on Firebird 5 (Linux), FireDAC and Zeos on Delphi (Win32 and Win64; PostgreSQL Win64 only),
-SQLdb and Zeos on MySQL 8.4 and MariaDB 11.4 (Linux).
+SQLdb and Zeos on MySQL 8.4 and MariaDB 11.4 (FPC, Windows and Linux), FireDAC and Zeos on them
+with Delphi (Win32 and Win64).
 Without the setting, PostgreSQL and SQLdb on Firebird waited the full 8 s the test held the lock,
 Zeos on Firebird failed at once (FireDAC's transactions showed the same `nowait` in
 `MON$TRANSACTIONS`), and SQLite gave up after 5 s.
