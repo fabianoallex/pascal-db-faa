@@ -115,3 +115,126 @@ scope are not: each thread acquires its own and releases it when done. Workers i
 On FPC, `Output` is per thread (a `threadvar`): with the output redirected on Linux, lines from
 different threads came out cut in the middle even under a lock. Call `Flush(Output)` inside the
 lock, after `Writeln` (gotcha 20 in [`CLAUDE.md`](../CLAUDE.md)).
+
+## Database work off the UI thread
+
+Every call in the library blocks until the database answers, and there is no `OpenAsync`. In a
+server that is what you want: each request already runs on a worker thread of the HTTP
+framework, and the drivers underneath (fbclient, libpq, sqlite3) block anyway, so an
+asynchronous wrapper would only hand the wait to yet another thread. In a desktop or mobile
+program, a slow query on the main thread freezes the window: run it on a thread of its own.
+
+Move the **whole unit of work** to the thread, not a single `Open`: acquire, transaction,
+queries, commit, and a **copy** of the rows. The result of `Open` is the query itself, tied to
+its connection and transaction: it can't be handed to the main thread, and on SQLdb the commit
+closes it. Hand over plain data (records, objects, strings) instead:
+
+```pascal
+type
+  TCity = record
+    Id: Integer;
+    Name: string;
+  end;
+  TCities = array of TCity;
+
+  TLoadCities = class(TThread)
+  private
+    FFactory: IDBFactory;
+    FCities: TCities;
+    FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const AFactory: IDBFactory);
+    property Cities: TCities read FCities;
+    property Error: string read FError;  // '' = success
+  end;
+
+constructor TLoadCities.Create(const AFactory: IDBFactory);
+begin
+  FFactory := AFactory;
+  inherited Create(False);
+end;
+
+procedure TLoadCities.Execute;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LResult: IQueryResult;
+begin
+  try
+    LScope := FFactory.GetPool.AcquireQuery(LQuery);
+    LScope.StartTransaction;
+    try
+      LQuery.Sql := FFactory.SqlLoader['CITY.LIST'].SQL;
+      LResult := LQuery.Open;
+      while not LResult.Eof do
+      begin
+        SetLength(FCities, Length(FCities) + 1);
+        FCities[High(FCities)].Id := LResult.Integers['ID'];
+        FCities[High(FCities)].Name := LResult.Strings['NAME'];
+        LResult.Next;
+      end;
+      LScope.Commit;
+    except
+      LScope.Rollback;
+      raise;
+    end;
+  except
+    on E: Exception do
+      FError := E.Message;  // an exception must not escape Execute
+  end;
+end;
+```
+
+The form starts it and gets the rows in `OnTerminate`, which runs on the main thread:
+
+```pascal
+procedure TCityForm.LoadButtonClick(Sender: TObject);
+begin
+  LoadButton.Enabled := False;
+  FLoader := TLoadCities.Create(FFactory);
+  FLoader.OnTerminate := LoaderDone;
+end;
+
+procedure TCityForm.LoaderDone(Sender: TObject);
+begin
+  if FLoader.Error <> '' then
+    ShowMessage(FLoader.Error)
+  else
+    ShowCities(FLoader.Cities);
+  LoadButton.Enabled := True;
+  // Not freed here: this runs inside the thread's own termination.
+end;
+
+procedure TCityForm.FormDestroy(Sender: TObject);
+begin
+  if Assigned(FLoader) then
+  begin
+    FLoader.OnTerminate := nil;  // the form is going away: don't call it back
+    FLoader.WaitFor;
+    FLoader.Free;
+  end;
+end;
+```
+
+Things that bite:
+
+- **Closing waits.** `FormDestroy` blocks until the unit of work ends: a query can't be
+  cancelled portably. Keep the work short, or bound its lock waits with `LockTimeoutMs`
+  ([guide 6](errors.md#locks-and-conflicts-elockconflictexception)).
+- **The callback needs a message loop.** `OnTerminate` (like `TThread.Synchronize` and
+  `TThread.Queue`) reaches the main thread only when it calls `CheckSynchronize`. VCL and LCL
+  applications do; a console program or a service must call it in its own loop, or the callback
+  never arrives.
+- **One loader at a time per form**, as above (the button is disabled). Starting a second one
+  over `FLoader` would lose the first; keep a list if you need several.
+- **Every thread acquires its own query** from the shared factory (see [Threads](#threads)); a
+  query acquired on the main thread must not be used by the worker.
+- **FPC 3.2.2 has no anonymous methods**, so no `TThread.CreateAnonymousThread` and no closures
+  for the callback: a `TThread` subclass and a method, as here, compile on both compilers.
+
+Checked with FPC 3.2.2 (Win64, SQLdb and SQLite, a console loop calling `CheckSynchronize`):
+`OnTerminate` ran on the main thread with the rows; a failing query arrived as `Error`; clearing
+`OnTerminate`, `WaitFor` and `Free` while the worker was still running waited for it (1 s of work
+in the test), never called back, and left 0 leaks (heaptrc). Not run on Delphi.
