@@ -363,13 +363,22 @@ Package Manager under "zeos").
 
 ## Known open items
 
-None.
-
-Closed on 2026-09-27: the rare failures with concurrent connections on Zeos + Firebird (Linux),
-sample 05 (CI run 36235419745: `EAccessViolation` in a worker; once 26 unfreed blocks locally).
-Attributed to the `TClock`/`TSleep` lazy-initialization race fixed in `5c853c6` (see the list
-under "Origin"); sample 05 stayed clean in every CI run since. If it comes back, the sample
-prints the FPC backtrace and `test_samples_docker.sh` prints heaptrc's report.
+- **Zeos + Firebird (Linux): connections opened at the same moment sometimes fail inside the
+  connect, with memory corruption.** Reopened on 2026-09-29. GitHub CI run 36644884746 (commit
+  `1d62aa2`, attempt 1), contract test `ConcurrentWriters_AllCommit` (4 threads, each opening a
+  pooled connection): two writers failed in the connect, one with `EAccessViolation`, the other
+  with `EZIBSQLException: Invalid index 1104090048 in function IMessageMetadata::getScale` (GDS
+  335545015, a garbage index), and heaptrc reported 26 unfreed blocks. Attempt 2 of the same
+  run passed; locally, 40 runs of the Zeos + Firebird suite with `--cpus=2` and 40 with
+  `--cpus=1` all passed. Same signature as the failures closed on 2026-09-27 (sample 05, CI run
+  36235419745: `EAccessViolation` in a worker while two connections were created; once 26
+  unfreed blocks locally), which were attributed to the `TClock`/`TSleep` race fixed in
+  `5c853c6`: that attribution was wrong or incomplete. Suspected: shared state in Zeos 8's
+  Firebird 3+ API path (`ZDbcFirebird.pas`) when two `TZConnection`s connect concurrently;
+  per-connection `IStatus`/`IUtil` there look fine, not investigated further. Never seen with
+  SQLdb, with the Windows runners (legacy API, 2.5 client) or on other databases. Next
+  occurrence: keep the CI log; a local reproduction would need a tighter loop of concurrent
+  connects than the contract suite.
 
 ---
 
