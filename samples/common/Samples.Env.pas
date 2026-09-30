@@ -8,23 +8,30 @@ unit Samples.Env;
   (queries, transactions, the repository) is driver-agnostic.
 
   Settings (environment variables, all optional):
-    PASCALDB_SAMPLE_ENGINE    postgresql (default), firebird, sqlite, mysql or
-                              mariadb
+    PASCALDB_SAMPLE_ENGINE    postgresql (default), firebird, sqlite, mysql,
+                              mariadb or sqlserver (SQLdb and Zeos only: the
+                              FireDAC of Delphi's Community Edition has no SQL
+                              Server driver)
     PASCALDB_SAMPLE_HOST      default localhost (unused by SQLite)
-    PASCALDB_SAMPLE_PORT      default: the driver's (5432 / 3050 / 3306)
+    PASCALDB_SAMPLE_PORT      default: the driver's (5432 / 3050 / 3306 / 1433)
     PASCALDB_SAMPLE_DATABASE  PostgreSQL: database name (default postgres).
-                              MySQL/MariaDB: name of an existing database
-                              (default samples).
+                              MySQL/MariaDB, SQL Server: name of an existing
+                              database (default samples).
                               Firebird: path of an existing database on the
                               server (required). SQLite: the database file,
                               created on first connect (default
                               pascaldb_samples.sqlite in the current folder)
-    PASCALDB_SAMPLE_USER      default postgres / SYSDBA / root (unused by
+    PASCALDB_SAMPLE_USER      default postgres / SYSDBA / root / sa (unused by
                               SQLite)
-    PASCALDB_SAMPLE_PASSWORD  default postgres / masterkey / root (unused by
-                              SQLite)
+    PASCALDB_SAMPLE_PASSWORD  default postgres / masterkey / root /
+                              PascalDb_It1 (unused by SQLite)
+    PASCALDB_SAMPLE_ODBC_DRIVER
+                              SQL Server: the ODBC driver's name (default ODBC
+                              Driver 18 for SQL Server)
     PASCALDB_SAMPLE_CLIENT    full path of the client library (libpq /
-                              fbclient / sqlite3 / libmariadb or libmysql)
+                              fbclient / sqlite3 / libmariadb or libmysql;
+                              SQL Server: the ODBC driver manager, e.g.
+                              libodbc.so.2)
                               when it isn't found on the
                               default search path, e.g.
                               C:\Program Files\PostgreSQL\17\bin\libpq.dll.
@@ -34,9 +41,9 @@ unit Samples.Env;
   Each adapter has its own names for the connection settings (see the
   adapter units); SetConnectionParams below is the whole difference.
 
-  The SQL directory follows the engine ('PG', 'FB', 'SQLITE' or 'MYSQL', for
-  MySQL and MariaDB alike), so a program can keep one version of a script per
-  database under the same key. }
+  The SQL directory follows the engine ('PG', 'FB', 'SQLITE', 'MYSQL', for
+  MySQL and MariaDB alike, or 'MSSQL'), so a program can keep one version of a
+  script per database under the same key. }
 
 {$IFDEF FPC}{$MODE DELPHI}{$H+}{$ENDIF}
 
@@ -49,13 +56,14 @@ uses
   PascalDb.Pool;
 
 type
-  TSampleEngine = (sePostgreSQL, seFirebird, seSQLite, seMySQL, seMariaDB);
+  TSampleEngine = (sePostgreSQL, seFirebird, seSQLite, seMySQL, seMariaDB, seSqlServer);
 
 const
   SQL_DIR_POSTGRESQL = 'PG';
   SQL_DIR_FIREBIRD = 'FB';
   SQL_DIR_SQLITE = 'SQLITE';
   SQL_DIR_MYSQL = 'MYSQL'; // MySQL and MariaDB
+  SQL_DIR_MSSQL = 'MSSQL';
 
 function SampleEngine: TSampleEngine;
 /// Human-readable description of the target, e.g. 'PostgreSQL on localhost (SQLdb adapter)'.
@@ -113,8 +121,10 @@ begin
     Result := seMySQL
   else if LEngine = 'mariadb' then
     Result := seMariaDB
+  else if LEngine = 'sqlserver' then
+    Result := seSqlServer
   else
-    raise Exception.CreateFmt('PASCALDB_SAMPLE_ENGINE must be postgresql, firebird, sqlite, mysql or mariadb, not "%s"', [LEngine]);
+    raise Exception.CreateFmt('PASCALDB_SAMPLE_ENGINE must be postgresql, firebird, sqlite, mysql, mariadb or sqlserver, not "%s"', [LEngine]);
 end;
 
 function IsMySQL: Boolean;
@@ -139,7 +149,7 @@ begin
       Result := Env('PASCALDB_SAMPLE_DATABASE', 'postgres');
     seSQLite:
       Result := ExpandFileName(Env('PASCALDB_SAMPLE_DATABASE', 'pascaldb_samples.sqlite'));
-    seMySQL, seMariaDB:
+    seMySQL, seMariaDB, seSqlServer:
       Result := Env('PASCALDB_SAMPLE_DATABASE', 'samples');
   else
     Result := Env('PASCALDB_SAMPLE_DATABASE', '');
@@ -154,6 +164,8 @@ begin
     Result := Env('PASCALDB_SAMPLE_USER', 'SYSDBA')
   else if IsMySQL then
     Result := Env('PASCALDB_SAMPLE_USER', 'root')
+  else if SampleEngine = seSqlServer then
+    Result := Env('PASCALDB_SAMPLE_USER', 'sa')
   else
     Result := Env('PASCALDB_SAMPLE_USER', 'postgres');
 end;
@@ -164,8 +176,15 @@ begin
     Result := Env('PASCALDB_SAMPLE_PASSWORD', 'masterkey')
   else if IsMySQL then
     Result := Env('PASCALDB_SAMPLE_PASSWORD', 'root')
+  else if SampleEngine = seSqlServer then
+    Result := Env('PASCALDB_SAMPLE_PASSWORD', 'PascalDb_It1')
   else
     Result := Env('PASCALDB_SAMPLE_PASSWORD', 'postgres');
+end;
+
+function OdbcDriver: string;
+begin
+  Result := Env('PASCALDB_SAMPLE_ODBC_DRIVER', 'ODBC Driver 18 for SQL Server');
 end;
 
 function ClientLibrary: string;
@@ -186,6 +205,23 @@ begin
     seSQLite: AParams.Values['Protocol'] := 'sqlite';
     seMySQL: AParams.Values['Protocol'] := 'mysql';
     seMariaDB: AParams.Values['Protocol'] := 'mariadb';
+    seSqlServer:
+      begin
+        // ODBC: the connection string is the database (see
+        // PascalDb.Adapter.Zeos). A development server's certificate is
+        // usually self-signed: trusted as is here.
+        AParams.Values['Protocol'] := 'odbc_w';
+        if Port <> '' then
+          AParams.Values['Database'] := 'DRIVER={' + OdbcDriver + '};SERVER=' + Host + ',' + Port +
+            ';DATABASE=' + DatabaseName + ';TrustServerCertificate=yes'
+        else
+          AParams.Values['Database'] := 'DRIVER={' + OdbcDriver + '};SERVER=' + Host +
+            ';DATABASE=' + DatabaseName + ';TrustServerCertificate=yes';
+        AParams.Values['User'] := UserName;
+        AParams.Values['Password'] := Password;
+        AParams.Values['LibraryLocation'] := ClientLibrary;
+        Exit;
+      end;
   end;
   if SampleEngine <> seSQLite then
   begin
@@ -225,6 +261,14 @@ begin
         AParams.Values['ConnectorType'] := 'MySQL 5.7';
         AParams.Values['SkipLibraryVersionCheck'] := 'true';
       end;
+    // SQL Server through ODBC (see the adapter unit). A development server's
+    // certificate is usually self-signed: trusted as is here.
+    seSqlServer:
+      begin
+        AParams.Values['ConnectorType'] := 'ODBC';
+        AParams.Values['Driver'] := OdbcDriver;
+        AParams.Values['TrustServerCertificate'] := 'yes';
+      end;
   end;
   if SampleEngine <> seSQLite then
   begin
@@ -234,7 +278,7 @@ begin
     AParams.Values['Password'] := Password;
     if IsMySQL then
       AParams.Values['CharSet'] := 'utf8mb4'
-    else
+    else if SampleEngine <> seSqlServer then
       AParams.Values['CharSet'] := 'UTF8';
   end;
   AParams.Values['DatabaseName'] := DatabaseName;
@@ -253,6 +297,9 @@ const
 
 procedure SetConnectionParams(AParams: TStrings);
 begin
+  if SampleEngine = seSqlServer then
+    raise Exception.Create('PASCALDB_SAMPLE_ENGINE=sqlserver: FireDAC''s SQL Server driver is not in ' +
+      'Delphi''s Community Edition; build the samples with PASCALDB_SAMPLES_ZEOS');
   if SampleEngine = seSQLite then
   begin
     // No server, credentials or client library: the engine is in the program.
@@ -296,6 +343,7 @@ begin
     seFirebird: Result := Format('Firebird on %s', [Host]);
     seMySQL: Result := Format('MySQL on %s', [Host]);
     seMariaDB: Result := Format('MariaDB on %s', [Host]);
+    seSqlServer: Result := Format('SQL Server on %s', [Host]);
   else
     Result := Format('SQLite file %s', [DatabaseName]);
   end;
@@ -321,6 +369,7 @@ begin
     case SampleEngine of
       sePostgreSQL: LPort := '5432 (default)';
       seMySQL, seMariaDB: LPort := '3306 (default)';
+      seSqlServer: LPort := '1433 (default)';
     else
       LPort := '3050 (default)';
     end;
@@ -382,6 +431,11 @@ begin
       begin
         LConfig.SQLDialect := 'MySQL'; // 'MariaDB' names the same dialect
         LConfig.SQLDirectory := SQL_DIR_MYSQL;
+      end;
+    seSqlServer:
+      begin
+        LConfig.SQLDialect := 'SQLServer'; // 'MSSQL' names the same dialect
+        LConfig.SQLDirectory := SQL_DIR_MSSQL;
       end;
   end;
   LConfig.SqlSource := ASqlSource;

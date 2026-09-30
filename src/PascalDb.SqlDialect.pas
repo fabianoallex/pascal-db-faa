@@ -5,10 +5,10 @@
 { SQL differences between databases that the library itself has to generate:
   savepoints (create, roll back to, release) via ISQLDialect, and the queries
   on the migrations control table via IMigrationDialect. Implementations for
-  PostgreSQL, Firebird, SQLite and MySQL/MariaDB, registered in this unit's
-  initialization section under the names 'PostgreSQL', 'Firebird', 'SQLite',
-  'MySQL' and 'MariaDB' (the last two are the same class); adapters resolve
-  the dialect
+  PostgreSQL, Firebird, SQLite, MySQL/MariaDB and SQL Server, registered in
+  this unit's initialization section under the names 'PostgreSQL',
+  'Firebird', 'SQLite', 'MySQL', 'MariaDB' (the same class as MySQL),
+  'SQLServer' and 'MSSQL' (the same class); adapters resolve the dialect
   with TSQLDialectFactory.GetDialect(Config.SQLDialect). New database:
   RegisterDialect(Name, Class) in the application's composition root.
   Names are matched ignoring case, like the drivers' own names ('firebird'
@@ -100,6 +100,25 @@ type
     goes in backticks. }
 
   TMySQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
+  public
+    function GetReleaseSavepointSQL(const AName: string): string;
+    function GetRollbackToSavepointSQL(const AName: string): string;
+    function GetSavepointSQL(const AName: string): string;
+    function SupportsRelease: Boolean;
+    function GetPingSQL: string;
+    function GetMigrationTableExistsSQL: string;
+    function GetMigrationLastVersionSQL: string;
+    function GetMigrationInsertVersionSQL: string;
+  end;
+
+  { TSQLServerDialect
+    SQL Server names savepoints with SAVE TRANSACTION and rolls back to one
+    with ROLLBACK TRANSACTION; there is no statement to release one (it lasts
+    until the transaction ends), so SupportsRelease is False. The control
+    table is looked up with OBJECT_ID, which follows the database's
+    collation (case-insensitive by default). }
+
+  TSQLServerDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -358,11 +377,58 @@ begin
     'VALUES (:VERSION, CURRENT_TIMESTAMP)';
 end;
 
+{ TSQLServerDialect }
+
+function TSQLServerDialect.GetReleaseSavepointSQL(const AName: string): string;
+begin
+  Result := '';
+end;
+
+function TSQLServerDialect.GetRollbackToSavepointSQL(const AName: string): string;
+begin
+  Result := Format('ROLLBACK TRANSACTION %s', [AName]);
+end;
+
+function TSQLServerDialect.GetSavepointSQL(const AName: string): string;
+begin
+  Result := Format('SAVE TRANSACTION %s', [AName]);
+end;
+
+function TSQLServerDialect.SupportsRelease: Boolean;
+begin
+  Result := False;
+end;
+
+function TSQLServerDialect.GetPingSQL: string;
+begin
+  Result := 'SELECT 1';
+end;
+
+function TSQLServerDialect.GetMigrationTableExistsSQL: string;
+begin
+  Result :=
+    'SELECT CASE WHEN OBJECT_ID(''SCHEMA_MIGRATIONS'', ''U'') IS NULL THEN 0 ELSE 1 END AS "EXISTS"';
+end;
+
+function TSQLServerDialect.GetMigrationLastVersionSQL: string;
+begin
+  Result := 'SELECT COALESCE(MAX(VERSION), 0) AS VERSION FROM SCHEMA_MIGRATIONS';
+end;
+
+function TSQLServerDialect.GetMigrationInsertVersionSQL: string;
+begin
+  Result :=
+    'INSERT INTO SCHEMA_MIGRATIONS (VERSION, APPLIED_AT) ' +
+    'VALUES (:VERSION, CURRENT_TIMESTAMP)';
+end;
+
 initialization
   TSQLDialectFactory.RegisterDialect('PostgreSQL', TPostgreSQLDialect);
   TSQLDialectFactory.RegisterDialect('Firebird', TFirebirdDialect);
   TSQLDialectFactory.RegisterDialect('SQLite', TSQLiteDialect);
   TSQLDialectFactory.RegisterDialect('MySQL', TMySQLDialect);
   TSQLDialectFactory.RegisterDialect('MariaDB', TMySQLDialect);
+  TSQLDialectFactory.RegisterDialect('SQLServer', TSQLServerDialect);
+  TSQLDialectFactory.RegisterDialect('MSSQL', TSQLServerDialect);
 
 end.

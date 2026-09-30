@@ -4,11 +4,13 @@
 # (SQLite needs no server: its database is a file inside the FPC container).
 # The FPC container installs the client library from Debian (libfbclient2,
 # libpq5, libsqlite3-0 or libmariadb3, MariaDB Connector/C, which also talks to
-# MySQL servers), builds the suite with plain fpc and runs it with
+# MySQL servers; for SQL Server, Microsoft's ODBC Driver 18 and unixODBC, from
+# Microsoft's repository, accepting its license), builds the suite with plain
+# fpc and runs it with
 # heaptrc. Everything is removed at the end, even on failure. Acceptance:
 # 0 errors, 0 failures, 0 unfreed blocks.
 #
-# ENGINE:    firebird (default), postgresql, sqlite, mysql or mariadb
+# ENGINE:    firebird (default), postgresql, sqlite, mysql, mariadb or sqlserver
 # ADAPTER:   sqldb (default) or zeos
 # ZEOSDBO:   ADAPTER=zeos only: the ZeosLib 8 folder (the one containing
 #            src/core, src/dbc, ...), mounted read-only into the FPC container
@@ -17,6 +19,8 @@
 # PG_IMAGE:  PostgreSQL server image (default: postgres:17)
 # MYSQL_IMAGE:   MySQL server image (default: mysql:8.4)
 # MARIADB_IMAGE: MariaDB server image (default: mariadb:11.4)
+# MSSQL_IMAGE:   SQL Server image (default:
+#                mcr.microsoft.com/mssql/server:2022-latest)
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE="${ENGINE:-firebird}"
@@ -26,6 +30,8 @@ FB_IMAGE="${FB_IMAGE:-firebirdsql/firebird:5}"
 PG_IMAGE="${PG_IMAGE:-postgres:17}"
 MYSQL_IMAGE="${MYSQL_IMAGE:-mysql:8.4}"
 MARIADB_IMAGE="${MARIADB_IMAGE:-mariadb:11.4}"
+MSSQL_IMAGE="${MSSQL_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}"
+MS_REPO=""
 NET=pascaldb-it-net
 DB=pascaldb-it-db
 MOUNT="$ROOT"
@@ -52,7 +58,11 @@ case "$ENGINE" in
     fi
     CLIENT_PKG=libmariadb3; CLIENT_GLOB='/usr/lib/*/libmariadb.so.3'; DB_PORT=3306
     IT_DATABASE=pascaldb_it; IT_PASSWORD=root ;;
-  *) echo "ENGINE must be firebird, postgresql, sqlite, mysql or mariadb" >&2; exit 2 ;;
+  sqlserver)
+    SERVER_IMAGE="$MSSQL_IMAGE"; SERVER_ENV="ACCEPT_EULA=Y"; SERVER_ENV2="MSSQL_SA_PASSWORD=PascalDb_It1"
+    CLIENT_PKG="msodbcsql18 mssql-tools18 unixodbc"; CLIENT_GLOB='/usr/lib/*/libodbc.so.2'; DB_PORT=1433
+    MS_REPO=1; IT_DATABASE=pascaldb_it; IT_PASSWORD=PascalDb_It1 ;;
+  *) echo "ENGINE must be firebird, postgresql, sqlite, mysql, mariadb or sqlserver" >&2; exit 2 ;;
 esac
 
 ZEOS_MOUNT=""
@@ -82,7 +92,13 @@ cd "$ROOT"
 python tools/gen_fpc_mirror.py --check
 
 docker network create "$NET" >/dev/null
-[ -z "$SERVER_IMAGE" ] || docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" "$SERVER_IMAGE" >/dev/null
+if [ -n "$SERVER_IMAGE" ]; then
+  if [ -n "${SERVER_ENV2:-}" ]; then
+    docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" -e "$SERVER_ENV2" "$SERVER_IMAGE" >/dev/null
+  else
+    docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" "$SERVER_IMAGE" >/dev/null
+  fi
+fi
 
 # $ZEOS_MOUNT is unquoted on purpose: empty (no option) or "-v <dir>:/zeos:ro".
 MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MOUNT \
@@ -90,12 +106,21 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   -e PASCALDB_IT_HOST="$DB" \
   -e PASCALDB_IT_DATABASE="$IT_DATABASE" \
   -e PASCALDB_IT_PASSWORD="$IT_PASSWORD" \
-  -e CLIENT_PKG="$CLIENT_PKG" -e CLIENT_GLOB="$CLIENT_GLOB" -e DB_PORT="$DB_PORT" \
+  -e CLIENT_PKG="$CLIENT_PKG" -e CLIENT_GLOB="$CLIENT_GLOB" -e DB_PORT="$DB_PORT" -e MS_REPO="$MS_REPO" \
   -e RUNNER_DIR="$RUNNER_DIR" -e RUNNER="$RUNNER" -e ADAPTER_OPTS="$ADAPTER_OPTS" \
   "$FPC_IMAGE" bash -c '
   set -e
   apt-get update -qq > /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
-  apt-get install -y -qq "$CLIENT_PKG" >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
+  if [ -n "$MS_REPO" ]; then
+    # SQL Server: the Microsoft ODBC driver and sqlcmd come from the Microsoft
+    # Debian 12 repository; installing them accepts the Microsoft license
+    # (ACCEPT_EULA).
+    apt-get install -y -qq curl gnupg ca-certificates >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+    curl -fsSL https://packages.microsoft.com/config/debian/12/prod.list > /etc/apt/sources.list.d/mssql-release.list
+    apt-get update -qq >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
+  fi
+  ACCEPT_EULA=Y apt-get install -y -qq $CLIENT_PKG >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
   export PASCALDB_IT_CLIENT="$(ls $CLIENT_GLOB 2>/dev/null | head -1)"
   [ -n "$PASCALDB_IT_CLIENT" ] || { echo "client library not installed: $CLIENT_GLOB"; tail -20 /t-apt.log; exit 1; }
   echo "client: $PASCALDB_IT_CLIENT"
@@ -105,6 +130,12 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
     $RUNNER > /t/build.log 2>&1 || { grep -iE "error|fatal" /t/build.log | head -30; exit 1; }
   if [ -n "$DB_PORT" ]; then
     for i in $(seq 1 180); do (echo > /dev/tcp/$PASCALDB_IT_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
+  fi
+  # SQL Server opens its port before it accepts logins.
+  if [ -n "$MS_REPO" ]; then
+    for i in $(seq 1 90); do
+      /opt/mssql-tools18/bin/sqlcmd -C -S "$PASCALDB_IT_HOST" -U sa -P "$PASCALDB_IT_PASSWORD" -Q "SELECT 1" >/dev/null 2>&1 && break; sleep 1
+    done
   fi
   cd /t
   HEAPTRC="log=/t/heap.txt" ./runner --all --format=plain > /t/run.log 2>&1 || true

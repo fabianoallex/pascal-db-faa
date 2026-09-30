@@ -6,15 +6,18 @@ for all three adapters and databases.
 
 ## Choosing
 
-| Adapter | Compilers | Unit / Lazarus package | Firebird | PostgreSQL | SQLite | MySQL / MariaDB |
-|---|---|---|---|---|---|---|
-| SQLdb | FPC | `PascalDb.Adapter.SQLdb` / `pascal_db_faa_sqldb.lpk` | yes | yes | yes | yes |
-| FireDAC | Delphi | `PascalDb.Adapter.FireDAC` (add `adapters/firedac` to the search path) | yes | yes | yes | yes |
-| Zeos (ZeosLib 8) | both | `PascalDb.Adapter.Zeos` / `pascal_db_faa_zeos.lpk` | yes | yes | yes | yes |
+| Adapter | Compilers | Unit / Lazarus package | Firebird | PostgreSQL | SQLite | MySQL / MariaDB | SQL Server |
+|---|---|---|---|---|---|---|---|
+| SQLdb | FPC | `PascalDb.Adapter.SQLdb` / `pascal_db_faa_sqldb.lpk` | yes | yes | yes | yes | yes (ODBC) |
+| FireDAC | Delphi | `PascalDb.Adapter.FireDAC` (add `adapters/firedac` to the search path) | yes | yes | yes | yes | no (see below) |
+| Zeos (ZeosLib 8) | both | `PascalDb.Adapter.Zeos` / `pascal_db_faa_zeos.lpk` | yes | yes | yes | yes | yes (ODBC) |
 
 - **One source for both compilers:** Zeos on both, or SQLdb on FPC and FireDAC on Delphi
   behind an `{$IFDEF FPC}` in the one unit that builds the factory (what the samples do by
   default). The rest of the program only sees `IDBFactory`.
+- **SQL Server on Delphi: Zeos.** FireDAC's SQL Server driver (`FireDAC.Phys.MSSQL`) is not in
+  Delphi's Community Edition, which the library is tested with (only its metadata unit ships), so
+  the FireDAC adapter was never run against SQL Server.
 - The core package is `pascal_db_faa.lpk` (Lazarus); on Delphi, add `src` to the search path.
 - Which combinations were run where (compiler, bitness, OS, database version) is in the
   [README](../README.md#status). CI covers FPC on Linux; the Delphi side is run by hand.
@@ -29,18 +32,47 @@ Lines an adapter doesn't know go to the driver as they are.
 
 | | SQLdb | FireDAC | Zeos |
 |---|---|---|---|
-| Driver / database kind | `ConnectorType` = `Firebird`, `PostgreSQL`, `SQLite3`, `MySQL 5.7` | `DriverID` = `FB`, `PG`, `SQLite`, `MySQL` | `Protocol` = `firebird`, `postgresql`, `sqlite`, `mysql`, `mariadb` |
-| Host, port | `HostName`, `Port` | `Server`, `Port` | `HostName`, `Port` |
-| Database | `DatabaseName` | `Database` | `Database` |
+| Driver / database kind | `ConnectorType` = `Firebird`, `PostgreSQL`, `SQLite3`, `MySQL 5.7`, `ODBC` (SQL Server) | `DriverID` = `FB`, `PG`, `SQLite`, `MySQL` | `Protocol` = `firebird`, `postgresql`, `sqlite`, `mysql`, `mariadb`, `odbc_w` (SQL Server) |
+| Host, port | `HostName`, `Port` | `Server`, `Port` | `HostName`, `Port` (SQL Server: in `Database`) |
+| Database | `DatabaseName` | `Database` | `Database` (SQL Server: the ODBC connection string) |
 | Credentials | `UserName`, `Password` | `User_Name`, `Password` | `User`, `Password` |
 | Character set | `CharSet=UTF8` (MySQL: `utf8mb4`) | `CharacterSet=UTF8` (MySQL: `utf8mb4`) | `ClientCodepage=UTF8` (MySQL: `utf8mb4`) |
 | Client library path | `ClientLibrary` | `VendorLib` | `LibraryLocation` |
 
 For Firebird on FireDAC, also `Protocol=TCPIP` for a server. `SQLDialect` on the configuration
-is `Firebird`, `PostgreSQL`, `SQLite`, `MySQL` or `MariaDB`, whatever the adapter.
+is `Firebird`, `PostgreSQL`, `SQLite`, `MySQL`, `MariaDB` or `SQLServer` (also `MSSQL`), whatever
+the adapter.
+
+SQL Server settings, on SQLdb:
+
+```
+ConnectorType=ODBC
+Driver=ODBC Driver 18 for SQL Server
+HostName=dbserver
+Port=1433
+DatabaseName=sales
+UserName=app
+Password=...
+```
+
+`HostName`/`Port` and `DatabaseName` become the ODBC connection string's `Server=host,port` and
+`Database=`; any other line is a keyword of that string (e.g. `TrustServerCertificate=yes` for a
+server with a self-signed certificate, `Encrypt=no`). On Zeos, `Database` *is* the connection
+string (Zeos's own convention for ODBC):
+
+```
+Protocol=odbc_w
+Database=DRIVER={ODBC Driver 18 for SQL Server};SERVER=dbserver,1433;DATABASE=sales
+User=app
+Password=...
+```
+
+The adapter adds `MARS_Connection=yes` to it unless it says otherwise.
 
 Always set the character set to UTF-8: that is the setting every test and sample runs with. On
-MySQL and MariaDB that is `utf8mb4`: their `utf8` stores no 4-byte characters.
+MySQL and MariaDB that is `utf8mb4`: their `utf8` stores no 4-byte characters. SQL Server has no
+such setting: ODBC exchanges text as UTF-16, and what a column holds depends on its type (use
+`NVARCHAR`, see the SQL Server notes).
 
 ## Client libraries
 
@@ -85,6 +117,16 @@ program.
   8.0 does, which libmariadb doesn't: with any option set, connections fail with `Server connect
   failed` (gotcha 35). On Linux, set `ClientLibrary` to the versioned file (`libmariadb.so.3`):
   SQLdb looks for `libmysqlclient.so.20` by default.
+- **SQL Server client: Microsoft's ODBC Driver 18 for SQL Server**, on SQLdb and Zeos. Windows:
+  install it from Microsoft (the "SQL Server" driver that comes with Windows is a much older one);
+  the driver manager, `odbc32.dll`, is part of Windows. Linux: the `msodbcsql18` package from
+  Microsoft's repository, with unixODBC (`unixodbc`); `ClientLibrary`/`LibraryLocation` names the
+  driver manager, `libodbc.so.2` (SQLdb uses that name by default on Unix; it looks for
+  `libodbc.so`, which only the `-dev` package creates, otherwise). Installing the driver means
+  accepting Microsoft's license. FreeTDS (the db-lib connectors: SQLdb's `MSSQLServer`, Zeos's
+  `mssql`) is not supported: with SQLdb, errors on two connections at the same moment corrupted the
+  heap; with Zeos, `DATETIME2` couldn't be read and date-times lost their milliseconds (both
+  measured, see the adapter units).
 
 ## SQLite notes
 
@@ -114,6 +156,33 @@ program.
   `NO_BACKSLASH_ESCAPES`), and SQLdb's connector escapes parameter values that way.
 - An expired lock wait (`LockTimeoutMs`) undoes only the statement, not the transaction; roll the
   transaction back anyway, as on the other databases.
+
+## SQL Server notes
+
+- One SQL dialect: `SQLServer` (also registered as `MSSQL`). Tested with SQL Server 2022.
+- **Text: `NVARCHAR`, and `N'...'` for literals.** A `VARCHAR` holds only its collation's code
+  page (1252 by default): `'São Paulo → ok'` comes back as `'São Paulo ? ok'`. Parameters are sent
+  as Unicode either way.
+- **`TIMESTAMP` is not a date** in SQL Server (it's a row version): use `DATETIME2` (`DATETIME2(3)`
+  keeps milliseconds exactly; the older `DATETIME` rounds them to 1/300 s).
+- **No `RETURNING`: `INSERT ... OUTPUT INSERTED.ID, ...`** returns the new row, through `Open`, as
+  `RETURNING` does elsewhere.
+- **No `CREATE TABLE IF NOT EXISTS`:** `IF OBJECT_ID('NAME', 'U') IS NULL CREATE TABLE ...`. In
+  `ALTER TABLE`, `ADD` takes no `COLUMN`.
+- Savepoints exist but can't be released: a nested scope that commits keeps its savepoint until the
+  transaction ends (`SupportsRelease` is `False`); rolling back to it works as elsewhere.
+- DDL is transactional, as on PostgreSQL. A `UNIQUE` column accepts a single `NULL`.
+- `LockTimeoutMs` is `SET LOCK_TIMEOUT` (milliseconds) on every connection; errors 1222 (lock
+  request time out) and 1205 (deadlock victim) become `ELockConflictException`. By default (0) a
+  statement waits for a lock forever.
+- **A `SET` run through a query doesn't stay on SQLdb:** its ODBC connector prepares every
+  statement, the driver runs a prepared statement as a procedure, and SQL Server undoes a `SET`
+  when a procedure returns (measured with `SET LOCK_TIMEOUT`, which is why the adapter applies it
+  outside SQLdb). Zeos runs it directly.
+- The ODBC session has the ANSI options on (`ANSI_NULLS`, `ANSI_WARNINGS`, a column declared
+  without `NULL` accepts NULLs, ...), as in any ODBC or OLE DB program; `ARITHABORT` is off.
+- SQLdb reads a `NUMERIC`/`DECIMAL` column as a floating-point field, so `Currencies[...]` goes
+  through a `Double` (exact for amounts that fit 15 digits); Zeos reads it as a decimal.
 
 ## Adapter-specific behavior you may notice
 

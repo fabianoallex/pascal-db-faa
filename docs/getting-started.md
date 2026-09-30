@@ -26,7 +26,7 @@ begin
   LConfig.ConnectionParams.Values['Password'] := 'postgres';
   LConfig.ConnectionParams.Values['CharSet'] := 'UTF8';
 
-  LConfig.SQLDialect := 'PostgreSQL';   // 'Firebird', 'PostgreSQL', 'SQLite', 'MySQL' or 'MariaDB'
+  LConfig.SQLDialect := 'PostgreSQL';   // 'Firebird', 'PostgreSQL', 'SQLite', 'MySQL', 'MariaDB' or 'SQLServer'
   LConfig.SQLDirectory := 'PG';         // which SQL folder this database reads (guide 2)
 
   LConfig.PoolIniConnections := 1;      // opened when the factory is created

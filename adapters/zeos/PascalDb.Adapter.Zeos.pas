@@ -8,10 +8,11 @@
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
     Protocol         Zeos protocol (required): 'firebird', 'postgresql',
-                     'sqlite', 'mysql' and 'mariadb' are the ones tested
-                     (the last two load the same client libraries: MySQL's
-                     libmysql or MariaDB Connector/C's libmariadb); any other
-                     Zeos protocol
+                     'sqlite', 'mysql', 'mariadb' and 'odbc_w' are the ones
+                     tested (mysql and mariadb load the same client
+                     libraries: MySQL's libmysql or MariaDB Connector/C's
+                     libmariadb; odbc_w is for SQL Server, see below); any
+                     other Zeos protocol
                      is passed through, with an SQL dialect registered for
                      it (docs/other-databases.md). 'firebird' uses the Firebird 3+ API when
                      the client library has it and the legacy API otherwise
@@ -20,12 +21,18 @@
                      SQLite)
     Port             server port (optional)
     Database         database path (Firebird, SQLite: the file, created on
-                     first connect) or name (PostgreSQL, MySQL/MariaDB)
+                     first connect) or name (PostgreSQL, MySQL/MariaDB); SQL
+                     Server (odbc_w): the ODBC connection string, with
+                     DRIVER= (the driver's name, e.g. ODBC Driver 18 for SQL
+                     Server, in curly braces), SERVER=host,port, DATABASE= and
+                     any other keyword, e.g. TrustServerCertificate=yes
+                     (HostName and Port are not used)
     User, Password
     ClientCodepage   connection character set (e.g. UTF8; MySQL/MariaDB:
                      utf8mb4, since their utf8 has no 4-byte characters)
     LibraryLocation  full path of the client library (fbclient/libpq/sqlite3/
-                     libmysql/libmariadb) when
+                     libmysql/libmariadb; odbc_w: the ODBC driver manager,
+                     odbc32.dll or libodbc) when
                      it isn't found on the default search path (optional)
   Any other line goes to TZConnection.Properties as is (Zeos connection
   properties, e.g. CreateNewDatabase=true). MySQL/MariaDB: MYSQL_PLUGIN_DIR,
@@ -113,7 +120,22 @@
     commits and disconnects still in parallel), 4800 connections clean, and
     with the legacy API (FirebirdAPI=legacy) too. Whether the fault is in
     Zeos or in fbclient wasn't isolated. A pool opens connections rarely, so
-    the lock costs little. }
+    the lock costs little.
+  - SQL Server goes through ODBC (Protocol=odbc_w) with Microsoft's ODBC
+    Driver 18, not through Zeos's db-lib protocol (mssql over FreeTDS): that
+    one has no DATETIME2 (the value arrives as text, "25 2026 10:11:12:000AM",
+    and fails to convert), writes date-times without their milliseconds,
+    reports every error as the generic 20018, and its sessions start with the
+    ANSI options off (a column declared without NULL comes out NOT NULL); all
+    measured with Zeos 8.0.0 and FreeTDS 1.3.17 on Linux. The connection
+    string gets MARS_Connection=yes unless it says otherwise: without it a
+    statement failed with "Connection is busy with results for another
+    command" while another one on the same connection still had a result
+    open. IDatabaseConfig.LockTimeoutMs is a SET LOCK_TIMEOUT right after
+    connecting (in milliseconds), and errors 1222 (lock request time out) and
+    1205 (deadlock victim) become ELockConflictException. Measured with 8
+    threads x 2000 statements, connecting at the same time, errors included:
+    clean, no lock needed around Connect. }
 
 interface
 
@@ -274,6 +296,8 @@ const
   PG_SERIALIZATION_FAILURE = '40001';
   MYSQL_ER_LOCK_WAIT_TIMEOUT = 1205; // mysqld_error.h: "Lock wait timeout exceeded"
   MYSQL_ER_LOCK_DEADLOCK = 1213;     // mysqld_error.h: "Deadlock found when trying to get lock"
+  MSSQL_LOCK_TIMEOUT = 1222;         // "Lock request time out period exceeded"
+  MSSQL_DEADLOCK_VICTIM = 1205;      // "... was deadlocked ... and has been chosen as the deadlock victim"
 
 function IsProtocol(AConn: TZConnection; const APrefix: string): Boolean;
 begin
@@ -283,6 +307,12 @@ end;
 function IsMySQLProtocol(AConn: TZConnection): Boolean;
 begin
   Result := IsProtocol(AConn, 'mysql') or IsProtocol(AConn, 'mariadb');
+end;
+
+// odbc_w or odbc_a: SQL Server (see the unit header).
+function IsODBCProtocol(AConn: TZConnection): Boolean;
+begin
+  Result := IsProtocol(AConn, 'odbc');
 end;
 
 var
@@ -329,7 +359,9 @@ begin
   if IsProtocol(AConn, 'postgresql') then
     AConn.ExecuteDirect('SET lock_timeout = ' + IntToStr(AMs))
   else if IsMySQLProtocol(AConn) then
-    AConn.ExecuteDirect('SET SESSION innodb_lock_wait_timeout = ' + IntToStr((AMs + 999) div 1000));
+    AConn.ExecuteDirect('SET SESSION innodb_lock_wait_timeout = ' + IntToStr((AMs + 999) div 1000))
+  else if IsODBCProtocol(AConn) then
+    AConn.ExecuteDirect('SET LOCK_TIMEOUT ' + IntToStr(AMs));
 end;
 
 // See the unit header: the driver's lock conflict errors.
@@ -357,7 +389,10 @@ begin
     Result := (EZSQLThrowable(E).ErrorCode = MYSQL_ER_LOCK_WAIT_TIMEOUT) or
       (EZSQLThrowable(E).ErrorCode = MYSQL_ER_LOCK_DEADLOCK)
   else if IsProtocol(AConn, 'sqlite') then
-    Result := (EZSQLThrowable(E).ErrorCode = SQLITE_BUSY) or (EZSQLThrowable(E).ErrorCode = SQLITE_LOCKED);
+    Result := (EZSQLThrowable(E).ErrorCode = SQLITE_BUSY) or (EZSQLThrowable(E).ErrorCode = SQLITE_LOCKED)
+  else if IsODBCProtocol(AConn) then
+    Result := (EZSQLThrowable(E).ErrorCode = MSSQL_LOCK_TIMEOUT) or
+      (EZSQLThrowable(E).ErrorCode = MSSQL_DEADLOCK_VICTIM);
 end;
 
 function PdbZeosNewConnection(ASettings: TStrings): TZConnection;
@@ -399,6 +434,12 @@ begin
       Result.Properties.Values['hard_commit'] := 'true';
     if SameText(Copy(Result.Protocol, 1, 6), 'sqlite') and (Result.Properties.Values['busytimeout'] = '') then
       Result.Properties.Values['busytimeout'] := '5000';
+    if IsODBCProtocol(Result) and (Pos('MARS_CONNECTION', UpperCase(Result.Database)) = 0) then
+    begin
+      if (Result.Database <> '') and (Result.Database[Length(Result.Database)] <> ';') then
+        Result.Database := Result.Database + ';';
+      Result.Database := Result.Database + 'MARS_Connection=yes';
+    end;
     if IsMySQLProtocol(Result) and (Result.Properties.Values['MYSQL_PLUGIN_DIR'] = '') and
       (PdbMySQLPluginDir(Result.LibraryLocation) <> '') then
       Result.Properties.Values['MYSQL_PLUGIN_DIR'] := PdbMySQLPluginDir(Result.LibraryLocation);

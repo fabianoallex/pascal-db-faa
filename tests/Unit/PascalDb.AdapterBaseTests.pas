@@ -106,6 +106,7 @@ type
     [Test] procedure Dialect_RegisterSameNameAnyCase_Raises;
     [Test] procedure Scope_Main_CommitsTheTransaction;
     [Test] procedure Scope_Nested_UsesSavepoints;
+    [Test] procedure Scope_Nested_NoRelease_CommitRunsNothing;
   end;
 
 implementation
@@ -487,6 +488,30 @@ begin
   TAssert.AssertTrue('The nested scope must create a savepoint', Pos('SAVEPOINT', LTransaction.Log[1]) = 1);
   TAssert.AssertTrue('The nested rollback must roll back to it', Pos('ROLLBACK TO SAVEPOINT', LTransaction.Log[2]) = 1);
   TAssert.AssertEquals('COMMIT', LTransaction.Log[3]);
+end;
+
+procedure TAdapterBaseTests.Scope_Nested_NoRelease_CommitRunsNothing;
+var
+  LTransaction: TRecordingTransaction;
+  LIntf: ITransaction;
+  LOuter, LInner: IScopeTransaction;
+begin
+  // SQL Server has no statement to release a savepoint: a nested scope that
+  // commits leaves it in place until the transaction ends.
+  LTransaction := TRecordingTransaction.Create(
+    TRecordingConnection.Create(TSQLDialectFactory.GetDialect('mssql')));
+  LIntf := LTransaction;
+  LOuter := TScopeTransaction.Create(LIntf, nil);
+  LOuter.StartTransaction;
+  LInner := TScopeTransaction.Create(LIntf, nil);
+  LInner.StartTransaction;
+  LInner.Commit;
+  LOuter.Commit;
+  TAssert.AssertEquals('Log lines', 3, LTransaction.Log.Count);
+  TAssert.AssertEquals('START', LTransaction.Log[0]);
+  TAssert.AssertTrue('The nested scope must create a savepoint: ' + LTransaction.Log[1],
+    Pos('SAVE TRANSACTION sp_', LTransaction.Log[1]) = 1);
+  TAssert.AssertEquals('COMMIT', LTransaction.Log[2]);
 end;
 
 initialization

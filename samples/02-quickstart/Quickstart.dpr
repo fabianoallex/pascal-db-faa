@@ -66,13 +66,19 @@ begin
   // MySQL/MariaDB: utf8mb4 declared, since a server's default varies.
   LSource.Add(SQL_DIR_MYSQL, 'SCHEMA.CREATE',
     'CREATE TABLE IF NOT EXISTS SAMPLE_CITIES ' + Format(TABLE_COLUMNS, ['']) + ' DEFAULT CHARSET=utf8mb4');
+  // SQL Server has no CREATE TABLE IF NOT EXISTS either, and needs NVARCHAR
+  // for text outside its collation's code page (1252 by default).
+  LSource.Add(SQL_DIR_MSSQL, 'SCHEMA.CREATE',
+    'IF OBJECT_ID(''SAMPLE_CITIES'', ''U'') IS NULL CREATE TABLE SAMPLE_CITIES ' +
+    '(CODE NVARCHAR(7) NOT NULL PRIMARY KEY, NAME NVARCHAR(100) NOT NULL, STATE NVARCHAR(2) NOT NULL)');
   // Firebird has no CREATE TABLE IF NOT EXISTS; RECREATE drops and creates.
   // Text columns declare UTF8 because a database's default character set
   // may be NONE.
   LSource.Add(SQL_DIR_FIREBIRD, 'SCHEMA.CREATE',
     'RECREATE TABLE SAMPLE_CITIES ' + Format(TABLE_COLUMNS, [' CHARACTER SET UTF8']));
   // The rest is standard SQL: the same text for all.
-  for LDir in TArray<string>.Create(SQL_DIR_POSTGRESQL, SQL_DIR_FIREBIRD, SQL_DIR_SQLITE, SQL_DIR_MYSQL) do
+  for LDir in TArray<string>.Create(SQL_DIR_POSTGRESQL, SQL_DIR_FIREBIRD, SQL_DIR_SQLITE, SQL_DIR_MYSQL,
+    SQL_DIR_MSSQL) do
     LSource
       .Add(LDir, 'CITY.DELETE_ALL', 'DELETE FROM SAMPLE_CITIES')
       .Add(LDir, 'CITY.INSERT', 'INSERT INTO SAMPLE_CITIES (CODE, NAME, STATE) VALUES (:CODE, :NAME, :STATE)')

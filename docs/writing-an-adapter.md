@@ -359,7 +359,7 @@ return an `INullXxx`.
 ### A new database
 
 The dialect is looked up by `IDatabaseConfig.SQLDialect`: `Firebird`, `PostgreSQL`, `SQLite`,
-`MySQL` and `MariaDB` are built in. For another database, write one class implementing both `ISQLDialect` (savepoint
+`MySQL`, `MariaDB` and `SQLServer` (also `MSSQL`) are built in. For another database, write one class implementing both `ISQLDialect` (savepoint
 statements, whether `RELEASE SAVEPOINT` exists, a ping query) and `IMigrationDialect` (the
 queries on the migrations table; without it, the migration engine refuses to run), and register
 it once at startup, before creating the factory:

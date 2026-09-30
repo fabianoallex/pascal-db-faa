@@ -7,13 +7,14 @@
   master and run the script again. }
 
 { Contract tests for an adapter, against a real Firebird, PostgreSQL, SQLite,
-  MySQL or MariaDB database (PascalDb.IntegrationEnv, PASCALDB_IT_ENGINE): only
+  MySQL, MariaDB or SQL Server database (PascalDb.IntegrationEnv,
+  PASCALDB_IT_ENGINE): only
   IDBFactory, IQuery, IParams, IQueryResult and the scope transactions are
   used, so the same bodies validate every adapter (the factory comes from
   PascalDb.IntegrationEnv). Covered: connection ping, migrations (through the
   library's own engine), a round trip of every parameter type, typed NULLs,
-  optional columns through SQL tags, INSERT ... RETURNING (where the
-  database has it: not MySQL), UTF-8 text,
+  optional columns through SQL tags, an INSERT returning its row through
+  Open (RETURNING, or OUTPUT on SQL Server; not on MySQL), UTF-8 text,
   commit/rollback, nested scopes with savepoints, a constraint violation
   that must not discard the connection, scripts, row counts, parameters
   after the same SQL text is assigned again (still bound, without the
@@ -444,12 +445,12 @@ var
   LScope: IScopeTransaction;
   LResult: IQueryResult;
 begin
-  if not SupportsReturning then
+  if InsertReturningSql = '' then
     Exit; // MySQL: no INSERT ... RETURNING
   LScope := FFactory.GetPool.AcquireQuery(LQuery);
   LScope.StartTransaction;
   try
-    LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME) RETURNING ID, NAME';
+    LQuery.Sql := InsertReturningSql;
     LQuery.Params.Integers['ID'] := 5;
     LQuery.Params.Strings['NAME'] := 'returned';
     LResult := LQuery.Open;

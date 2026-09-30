@@ -3,10 +3,11 @@ program Migrations;
 { Sample 03: versioned migrations, with SQL kept in .sql files and embedded
   in the executable.
 
-  SQL: sql/PG, sql/FB, sql/SQLITE and sql/MYSQL (MySQL and MariaDB) hold one
-  .sql file per script; the name of the file is the key the program asks for
-  (MIG.0001, PRODUCT.LIST, ...), and the factory's SQL directory (PG, FB,
-  SQLITE or MYSQL, from Samples.Env) picks the folder.
+  SQL: sql/PG, sql/FB, sql/SQLITE, sql/MYSQL (MySQL and MariaDB) and
+  sql/MSSQL hold one .sql file per script; the name of the file is the key
+  the program asks for (MIG.0001, PRODUCT.LIST, ...), and the factory's SQL
+  directory (PG, FB, SQLITE, MYSQL or MSSQL, from Samples.Env) picks the
+  folder.
   tools/build_sql_res.py turns the tree into sql/MigrationsSql.res, which the
   $R directive below links into the program on both compilers; TResourceSqlSource
   reads it back. Rebuild the .res after editing a .sql file:

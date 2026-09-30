@@ -8,18 +8,21 @@
 
   Connection settings (IDatabaseConfig.ConnectionParams, Name=Value):
     ConnectorType  SQLdb connector name (required). 'Firebird', 'PostgreSQL',
-                   'SQLite3', 'MySQL 5.7' and 'MySQL 8.0' are registered by
-                   this unit (the MySQL ones talk to MariaDB servers too;
-                   with MariaDB Connector/C use 'MySQL 5.7', see below);
-                   for another
+                   'SQLite3', 'MySQL 5.7', 'MySQL 8.0' and 'ODBC' are
+                   registered by this unit (the MySQL ones talk to MariaDB
+                   servers too; with MariaDB Connector/C use 'MySQL 5.7', see
+                   below; 'ODBC' is for SQL Server, see below); for another
                    one, add its connection unit to the program's uses
                    (e.g. oracleconnection for 'Oracle') and register an SQL
                    dialect for it (docs/other-databases.md)
     HostName       server host ('' = local/embedded, Firebird; unused by
-                   SQLite)
+                   SQLite); SQL Server: host or host\instance
     Port           server port (optional)
     DatabaseName   database path (Firebird, SQLite: the file, created on
-                   first connect) or name (PostgreSQL, MySQL/MariaDB)
+                   first connect) or name (PostgreSQL, MySQL/MariaDB, SQL
+                   Server)
+    Driver         SQL Server only: the ODBC driver's name, e.g. ODBC Driver
+                   18 for SQL Server
     UserName, Password
     CharSet        connection character set (e.g. UTF8; MySQL/MariaDB:
                    utf8mb4, since their utf8 has no 4-byte characters)
@@ -28,7 +31,8 @@
                    locked" (default: IDatabaseConfig.LockTimeoutMs, or 5000
                    when that is 0)
     ClientLibrary  full path of the client library (fbclient/libpq/sqlite3/
-                   libmysqlclient/libmariadb) when it isn't found on the
+                   libmysqlclient/libmariadb; SQL Server: the ODBC driver
+                   manager, odbc32.dll or libodbc) when it isn't found on the
                    default search path (optional)
     SkipLibraryVersionCheck
                    MySQL only: true to connect with a client library of
@@ -37,7 +41,9 @@
                    MySQL only: the client's plugin folder (default: the
                    plugin folder next to ClientLibrary, if there is one;
                    see PdbMySQLPluginDir)
-  Any other line is passed to the connection's Params as is.
+  Any other line is passed to the connection's Params as is (SQL Server:
+  keywords of the ODBC connection string, e.g. TrustServerCertificate=yes or
+  Encrypt=no).
 
   SQLdb specifics handled here:
   - PacketRecords = -1: the whole result is fetched on Open, so RecordCount
@@ -98,7 +104,34 @@
     built.
     Parameters are replaced in the SQL text on the client (the connector has
     no server-side prepared statements), escaping backslashes as the server
-    expects. }
+    expects.
+  - SQL Server goes through ODBC (ConnectorType=ODBC) with Microsoft's ODBC
+    Driver 18, not through the db-lib connector (TMSSQLConnection, FreeTDS):
+    that one keeps its error text in unit-level variables, and two
+    connections failing at the same moment corrupted the heap (measured: FPC
+    3.2.2, Linux, FreeTDS 1.3.17, 8 threads, "double free or corruption" in
+    every run with concurrent errors); its sessions also start with the ANSI
+    options off (a column declared without NULL comes out NOT NULL), and
+    every error came as the generic 20018. Through ODBC the server's error
+    number is the exception's ErrorCode and the session has the ANSI
+    defaults. What this unit does for it: HostName/Port and DatabaseName
+    become the connection string's Server=host[,port] and Database= (SQLdb's
+    own DatabaseName is an ODBC DSN); ClientLibrary loads the driver manager
+    (FPC 3.2.2's ODBC connector has no library loader for
+    TSQLDBLibraryLoader, and on Unix it looks for libodbc.so, which only
+    unixODBC's -dev package creates, so libodbc.so.2 is the default there);
+    connections are opened one at a time, because the connector creates its
+    shared ODBC environment on the first connect without a lock (measured: 7
+    of 8 threads connecting at once failed with an access violation; with
+    the connects serialized, 8 threads x 2000 statements clean, errors
+    included); and the lock timeout is a SET LOCK_TIMEOUT run with
+    SQLExecDirect on the connection's own handle when it opens: the connector
+    prepares every statement, the driver runs a prepared one as a procedure
+    (sp_prepexec), and a SET inside a procedure is undone when it returns
+    (measured: @@LOCK_TIMEOUT back at -1 after the SET through SQLdb, 1000
+    through SQLExecDirect, still 1000 after a commit). The same applies to
+    any SET a program runs through a query. Lock errors: 1222 (lock request
+    time out) and 1205 (deadlock victim). }
 
 interface
 
@@ -117,6 +150,7 @@ uses
   sqlite3conn,
   mysql57conn,
   mysql80conn,
+  odbcconn,
   PascalDb.Interfaces,
   PascalDb.SqlDialect,
   PascalDb.Pool,
@@ -135,6 +169,9 @@ type
   public
     LockTimeoutMs: Integer;
     SkipLibraryVersionCheck: Boolean;
+    /// ODBC only: runs ASql with SQLExecDirect on the open connection's own
+    /// handle, outside SQLdb (see the unit header: session settings).
+    procedure ExecDirectOnSession(const ASql: string);
   end;
 
   { TSQLdbConnectionAdapter }
@@ -227,8 +264,14 @@ procedure PdbSQLdbUseClientLibrary(const AConnectorType, ALibrary: string);
 
 implementation
 
+uses
+  SyncObjs,
+  odbcsqldyn;
+
 var
   GLibraryLoaders: TList = nil;
+  GODBCConnectLock: TCriticalSection = nil;
+  GODBCLoaded: Boolean = False;
 
 const
   SQLITE_SCHEMA = 17; // sqlite3.h: "The database schema changed"
@@ -245,10 +288,23 @@ const
   PG_SERIALIZATION_FAILURE = '40001';
   MYSQL_ER_LOCK_WAIT_TIMEOUT = 1205; // mysqld_error.h: "Lock wait timeout exceeded"
   MYSQL_ER_LOCK_DEADLOCK = 1213;     // mysqld_error.h: "Deadlock found when trying to get lock"
+  MSSQL_LOCK_TIMEOUT = 1222;         // "Lock request time out period exceeded"
+  MSSQL_DEADLOCK_VICTIM = 1205;      // "... was deadlocked ... and has been chosen as the deadlock victim"
+  {$IFDEF UNIX}
+  // See the unit header: unixODBC's runtime package has only the versioned name.
+  DEFAULT_ODBC_LIBRARY = 'libodbc.so.2';
+  {$ELSE}
+  DEFAULT_ODBC_LIBRARY = '';
+  {$ENDIF}
 
 function IsMySQLConnector(const AConnectorType: string): Boolean;
 begin
   Result := SameText(Copy(AConnectorType, 1, 5), 'MySQL');
+end;
+
+function IsODBCConnector(const AConnectorType: string): Boolean;
+begin
+  Result := SameText(AConnectorType, 'ODBC');
 end;
 
 { TPdbSQLConnector }
@@ -264,7 +320,38 @@ begin
     TMySQL80Connection(Proxy).SkipLibraryVersionCheck := SkipLibraryVersionCheck
   else if Proxy is TMySQL57Connection then
     TMySQL57Connection(Proxy).SkipLibraryVersionCheck := SkipLibraryVersionCheck;
-  inherited DoInternalConnect;
+  // See the unit header: ODBC connections are opened one at a time.
+  if not IsODBCConnector(ConnectorType) then
+  begin
+    inherited DoInternalConnect;
+    Exit;
+  end;
+  GODBCConnectLock.Enter;
+  try
+    inherited DoInternalConnect;
+  finally
+    GODBCConnectLock.Leave;
+  end;
+end;
+
+procedure TPdbSQLConnector.ExecDirectOnSession(const ASql: string);
+var
+  LStatement: SQLHSTMT;
+  LResult: SQLRETURN;
+  LSql: AnsiString;
+begin
+  CheckProxy;
+  LResult := SQLAllocHandle(SQL_HANDLE_STMT, SQLHDBC(Proxy.Handle), LStatement);
+  if not (LResult in [SQL_SUCCESS, SQL_SUCCESS_WITH_INFO]) then
+    raise EDatabaseError.CreateFmt('PascalDb.Adapter.SQLdb: SQLAllocHandle failed (%d) for "%s"', [LResult, ASql]);
+  try
+    LSql := AnsiString(ASql);
+    LResult := SQLExecDirect(LStatement, PAnsiChar(LSql), Length(LSql));
+    if not (LResult in [SQL_SUCCESS, SQL_SUCCESS_WITH_INFO, SQL_NO_DATA]) then
+      raise EDatabaseError.CreateFmt('PascalDb.Adapter.SQLdb: SQLExecDirect failed (%d) for "%s"', [LResult, ASql]);
+  finally
+    SQLFreeHandle(SQL_HANDLE_STMT, LStatement);
+  end;
 end;
 
 // See the unit header. Runs in a throwaway transaction: SQLdb executes
@@ -310,11 +397,19 @@ begin
   end;
 end;
 
+// See the unit header: SQL Server's lock timeout, on the session itself.
+procedure ApplySqlServerLockTimeout(AConn: TPdbSQLConnector);
+begin
+  if (AConn.LockTimeoutMs > 0) and IsODBCConnector(AConn.ConnectorType) then
+    AConn.ExecDirectOnSession('SET LOCK_TIMEOUT ' + IntToStr(AConn.LockTimeoutMs));
+end;
+
 // Everything a connection needs right after it opens (also on a reconnect).
 procedure ApplySessionSettings(AConn: TPdbSQLConnector);
 begin
   ApplySQLiteBusyTimeout(AConn);
   ApplyMySQLLockTimeout(AConn);
+  ApplySqlServerLockTimeout(AConn);
 end;
 
 // See the unit header: PostgreSQL gets the lock timeout as a libpq option of
@@ -364,7 +459,9 @@ begin
     else if SameText(LType, 'SQLite3') then
       Result := (LCode = SQLITE_BUSY) or (LCode = SQLITE_LOCKED)
     else if IsMySQLConnector(LType) then
-      Result := (LCode = MYSQL_ER_LOCK_WAIT_TIMEOUT) or (LCode = MYSQL_ER_LOCK_DEADLOCK);
+      Result := (LCode = MYSQL_ER_LOCK_WAIT_TIMEOUT) or (LCode = MYSQL_ER_LOCK_DEADLOCK)
+    else if IsODBCConnector(LType) then
+      Result := (LCode = MSSQL_LOCK_TIMEOUT) or (LCode = MSSQL_DEADLOCK_VICTIM);
   end;
 end;
 
@@ -375,12 +472,40 @@ begin
     and (ADataBase is TSQLConnector) and SameText(TSQLConnector(ADataBase).ConnectorType, 'SQLite3');
 end;
 
+// See the unit header: the ODBC driver manager, loaded once for the process
+// (InitialiseODBC counts references, so the connector's own later calls,
+// without a name, reuse it).
+procedure UseODBCLibrary(const ALibrary: string);
+begin
+  if GODBCLoaded or (ALibrary = '') then
+    Exit;
+  GODBCConnectLock.Enter;
+  try
+    if not GODBCLoaded then
+    begin
+      PdbPreloadClientLibrary(ALibrary);
+      InitialiseODBC(ALibrary);
+      GODBCLoaded := True;
+    end;
+  finally
+    GODBCConnectLock.Leave;
+  end;
+end;
+
 // One TSQLDBLibraryLoader per (type, path), alive for the whole process.
 procedure PdbSQLdbUseClientLibrary(const AConnectorType, ALibrary: string);
 var
   I: Integer;
   LLoader: TSQLDBLibraryLoader;
 begin
+  if IsODBCConnector(AConnectorType) then
+  begin
+    if ALibrary <> '' then
+      UseODBCLibrary(ALibrary)
+    else
+      UseODBCLibrary(DEFAULT_ODBC_LIBRARY);
+    Exit;
+  end;
   if ALibrary = '' then
     Exit;
   PdbPreloadClientLibrary(ALibrary);
@@ -648,12 +773,16 @@ var
   LConn: TPdbSQLConnector;
   LParams: TStrings;
   I: Integer;
-  LName, LValue: string;
+  LName, LValue, LServer, LPort: string;
+  LIsODBC: Boolean;
 begin
   LParams := AConfig.ConnectionParams;
   if LParams.Values['ConnectorType'] = '' then
     raise EDatabaseError.Create('PascalDb.Adapter.SQLdb: ConnectionParams must set ConnectorType (the SQLdb connector name, e.g. Firebird, PostgreSQL or SQLite3)');
   PdbSQLdbUseClientLibrary(LParams.Values['ConnectorType'], LParams.Values['ClientLibrary']);
+  LIsODBC := IsODBCConnector(LParams.Values['ConnectorType']);
+  LServer := '';
+  LPort := '';
 
   LConn := TPdbSQLConnector.Create(nil);
   try
@@ -665,6 +794,16 @@ begin
       LValue := LParams.ValueFromIndex[I];
       if SameText(LName, 'ConnectorType') then
         LConn.ConnectorType := LValue
+      // See the unit header: ODBC takes these in the connection string.
+      else if LIsODBC and SameText(LName, 'HostName') then
+        LServer := LValue
+      else if LIsODBC and SameText(LName, 'Port') then
+        LPort := LValue
+      else if LIsODBC and SameText(LName, 'DatabaseName') then
+      begin
+        if LValue <> '' then
+          LConn.Params.Values['Database'] := LValue;
+      end
       else if SameText(LName, 'HostName') then
         LConn.HostName := LValue
       else if SameText(LName, 'DatabaseName') then
@@ -687,6 +826,12 @@ begin
         LConn.Params.Values['port'] := LValue
       else if LName <> '' then
         LConn.Params.Values[LName] := LValue;
+    end;
+    if LIsODBC and (LServer <> '') then
+    begin
+      if LPort <> '' then
+        LServer := LServer + ',' + LPort;
+      LConn.Params.Values['Server'] := LServer;
     end;
     ApplyPostgresLockTimeout(LConn);
     if IsMySQLConnector(LConn.ConnectorType) and (LParams.Values['MYSQL_PLUGIN_DIR'] = '') and
@@ -742,8 +887,12 @@ end;
 
 initialization
   GLibraryLoaders := TList.Create;
+  GODBCConnectLock := TCriticalSection.Create;
 
 finalization
   FreeLibraryLoaders;
+  if GODBCLoaded then
+    ReleaseODBC;
+  GODBCConnectLock.Free;
 
 end.

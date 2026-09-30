@@ -168,6 +168,7 @@ stays in the pool.
 | Firebird | transaction parameters (`isc_tpb_wait` + `isc_tpb_lock_timeout`), **whole seconds**: the value is rounded up | SQLdb waits until the lock is released; **Zeos and FireDAC don't wait at all** (their transactions are `nowait`, so the statement fails at once) | GDS `isc_lock_timeout`, `isc_lock_conflict`, `isc_deadlock`, `isc_update_conflict` |
 | PostgreSQL | `lock_timeout` of each server session | waits until the lock is released | SQLSTATE `55P03`, `40P01`, `40001` |
 | MySQL / MariaDB | `innodb_lock_wait_timeout` of each server session, **whole seconds**: the value is rounded up | the server's `innodb_lock_wait_timeout` (50 s by default) | errors 1205 (`ER_LOCK_WAIT_TIMEOUT`), 1213 (`ER_LOCK_DEADLOCK`) |
+| SQL Server | `SET LOCK_TIMEOUT` on each connection, in milliseconds | waits until the lock is released | errors 1222 (lock request time out), 1205 (deadlock victim) |
 | SQLite | the busy timeout, for the database's single write lock | 5000 ms (the adapters' busy timeout); an explicit `BusyTimeout` / `busytimeout` setting wins over `LockTimeoutMs` | `SQLITE_BUSY`, `SQLITE_LOCKED` |
 
 What `LockTimeoutMs` doesn't cover: a slow query that isn't waiting for anyone (a full scan, a
@@ -178,7 +179,8 @@ Measured with the contract test `LockWait_GivesUpAfterLockTimeout` (1000 ms): ev
 gave up after about 1 s — SQLdb and Zeos on Firebird 2.5, PostgreSQL 17 and SQLite (Windows) and
 on Firebird 5 (Linux), FireDAC and Zeos on Delphi (Win32 and Win64; PostgreSQL Win64 only),
 SQLdb and Zeos on MySQL 8.4 and MariaDB 11.4 (FPC, Windows and Linux), FireDAC and Zeos on them
-with Delphi (Win32 and Win64).
+with Delphi (Win32 and Win64), SQLdb and Zeos on SQL Server 2022 (FPC, Windows and Linux), and Zeos on it with Delphi (Win32
+and Win64).
 Without the setting, PostgreSQL and SQLdb on Firebird waited the full 8 s the test held the lock,
 Zeos on Firebird failed at once (FireDAC's transactions showed the same `nowait` in
 `MON$TRANSACTIONS`), and SQLite gave up after 5 s.

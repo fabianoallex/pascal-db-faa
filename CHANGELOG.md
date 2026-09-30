@@ -6,6 +6,25 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Added
+
+- SQL Server on SQLdb and Zeos, through Microsoft's ODBC Driver 18 (`ConnectorType=ODBC` on
+  SQLdb, `Protocol=odbc_w` on Zeos): a `SQLServer` SQL dialect (also registered as `MSSQL`;
+  savepoints with `SAVE TRANSACTION`, which can't be released: `SupportsRelease` is `False`);
+  `LockTimeoutMs` applied as `SET LOCK_TIMEOUT` and errors 1222 / 1205 raised as
+  `ELockConflictException`. SQLdb maps `HostName`/`Port`/`DatabaseName` to the ODBC connection
+  string, loads the driver manager given by `ClientLibrary` (`libodbc.so.2` by default on Unix),
+  opens ODBC connections one at a time (FPC 3.2.2's ODBC connector creates its shared environment
+  on the first connect without a lock: concurrent connects failed with access violations) and
+  applies the lock timeout outside SQLdb (a `SET` in a prepared statement doesn't stay on the
+  session). Zeos adds `MARS_Connection=yes` to the connection string. FreeTDS (db-lib) is not
+  supported: measured heap corruption with concurrent errors on SQLdb, no `DATETIME2` and lost
+  milliseconds on Zeos. FireDAC isn't covered: its SQL Server driver isn't in Delphi's Community
+  Edition. Contract suite run on SQL Server 2022 with FPC on Windows (Win64) and Linux and with
+  Delphi on Zeos (Win32 and Win64), samples on Linux; CI runs the Linux side.
+- Integration environment: `InsertReturningSql` replaces `SupportsReturning`, so the contract test
+  `InsertReturning_ViaOpen` also covers `INSERT ... OUTPUT` on SQL Server.
+
 ## [0.4.1] - 2026-09-30
 
 ### Fixed

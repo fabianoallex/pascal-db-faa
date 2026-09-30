@@ -1,0 +1,8 @@
+-- NVARCHAR: a VARCHAR holds only the characters of its collation's code page
+-- (1252 by default).
+CREATE TABLE SAMPLE_PRODUCTS (
+  ID    INTEGER       NOT NULL,
+  NAME  NVARCHAR(100) NOT NULL,
+  PRICE NUMERIC(15,2) NOT NULL,
+  CONSTRAINT PK_SAMPLE_PRODUCTS PRIMARY KEY (ID)
+);

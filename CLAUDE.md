@@ -169,19 +169,22 @@ The FPCUnit runner does both.
   `tests/Integration/PascalDb.IntegrationEnv.pas` is the only adapter-specific part (which
   factory, how to create/drop the database) and documents its `PASCALDB_IT_*` environment
   variables. `PASCALDB_IT_ENGINE` picks the database: `firebird` (default), `postgresql`,
-  `sqlite` (a file next to the runner; no server), `mysql` or `mariadb`.
+  `sqlite` (a file next to the runner; no server), `mysql`, `mariadb` or `sqlserver` (SQLdb and
+  Zeos runners only).
   Each run creates a fresh database, migrates it with `TDBMigrationEngine` (SQL from a
   `TMemorySqlSource`) and drops it at the end. FPC on Windows: build
   `tests/Integration/fpc/PascalDbIntegrationTestsFpc.lpi` (SQLdb) or
   `tests/Integration/fpc-zeos/PascalDbIntegrationTestsZeosFpc.lpi` (Zeos) and run it with
   `--all --format=plain`. The Zeos runners (FPC and Delphi) define `PASCALDB_IT_ZEOS` and
   reuse the same fixtures. Linux: `sh tools/test_integration_docker.sh` (`ENGINE=firebird`,
-  `postgresql`, `sqlite`, `mysql` or `mariadb`; `ADAPTER=sqldb` (default) or `zeos`, the latter with `ZEOSDBO` pointing at the
+  `postgresql`, `sqlite`, `mysql`, `mariadb` or `sqlserver`; `ADAPTER=sqldb` (default) or `zeos`, the latter with `ZEOSDBO` pointing at the
   ZeosLib folder, mounted into the container; server container + FPC container on a private
   network). **CI:** `.github/workflows/ci.yml` only calls `sh tools/ci-test.sh`, which runs the
-  unit suite, then all ten Linux integration combinations (SQLdb/Zeos ×
-  Firebird/PostgreSQL/SQLite/MySQL/MariaDB) and the samples on the same ten
-  (`tools/test_samples_docker.sh`);
+  unit suite, then all twelve Linux integration combinations (SQLdb/Zeos ×
+  Firebird/PostgreSQL/SQLite/MySQL/MariaDB/SQL Server) and the samples on the same twelve
+  (`tools/test_samples_docker.sh`); for SQL Server the FPC container installs Microsoft's
+  `msodbcsql18` and `mssql-tools18` from Microsoft's Debian 12 repository (`ACCEPT_EULA=Y`: that
+  accepts Microsoft's license, as running the server image does);
   it builds its FPC image (`pascaldb-fpc322`, Debian bookworm's fpc) and, without `ZEOSDBO`,
   downloads ZeosLib 8.0.0 into `.ci/` and checks its pinned SHA-256. Run it locally before
   pushing a change to the scripts.
@@ -242,9 +245,9 @@ them the driver's quirks):
 
 | Adapter | Compiler | Package / unit | Status |
 |---|---|---|---|
-| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux), SQLite (Windows with sqlite.org's 3.53.4 DLL, Linux with Debian bookworm's libsqlite3), MySQL 8.4 and MariaDB 11.4 (`MySQL 5.7` connector; Windows with MariaDB Connector/C 3.4.11, Linux with Debian bookworm's libmariadb3) |
-| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32 and Win64), PostgreSQL 17 (Win64) and SQLite (Win32 and Win64, engine linked in), MySQL 8.4 and MariaDB 11.4 (Win32 and Win64, MariaDB Connector/C 3.4.11) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
-| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32 and Win64), PostgreSQL 17 with FPC and Delphi (Win64), Firebird 5 and PostgreSQL 17 with FPC on Linux, SQLite with FPC on Windows and Linux and Delphi (Win32 and Win64), MySQL 8.4 and MariaDB 11.4 with FPC on Windows (Win64) and Linux and Delphi (Win32 and Win64) (MariaDB Connector/C) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
+| SQLdb | FPC only | `pascal_db_faa_sqldb.lpk` / `adapters/sqldb` | done: contract suite green on Firebird 2.5 (Windows), Firebird 5 (Linux), PostgreSQL 17 (Windows and Linux), SQLite (Windows with sqlite.org's 3.53.4 DLL, Linux with Debian bookworm's libsqlite3), MySQL 8.4 and MariaDB 11.4 (`MySQL 5.7` connector; Windows with MariaDB Connector/C 3.4.11, Linux with Debian bookworm's libmariadb3), SQL Server 2022 (`ODBC` connector, Microsoft's ODBC Driver 18: 18.5 on Windows Win64, 18.7 on Linux) |
+| FireDAC | Delphi only | `adapters/firedac` | done: contract suite green on Firebird 2.5 (Delphi 12 CE, Win32 and Win64), PostgreSQL 17 (Win64) and SQLite (Win32 and Win64, engine linked in), MySQL 8.4 and MariaDB 11.4 (Win32 and Win64, MariaDB Connector/C 3.4.11); no SQL Server (gotcha 42) — `tests/Integration/PascalDb.IntegrationTests.dproj` |
+| Zeos | dual | `pascal_db_faa_zeos.lpk` / `adapters/zeos` | done: contract suite green on Firebird 2.5 with FPC (Win64) and Delphi 12 CE (Win32 and Win64), PostgreSQL 17 with FPC and Delphi (Win64), Firebird 5 and PostgreSQL 17 with FPC on Linux, SQLite with FPC on Windows and Linux and Delphi (Win32 and Win64), MySQL 8.4 and MariaDB 11.4 with FPC on Windows (Win64) and Linux and Delphi (Win32 and Win64) (MariaDB Connector/C), SQL Server 2022 with FPC on Windows (Win64) and Linux and Delphi (Win32 and Win64) (`odbc_w`, Microsoft's ODBC Driver 18.5 / 18.7) — `tests/Integration/fpc-zeos`, `tests/Integration/PascalDb.IntegrationTestsZeos.dproj` |
 
 A third-party adapter implements `IDBComponentProvider` (usually on top of the two units
 above), and `TDBFactory` does the rest: the core never has to change for a new driver.
@@ -353,6 +356,36 @@ case-sensitive on Linux servers: the dialect looks the migrations table up with 
 `information_schema` and always writes `SCHEMA_MIGRATIONS`. The SQLdb connector replaces
 parameters in the SQL text on the client (no server-side prepared statements).
 
+**SQL Server specifics:** one dialect class, registered as `SQLServer` and `MSSQL` (savepoints with
+`SAVE TRANSACTION` / `ROLLBACK TRANSACTION`, no release: `SupportsRelease = False`; the
+migrations table found with `OBJECT_ID`). Both adapters go through **ODBC with Microsoft's ODBC
+Driver 18**: SQLdb `ConnectorType=ODBC` (+ `Driver=ODBC Driver 18 for SQL Server`; the adapter
+turns `HostName`/`Port`/`DatabaseName` into the connection string's `Server=host,port` and
+`Database=`, since SQLdb's own `DatabaseName` is a DSN), Zeos `Protocol=odbc_w` (`Database` is the
+connection string). FreeTDS/db-lib is rejected (gotchas 37, 38) and FireDAC can't be tested (gotcha
+42). Linux client: `msodbcsql18` + `unixodbc` from Microsoft's repository; `ClientLibrary` /
+`LibraryLocation` = `libodbc.so.2` (the driver manager). What the adapters add:
+- SQLdb: loads the driver manager itself (`InitialiseODBC`, `libodbc.so.2` by default on Unix),
+  opens ODBC connections one at a time (gotcha 39) and applies `LockTimeoutMs` as `SET
+  LOCK_TIMEOUT` through `SQLExecDirect` on the connection's own handle (gotcha 40);
+- Zeos: `MARS_Connection=yes` appended to the connection string unless it has one (gotcha 41),
+  `SET LOCK_TIMEOUT` after connecting;
+- errors 1222 (lock request time out) and 1205 (deadlock victim) → `ELockConflictException`
+  (SQLdb: `ESQLDatabaseError.ErrorCode`; Zeos: `EZSQLThrowable.ErrorCode`).
+Schema differences the integration environment handles: `NVARCHAR` (a `VARCHAR` holds only its
+collation's code page: `→` came back as `?` on every driver), `DATETIME2(3)` (`TIMESTAMP` is a row
+version), `INSERT ... OUTPUT INSERTED.*` instead of `RETURNING` (`InsertReturningSql`), and the
+database dropped after `ALTER DATABASE ... SET SINGLE_USER WITH ROLLBACK IMMEDIATE`. SQLdb reads
+`NUMERIC` as a float field (`Currencies` goes through a `Double`); Zeos as a BCD field. Linux
+runs: `ENGINE=sqlserver sh tools/test_integration_docker.sh` (image
+`mcr.microsoft.com/mssql/server:2022-latest`, `sa` / `PascalDb_It1`; the script waits with `sqlcmd`
+until the server accepts logins, which comes after the port opens). Windows runs: `docker run -d
+--name pascaldb-it-mssql -p 14330:1433 -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=PascalDb_It1
+mcr.microsoft.com/mssql/server:2022-latest`, then `PASCALDB_IT_ENGINE=sqlserver`,
+`PASCALDB_IT_PORT=14330`; the ODBC Driver 18 must be installed in the runner's bitness (the driver
+manager, `odbc32.dll`, is Windows's own: no `PASCALDB_IT_CLIENT`). The FreeTDS/ODBC probes that
+led here are in `.ci/probe-mssql` (git-ignored).
+
 **Zeos on Delphi is compiled from source:** the Delphi Zeos runner finds ZeosLib through the
 `ZEOSDBO` environment variable (the folder containing `src\core`, `src\dbc`, ...), set in
 the IDE (Tools > Options > IDE > Environment Variables) or in the OS. On Lazarus, install
@@ -382,7 +415,8 @@ in "Types", 19 in "Resource files" and 20 in "Threading / interop"; 5–6 in
 the compat adapter bullet of `SKILL.md` ("Mirrored tests"); 8 in "Encoding"; 9 in the
 `lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14, 16, 21–32 and 34–36 in "Database access"; 12
 and 15 in the tests section (`TearDown`, `finalization`). The skill links to this repository
-(https://github.com/fabianoallex/pascal-db-faa) from each of them.
+(https://github.com/fabianoallex/pascal-db-faa) from each of them. 37–42 are not in the skill
+yet.
 
 1. **`TDictionary.Create(nil)` raises an Access Violation on FPC.** Symptom: AV in
    `FindBucketIndex` (`generics.dictionaries.inc`) on the first `Add`/`TryGetValue`: 30 of 158
@@ -684,3 +718,50 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     isolated. Fix: the Zeos adapter opens Firebird connections one at a time (a process-wide
     lock around `Connect`); through the adapter, 4800 connections clean at `--cpus=2` and
     `--cpus=1`. The legacy API (the Windows runs, with a 2.5 client) and SQLdb never showed it.
+
+37. **SQLdb's db-lib connector (`TMSSQLConnection`, FreeTDS) corrupts the heap when two
+    connections fail at the same moment.** 8 threads, each on its own connection, 2000 statements
+    each (FPC 3.2.2, Linux, FreeTDS 1.3.17, SQL Server 2022): only successful statements, 16000
+    clean; with failing ones (4 threads or all 8), "double free or corruption" and an access
+    violation in every run. Cause: `mssqlconn.pp` keeps the error text in unit-level
+    `AnsiString`s (`DBErrorStr`, `DBMsgStr`) that the db-lib callbacks append to from any thread.
+    Also measured: every error comes as the generic db-lib 20018 (the server's number only in the
+    text), and db-lib sessions start with `ANSI_NULLS`, `ANSI_WARNINGS`, `ANSI_NULL_DFLT_ON` ... off,
+    so a column declared without `NULL` came out `NOT NULL` and `SELECT 1/0` returned NULL. Fix:
+    SQL Server goes through ODBC (below); db-lib isn't supported.
+38. **Zeos 8's db-lib protocol (`mssql` over FreeTDS) can't read `DATETIME2` and writes
+    date-times without milliseconds.** Reading a `DATETIME2(3)` column raised `EConvertError:
+    "25 2026 10:11:12:000AM" is not a valid time` (the value arrives as text; no reference to the
+    type in `ZDbcDbLib*`), with TDS 7.2 (Zeos's default for FreeTDS) and 7.3; a stored value read
+    back through `CONVERT(..., 121)` was `10:11:12.000` for `10:11:12.345`, in `DATETIME` too (the
+    write format is `YYYY-MM-DDTHH:NN:SS`). Concurrency was clean (errors kept per `DBPROCESS`
+    under a lock) but errors also came as 20018. Zeos 8.0.0, FreeTDS 1.3.17, Linux. Fix: ODBC.
+39. **SQLdb's ODBC connector: connections opened at the same moment raise access violations.**
+    7 of 8 threads connecting at once failed with an AV (FPC 3.2.2, Linux, msodbcsql 18.7). Cause:
+    `TODBCConnection.DoInternalConnect` creates the process-wide `DefaultEnvironment` on first use
+    without a lock (`odbcconn.pas`), the same lazy-init race as `TClock`/`TSleep`. With the connects
+    serialized: 8 threads x 2000 statements, errors included, clean in 4 runs. Also: the connector
+    ignores `TSQLDBLibraryLoader` (its connection def has no load function) and loads `libodbc.so`
+    on Unix, which only unixODBC's `-dev` package creates ("Can not load ODBC client"); and
+    `EODBCException`'s *message* shows the native error with garbage high bits (`123776662506051`
+    for 2627) while `ErrorCode` is right. Fix: the adapter serializes ODBC connects
+    (`TPdbSQLConnector.DoInternalConnect`) and calls `InitialiseODBC(ClientLibrary)` once,
+    `libodbc.so.2` by default on Unix.
+40. **SQLdb + SQL Server: a `SET` run through a query doesn't stay on the session.** After
+    `ExecuteDirect('SET LOCK_TIMEOUT 1000')`, `@@LOCK_TIMEOUT` read `-1`, and a statement waiting for
+    a lock never gave up. Cause: the ODBC connector prepares every statement (`SQLPrepareW`), the
+    driver runs a prepared statement through `sp_prepexec`, and SQL Server undoes a `SET` when the
+    procedure returns. Through `SQLExecDirect` on the connection's handle: `1000`, still `1000`
+    after a commit, and the wait gave up after 1003 ms with error 1222. Fix: the adapter applies
+    the lock timeout that way (`TPdbSQLConnector.ExecDirectOnSession`). Zeos's `ExecuteDirect` was
+    not affected.
+41. **Zeos 8 `odbc_w` + SQL Server without MARS: "Connection is busy with results for another
+    command".** Several statements of the probe failed with it (Zeos 8.0.0, msodbcsql 18.7, Linux)
+    while another statement on the same connection still had a result open; with
+    `MARS_Connection=yes` in the connection string, all passed. Fix: the adapter adds it unless the
+    connection string sets it.
+42. **Delphi 12 Community Edition's FireDAC has no SQL Server, Oracle or generic ODBC driver.**
+    `lib/win64/release` has `FireDAC.Phys.MSSQLMeta.dcu` and `FireDAC.Phys.OracleMeta.dcu` but no
+    `FireDAC.Phys.MSSQL`, `FireDAC.Phys.Oracle` or `FireDAC.Phys.ODBC` (only `ODBCBase`/`ODBCCli`/
+    `ODBCWrapper`), so the FireDAC adapter can't be built against SQL Server here. SQL Server on
+    Delphi goes through Zeos; the FireDAC integration runner refuses `PASCALDB_IT_ENGINE=sqlserver`.

@@ -14,7 +14,7 @@ concepts each one shows.
 | [05-pool](05-pool/PoolUnderLoad.dpr) | The connection pool under concurrent load (worker threads): growth up to the limit, callers waiting their turn, `EPoolTimeoutException` when the wait runs out, the idle sweep; observed through its events (thread-safe handler) and `GetSnapshot` | Yes |
 
 01 and 02 share `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
-and against PostgreSQL, Firebird, SQLite, MySQL or MariaDB in 02.
+and against PostgreSQL, Firebird, SQLite, MySQL, MariaDB or SQL Server in 02.
 
 ## Running samples 02 to 05
 
@@ -48,14 +48,28 @@ The client is MariaDB Connector/C for both servers (`libmariadb.dll` from its in
 the `plugin` folder next to it, which MySQL 8's default authentication needs; `libmariadb.so.3`
 on Linux). See the MySQL notes in [docs/adapters.md](../docs/adapters.md#mysql-and-mariadb-notes).
 
+For SQL Server, `PASCALDB_SAMPLE_ENGINE=sqlserver`, with SQLdb or Zeos (FireDAC's SQL Server
+driver isn't in Delphi's Community Edition: build with `PASCALDB_SAMPLES_ZEOS` on Delphi); the
+database `samples` must exist:
+
+```
+docker run -d --name pascaldb-sample-mssql -p 1433:1433 -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=PascalDb_It1 mcr.microsoft.com/mssql/server:2022-latest
+docker exec pascaldb-sample-mssql /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P PascalDb_It1 -Q "CREATE DATABASE samples"
+```
+
+The client is Microsoft's ODBC Driver 18 for SQL Server (`PASCALDB_SAMPLE_ODBC_DRIVER` names
+another), installed from Microsoft; on Linux, set `PASCALDB_SAMPLE_CLIENT=libodbc.so.2` for Zeos.
+The samples trust the server's self-signed certificate. See the SQL Server notes in
+[docs/adapters.md](../docs/adapters.md#sql-server-notes).
+
 On PostgreSQL, from the second run on, the client library prints
 `NOTICE: relation "sample_cities" already exists, skipping` to stderr: it comes from
 `CREATE TABLE IF NOT EXISTS` and is harmless.
 
 ## Sample 03: SQL files
 
-The `.sql` files under `03-migrations/sql/PG`, `sql/FB`, `sql/SQLITE` and `sql/MYSQL` (MySQL and
-MariaDB) are linked into the program
+The `.sql` files under `03-migrations/sql/PG`, `sql/FB`, `sql/SQLITE`, `sql/MYSQL` (MySQL and
+MariaDB) and `sql/MSSQL` are linked into the program
 through `sql/MigrationsSql.res`. After editing one, rebuild the `.res` (the test script
 checks it's up to date):
 
@@ -86,6 +100,7 @@ UTF-8.
 
 `sh tools/test_samples_docker.sh` builds the samples on Linux FPC and runs them against
 a PostgreSQL container (`ENGINE=firebird` for Firebird 5, `ENGINE=sqlite` for SQLite with no
-server, `ENGINE=mysql` / `mariadb` for MySQL 8.4 / MariaDB 11.4, `ADAPTER=zeos` with `ZEOSDBO`
+server, `ENGINE=mysql` / `mariadb` for MySQL 8.4 / MariaDB 11.4, `ENGINE=sqlserver` for SQL
+Server 2022, `ADAPTER=zeos` with `ZEOSDBO`
 for Zeos); each must exit with 0 and report 0 unfreed
 blocks.

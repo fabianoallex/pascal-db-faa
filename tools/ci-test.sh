@@ -2,7 +2,10 @@
 # Everything CI runs (.github/workflows/ci.yml), also runnable locally with
 # Docker: the unit suite, then the integration (contract) suite and the
 # samples for the SQLdb and Zeos adapters on Firebird 5, PostgreSQL 17,
-# SQLite, MySQL 8.4 and MariaDB 11.4, all on Linux FPC 3.2.2.
+# SQLite, MySQL 8.4, MariaDB 11.4 and SQL Server 2022, all on Linux FPC 3.2.2.
+# SQL Server's client, Microsoft's ODBC Driver 18, comes from Microsoft's
+# Debian repository and installing it accepts Microsoft's license
+# (ACCEPT_EULA=Y in the test scripts); so does running the server image.
 # Delphi Community Edition can't build headless, so the Delphi side is still
 # validated in the IDE (see CLAUDE.md, "Tests").
 #
@@ -47,15 +50,15 @@ for ADAPTER in sqldb zeos; do
     ADAPTER=$ADAPTER ENGINE=$ENGINE sh tools/test_integration_docker.sh
   done
 done
-# MySQL and MariaDB: MariaDB Connector/C for both servers.
+# MySQL and MariaDB: MariaDB Connector/C for both servers. SQL Server: ODBC.
 for ADAPTER in sqldb zeos; do
-  for ENGINE in mysql mariadb; do
+  for ENGINE in mysql mariadb sqlserver; do
     echo "== integration: $ADAPTER on $ENGINE"
     ADAPTER=$ADAPTER ENGINE=$ENGINE sh tools/test_integration_docker.sh
   done
 done
 for ADAPTER in sqldb zeos; do
-  for ENGINE in firebird postgresql sqlite mysql mariadb; do
+  for ENGINE in firebird postgresql sqlite mysql mariadb sqlserver; do
     echo "== samples: $ADAPTER on $ENGINE"
     ADAPTER=$ADAPTER ENGINE=$ENGINE sh tools/test_samples_docker.sh
   done

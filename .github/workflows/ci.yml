@@ -11,11 +11,11 @@ on:
 jobs:
   test-fpc-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Unit and integration suites and samples (FPC 3.2.2, Firebird 5, PostgreSQL 17)
+      - name: Unit and integration suites and samples (FPC 3.2.2; Firebird, PostgreSQL, SQLite, MySQL, MariaDB, SQL Server)
         run: sh tools/ci-test.sh
