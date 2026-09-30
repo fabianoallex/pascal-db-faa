@@ -10,7 +10,9 @@
   optional columns through SQL tags, an INSERT returning its row through
   Open (RETURNING, or OUTPUT on SQL Server; not on MySQL), UTF-8 text,
   commit/rollback, nested scopes with savepoints, a constraint violation
-  that must not discard the connection, scripts, row counts, parameters
+  that must not discard the connection, scripts, row counts, the dialect's
+  paging clause (pages in order, a partial last page, one past the end),
+  parameters
   after the same SQL text is assigned again (still bound, without the
   previous run's values), one query run in several transactions in a row,
   a string parameter that grows
@@ -38,6 +40,7 @@ uses
   PascalDb.Migrations,
   PascalDb.Threading,
   PascalDb.Pool,
+  PascalDb.Paging,
   PascalDb.IntegrationEnv;
 
 type
@@ -68,6 +71,7 @@ type
     [Test] procedure ConstraintViolation_RaisesDataError_KeepsConnection;
     [Test] procedure SqlScript_RunsEveryStatement;
     [Test] procedure RecordCount_CountsEveryRow;
+    [Test] procedure Paging_PagesCoverAllRowsInOrder;
     [Test] procedure SameSqlReassigned_ParamsStillBind;
     [Test] procedure SameSqlReassigned_PreviousValuesDontLeak;
     [Test] procedure SameQuery_AcrossTransactions;
@@ -618,6 +622,59 @@ begin
     LScope.Rollback;
     raise;
   end;
+end;
+
+// The dialect's paging clause after ORDER BY and a bound parameter: 7 rows in
+// pages of 3 give 3 + 3 + 1, a page past the end is empty, and the pages put
+// together are the whole ordered result, with no row missing or repeated.
+// SQL Server refuses OFFSET/FETCH without ORDER BY; Firebird takes ROWS.
+procedure TContractTests.Paging_PagesCoverAllRowsInOrder;
+const
+  EXPECTED_COUNTS: array[1..4] of Integer = (3, 3, 1, 0);
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LResult: IQueryResult;
+  LPage: TPageRequest;
+  LMeta: TPageMeta;
+  LSeen: string;
+  LRows, I: Integer;
+begin
+  for I := 1 to 7 do
+    InsertItem(I, 'page item ' + IntToStr(I));
+  InsertItem(100, 'filtered out');
+
+  LSeen := '';
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := 'SELECT COUNT(*) AS TOTAL FROM ITEMS WHERE ID < :MAX_ID';
+    LQuery.Params.Integers['MAX_ID'] := 100;
+    LMeta := TPageMeta.Create(TPageRequest.Create(1, 3), LQuery.Open.Int64s['TOTAL']);
+    TAssert.AssertEquals('TotalPages', Int64(3), LMeta.TotalPages);
+
+    for I := 1 to 4 do
+    begin
+      LPage := TPageRequest.Create(I, 3);
+      LQuery.Sql := 'SELECT ID FROM ITEMS WHERE ID < :MAX_ID ORDER BY ID ' +
+        PdbPagingClause(LScope, LPage);
+      LQuery.Params.Integers['MAX_ID'] := 100;
+      LResult := LQuery.Open;
+      LRows := 0;
+      while not LResult.Eof do
+      begin
+        LSeen := LSeen + IntToStr(LResult.Integers['ID']) + ',';
+        Inc(LRows);
+        LResult.Next;
+      end;
+      TAssert.AssertEquals('Rows on page ' + IntToStr(I), EXPECTED_COUNTS[I], LRows);
+    end;
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+  TAssert.AssertEquals('The pages together', '1,2,3,4,5,6,7,', LSeen);
 end;
 
 // Assigning Sql resets the parameters; assigning the same text again (a loop

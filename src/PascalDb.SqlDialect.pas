@@ -3,8 +3,13 @@
 {$I pascaldb.inc}
 
 { SQL differences between databases that the library itself has to generate:
-  savepoints (create, roll back to, release) via ISQLDialect, and the queries
-  on the migrations control table via IMigrationDialect. Implementations for
+  savepoints (create, roll back to, release) via ISQLDialect, the queries
+  on the migrations control table via IMigrationDialect, and the clause that
+  limits a query to one page via IPagingDialect (LIMIT/OFFSET; ROWS m TO n on
+  Firebird, which 2.5 has and OFFSET/FETCH needs 3.0 for; OFFSET/FETCH on SQL
+  Server, which refuses it without ORDER BY). The paging numbers go into the
+  text as integer literals: they are typed Integer/Int64, so nothing a user
+  types can reach the SQL through them. Implementations for
   PostgreSQL, Firebird, SQLite, MySQL/MariaDB and SQL Server, registered in
   this unit's initialization section under the names 'PostgreSQL',
   'Firebird', 'SQLite', 'MySQL', 'MariaDB' (the same class as MySQL),
@@ -47,7 +52,7 @@ type
 
   { TPostgreSQLDialect }
 
-  TPostgreSQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
+  TPostgreSQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -57,11 +62,12 @@ type
     function GetMigrationTableExistsSQL: string;
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
+    function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
   end;
 
   { TFirebirdDialect }
 
-  TFirebirdDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
+  TFirebirdDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -71,6 +77,7 @@ type
     function GetMigrationTableExistsSQL: string;
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
+    function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
   end;
 
   { TSQLiteDialect
@@ -78,7 +85,7 @@ type
     names as written, so the control table is looked up case-insensitively
     in sqlite_master. }
 
-  TSQLiteDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
+  TSQLiteDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -88,6 +95,7 @@ type
     function GetMigrationTableExistsSQL: string;
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
+    function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
   end;
 
   { TMySQLDialect
@@ -99,7 +107,7 @@ type
     Double quotes delimit strings unless ANSI_QUOTES is on: the column alias
     goes in backticks. }
 
-  TMySQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
+  TMySQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -109,6 +117,7 @@ type
     function GetMigrationTableExistsSQL: string;
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
+    function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
   end;
 
   { TSQLServerDialect
@@ -118,7 +127,7 @@ type
     table is looked up with OBJECT_ID, which follows the database's
     collation (case-insensitive by default). }
 
-  TSQLServerDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
+  TSQLServerDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -128,6 +137,7 @@ type
     function GetMigrationTableExistsSQL: string;
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
+    function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
   end;
 
 implementation
@@ -236,6 +246,11 @@ begin
     'VALUES (:VERSION, CURRENT_TIMESTAMP)';
 end;
 
+function TPostgreSQLDialect.GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+begin
+  Result := Format('LIMIT %d OFFSET %d', [ALimit, AOffset]);
+end;
+
 { TFirebirdDialect }
 
 function TFirebirdDialect.GetReleaseSavepointSQL(const AName: string): string;
@@ -281,6 +296,11 @@ begin
   Result :=
     'INSERT INTO SCHEMA_MIGRATIONS (VERSION, APPLIED_AT) ' +
     'VALUES (:VERSION, CURRENT_TIMESTAMP)';
+end;
+
+function TFirebirdDialect.GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+begin
+  Result := Format('ROWS %d TO %d', [AOffset + 1, AOffset + ALimit]);
 end;
 
 { TSQLiteDialect }
@@ -330,6 +350,11 @@ begin
     'VALUES (:VERSION, CURRENT_TIMESTAMP)';
 end;
 
+function TSQLiteDialect.GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+begin
+  Result := Format('LIMIT %d OFFSET %d', [ALimit, AOffset]);
+end;
+
 { TMySQLDialect }
 
 function TMySQLDialect.GetReleaseSavepointSQL(const AName: string): string;
@@ -377,6 +402,11 @@ begin
     'VALUES (:VERSION, CURRENT_TIMESTAMP)';
 end;
 
+function TMySQLDialect.GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+begin
+  Result := Format('LIMIT %d OFFSET %d', [ALimit, AOffset]);
+end;
+
 { TSQLServerDialect }
 
 function TSQLServerDialect.GetReleaseSavepointSQL(const AName: string): string;
@@ -420,6 +450,11 @@ begin
   Result :=
     'INSERT INTO SCHEMA_MIGRATIONS (VERSION, APPLIED_AT) ' +
     'VALUES (:VERSION, CURRENT_TIMESTAMP)';
+end;
+
+function TSQLServerDialect.GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+begin
+  Result := Format('OFFSET %d ROWS FETCH NEXT %d ROWS ONLY', [AOffset, ALimit]);
 end;
 
 initialization

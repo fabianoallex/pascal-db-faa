@@ -15,8 +15,8 @@ LQuery.Sql := FFactory.SqlLoader['CITY.INSERT'].SQL;
 The loader looks for `<SQLDirectory>/<KEY>` in the configuration's `SqlSource`.
 `SQLDirectory` is set per database (`'PG'`, `'FB'`, `'SQLITE'` in the samples), so **one key
 can hold a different statement for each database** while the code stays the same. Usually
-most scripts are identical and only a few differ (a `CREATE TABLE`, a `RETURNING`, a
-pagination clause).
+most scripts are identical and only a few differ (a `CREATE TABLE`, a `RETURNING`). A
+pagination clause doesn't need a copy per database: the dialect writes it ([Paging](#paging)).
 
 A missing key raises `ESQLLoaderException` ("SQL not found: PG/CITY.INSERT. Looked in: ...").
 Each loader caches the texts it has read, and is safe to use from several threads.
@@ -138,6 +138,82 @@ LPattern := StringReplace(StringReplace(StringReplace(AText,
 With `ESCAPE '\'`, SQLdb's SQLite and PostgreSQL connectors read `\'` as an escaped quote while
 looking for parameters, and every parameter after it disappears without an error, until
 binding fails with `Parameter "..." not found` (gotcha 26 in [`CLAUDE.md`](../CLAUDE.md)).
+
+## Paging
+
+`PascalDb.Paging` pages a query by offset. The SQL marks where the clause goes with a `${PAGE}`
+literal, after the `ORDER BY`:
+
+```sql
+SELECT CODE, NAME, STATE FROM CITIES
+WHERE STATE = :STATE
+ORDER BY NAME, CODE
+${PAGE}
+```
+
+`PdbPagingClause` writes the clause for the database of the scope's connection:
+
+```pascal
+function TCityRepository.FindByStatePaged(const AState: string;
+  const APage: TPageRequest): TPage<TCity>;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LResult: IQueryResult;
+begin
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := FFactory.SqlLoader['CITY.COUNT_BY_STATE'].SQL;
+    LQuery.Params.Strings['STATE'] := AState;
+    Result.Meta := TPageMeta.Create(APage, LQuery.Open.Int64s['TOTAL']);
+
+    LQuery.Sql := FFactory.SqlLoader['CITY.BY_STATE_PAGED']
+      .ReplaceLiteral('PAGE', PdbPagingClause(LScope, APage)).SQL;
+    LQuery.Params.Strings['STATE'] := AState;
+    LResult := LQuery.Open;
+    SetLength(Result.Items, LResult.RecordCount);
+    // ... read the rows into Result.Items
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+// the caller: page and limit as they came in, normalized
+LPage := LRepo.FindByStatePaged('SC', TPageRequest.Create(LPageNumber, LLimit));
+```
+
+| Database | Clause for page 3 of 20 |
+|---|---|
+| PostgreSQL, SQLite, MySQL, MariaDB | `LIMIT 20 OFFSET 40` |
+| Firebird (2.5 and later) | `ROWS 41 TO 60` |
+| SQL Server | `OFFSET 40 ROWS FETCH NEXT 20 ROWS ONLY` |
+
+- **`TPageRequest.Create(Page, Limit, DefaultLimit = 20, MaxLimit = 100)`** normalizes what a
+  client sent: a page below 1 becomes 1, a missing limit (0 or less) becomes the default, and
+  one above the maximum becomes the maximum. Build every page with it: `PdbPagingClause`
+  refuses a page with no limit.
+- **`TPageMeta`** holds the page, the limit and the total, and derives `TotalPages` (never below
+  1: an empty result is one empty page), `HasNext` and `HasPrev`. **`TPage<T>`** is `Items` plus
+  `Meta`, to return both from a repository. Turning them into JSON is the API's job.
+- **The total is a query you write**, with the same filter, usually `COUNT(*)`: the library
+  doesn't derive it from the page query, which would mean parsing SQL. In the same scope, both
+  run in one transaction.
+- **The `ORDER BY` must name a unique set of columns** (end with the key): with ties, the
+  database may put a row on two pages or on none. SQL Server refuses the clause without an
+  `ORDER BY`; the others accept it and return rows in no defined order.
+- **The numbers go into the text**, not through parameters: they are `Integer`/`Int64`, so
+  nothing a client types reaches the SQL. It also means each page is a different statement;
+  a request runs its page query once, so that costs nothing it wouldn't cost anyway.
+- **Large offsets are slow**: the database still reads and skips every row before the page.
+  For deep pages, page by key instead — `WHERE ID > :LAST_ID ORDER BY ID` with the same clause
+  on page 1 (`TPageRequest.Create(1, Limit)`), passing the last key of the previous page.
+- `PdbDialectOf(LScope)` gives the dialect itself. A dialect of your own pages only if it
+  implements `IPagingDialect` ([guide 10](other-databases.md#1-an-sql-dialect)); with the
+  mock, the clause is a `LIMIT`/`OFFSET` that never reaches the recorded key
+  ([guide 5](testing-with-the-mock.md)).
 
 ## Running the same statement many times
 

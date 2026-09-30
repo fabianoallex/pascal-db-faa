@@ -10,9 +10,9 @@ interface
 uses
   PascalDb.Threading, PascalDb.SystemContext, PascalDb.ClockCache, 
   PascalDb.Optionals, PascalDb.SqlSources, PascalDb.SqlLoader, 
-  PascalDb.Interfaces, PascalDb.SqlDialect, PascalDb.Registry, 
-  PascalDb.SafeLog, PascalDb.Mock, PascalDb.Pool, PascalDb.Migrations, 
-  PascalDb.Adapter.Base, PascalDb.Adapter.DataSet;
+  PascalDb.Interfaces, PascalDb.SqlDialect, PascalDb.Paging, 
+  PascalDb.Registry, PascalDb.SafeLog, PascalDb.Mock, PascalDb.Pool, 
+  PascalDb.Migrations, PascalDb.Adapter.Base, PascalDb.Adapter.DataSet;
 
 implementation
 

@@ -264,6 +264,20 @@ type
     function GetSnapshot: TPoolSnapshot;
   end;
 
+  // Dialect of the mock connection: no savepoint SQL (the mock scope runs
+  // none) and a LIMIT/OFFSET paging clause, so code calling PdbPagingClause
+  // runs against the mock. The mock's SQL loader returns the key itself, so
+  // the clause never reaches what LastExecution records.
+  TMockSQLDialect = class(TInterfacedObject, ISQLDialect, IPagingDialect)
+  public
+    function GetSavepointSQL(const AName: string): string;
+    function GetRollbackToSavepointSQL(const AName: string): string;
+    function GetReleaseSavepointSQL(const AName: string): string;
+    function SupportsRelease: Boolean;
+    function GetPingSQL: string;
+    function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+  end;
+
   // Minimal IDBConnection — every operation is a no-op
   TMockDBConnection = class(TInterfacedObject, IDBConnection)
   public
@@ -1117,6 +1131,19 @@ function TMockConnectionPool.GetWaitMaxAttemps: Integer;    begin Result := 0; e
 function TMockConnectionPool.GetWaitMilliseconds: Integer;  begin Result := 0; end;
 function TMockConnectionPool.GetSnapshot: TPoolSnapshot;    begin Result := Default(TPoolSnapshot); end;
 
+{ TMockSQLDialect }
+
+function TMockSQLDialect.GetSavepointSQL(const AName: string): string;           begin Result := ''; end;
+function TMockSQLDialect.GetRollbackToSavepointSQL(const AName: string): string; begin Result := ''; end;
+function TMockSQLDialect.GetReleaseSavepointSQL(const AName: string): string;    begin Result := ''; end;
+function TMockSQLDialect.SupportsRelease: Boolean;                               begin Result := False; end;
+function TMockSQLDialect.GetPingSQL: string;                                     begin Result := 'SELECT 1'; end;
+
+function TMockSQLDialect.GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+begin
+  Result := Format('LIMIT %d OFFSET %d', [ALimit, AOffset]);
+end;
+
 { TMockDBConnection }
 
 procedure TMockDBConnection.Connect;                       begin end;
@@ -1124,7 +1151,7 @@ procedure TMockDBConnection.Commit;                        begin end;
 procedure TMockDBConnection.Rollback;                      begin end;
 procedure TMockDBConnection.Disconnect(Force: Boolean);    begin end;
 function TMockDBConnection.GetNativeConnection: TObject;   begin Result := nil;  end;
-function TMockDBConnection.GetSQLDialect: ISQLDialect;     begin Result := nil;  end;
+function TMockDBConnection.GetSQLDialect: ISQLDialect;     begin Result := TMockSQLDialect.Create; end;
 function TMockDBConnection.IsConnected: Boolean;           begin Result := True; end;
 
 { TMockTransaction }
@@ -1134,7 +1161,7 @@ procedure TMockTransaction.Commit;                         begin end;
 procedure TMockTransaction.Rollback;                       begin end;
 procedure TMockTransaction.ExecSql(const ASql: string);    begin end;
 function TMockTransaction.InTransaction: Boolean;          begin Result := False; end;
-function TMockTransaction.GetConnection: IDBConnection;    begin Result := nil;   end;
+function TMockTransaction.GetConnection: IDBConnection;    begin Result := TMockDBConnection.Create; end;
 function TMockTransaction.GetNativeTransaction: TObject;   begin Result := nil;   end;
 
 { TMockSQLLoader }

@@ -13,6 +13,8 @@ A database access layer for **Delphi and Lazarus/FPC from the same source code**
 - SQL in tagged templates (`[TAG {] ... [} TAG]`, `${LITERAL}`), read from pluggable
   sources: embedded resources (default), a directory of `.sql` files, memory, or a
   composite. `tools/build_sql_res.py` builds the `.res` on any OS.
+- Offset paging: the clause written by each database's dialect into the SQL template, and
+  page request/metadata types.
 - Optional/nullable types (`IOptXxx`, `INullXxx`, `IOptNullXxx`) integrated with the
   parameters.
 - `TMockDBFactory`: a complete mock for testing repositories without a database.

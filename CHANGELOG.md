@@ -6,6 +6,20 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Added
+
+- Offset paging (`PascalDb.Paging`): `TPageRequest` (page and limit normalized: page below 1,
+  missing limit, limit above a maximum), `TPageMeta` (`TotalPages`, `HasNext`, `HasPrev`),
+  `TPage<T>`, `PdbDialectOf(Scope)` and `PdbPagingClause`, which writes the clause for the
+  scope's database into a `${PAGE}` template literal: `LIMIT/OFFSET` on PostgreSQL, SQLite,
+  MySQL and MariaDB, `ROWS m TO n` on Firebird (2.5 included), `OFFSET/FETCH` on SQL Server.
+  The dialects implement the new `IPagingDialect`, a separate interface (as `IMigrationDialect`)
+  so dialects registered by applications still compile. The total is a query the caller writes;
+  the library doesn't parse SQL. Contract test `Paging_PagesCoverAllRowsInOrder`.
+- `TMockDBFactory`'s scopes now have a connection and a dialect (`TMockSQLDialect`), so code
+  calling `PdbPagingClause` runs against the mock; `TMockTransaction.GetConnection` and
+  `TMockDBConnection.GetSQLDialect` no longer return `nil`.
+
 ## [0.5.1] - 2026-09-30
 
 ### Fixed

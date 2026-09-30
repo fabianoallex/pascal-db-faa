@@ -51,6 +51,16 @@ type
     function GetMigrationInsertVersionSQL: string;
   end;
 
+  // A separate interface, like IMigrationDialect, so a dialect registered by
+  // an application before it existed still compiles; PdbPagingClause
+  // (PascalDb.Paging) says so when a dialect doesn't implement it.
+  IPagingDialect = interface
+    ['{C3E81A57-6B2D-4F0E-9A14-7D5B2E8C9F31}']
+    // Clause that goes after ORDER BY and returns at most ALimit rows,
+    // skipping the first AOffset. ALimit >= 1, AOffset >= 0.
+    function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+  end;
+
   IDBConnection = interface
     ['{0763D2A3-9EAE-4F40-8580-E5F742C82105}']
     function GetNativeConnection: TObject;

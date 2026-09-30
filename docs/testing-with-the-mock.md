@@ -124,6 +124,10 @@ Check(LMock.ExecutionCount('PRODUCT.INSERT') = 1, 'the INSERT was tried once');
 - It runs no SQL: template tags, parameter names that don't exist in the statement and SQL
   errors all go unnoticed. The integration tests on a real database cover those. SQL errors
   can be simulated with `AddFailure`.
+- Paging: `PdbPagingClause(LScope, ...)` works on a mock scope (its dialect answers
+  `LIMIT n OFFSET m`), but the clause isn't recorded: the executed key is still the plain key
+  (`'CITY.BY_STATE_PAGED'`), and the canned result is returned whatever the page. Register the
+  rows of the page you are testing, and check the page's `TPageMeta` from the canned total.
 - Transactions only pretend: nothing is rolled back.
 - `CreateSqlScript` isn't supported (it raises), so code that runs migrations isn't testable
   with it.

@@ -7,7 +7,7 @@ Free Pascal (see [`samples/README.md`](../samples/README.md)).
 | Guide | What it covers | Sample |
 |---|---|---|
 | [1. Getting started](getting-started.md) | The factory and its configuration, the acquire / start / commit / rollback pattern, reading results, nested scopes | 02 |
-| [2. SQL by key](sql.md) | `SqlLoader['KEY']`, one SQL folder per database, SQL sources (resources, directory, memory, composite), template tags and `${...}` literals | 02, 03, 04 |
+| [2. SQL by key](sql.md) | `SqlLoader['KEY']`, one SQL folder per database, SQL sources (resources, directory, memory, composite), template tags and `${...}` literals, paging | 02, 03, 04 |
 | [3. Optional and nullable values](optionals.md) | `INullXxx`, `IOptXxx`, `IOptNullXxx` as parameters and column reads; optional filters and partial updates | 04 |
 | [4. Migrations](migrations.md) | `TDBMigrationEngine`, `IsDDL`, the migrations table, how scripts are split | 03 |
 | [5. Testing with the mock](testing-with-the-mock.md) | `TMockDBFactory`: canned results, recorded executions, and its lifetime | 01 |

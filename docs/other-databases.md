@@ -13,13 +13,13 @@ folder with your SQL for it.
 ## 1. An SQL dialect
 
 The dialect is the SQL the library generates by itself: savepoints for nested scopes, the ping
-that checks an idle pooled connection, and the queries on the migrations table. Your business SQL
-never goes through it. Write one class and register it once at startup, before creating the
-factory:
+that checks an idle pooled connection, the queries on the migrations table and the paging clause.
+The rest of your business SQL never goes through it. Write one class and register it once at
+startup, before creating the factory:
 
 ```pascal
 type
-  TMyDbDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect)
+  TMyDbDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect)
   public
     // ISQLDialect
     function GetSavepointSQL(const AName: string): string;
@@ -31,6 +31,8 @@ type
     function GetMigrationTableExistsSQL: string;
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
+    // IPagingDialect (only if you page queries)
+    function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
   end;
 
 // in the program's start-up code
@@ -46,8 +48,9 @@ LConfig.SQLDialect := 'MyDb';
 | `GetMigrationTableExistsSQL` | one row, column `EXISTS` = 1 or 0: whether `SCHEMA_MIGRATIONS` exists | a query on the database's catalog. `EXISTS` is a reserved word in most databases: quote the alias |
 | `GetMigrationLastVersionSQL` | one row, column `VERSION`: the highest applied version, 0 when empty | `SELECT COALESCE(MAX(VERSION), 0) AS VERSION FROM SCHEMA_MIGRATIONS` is standard SQL |
 | `GetMigrationInsertVersionSQL` | an `INSERT` into `SCHEMA_MIGRATIONS` with the named parameter `:VERSION` | |
+| `GetPagingClause` | the clause, placed after `ORDER BY`, that returns at most `ALimit` rows after skipping `AOffset` | `LIMIT n OFFSET m` where the database has it; without `IPagingDialect`, `PdbPagingClause` raises `EArgumentException` ([guide 2](sql.md#paging)) |
 
-`src/PascalDb.SqlDialect.pas` has the three built-in dialects to copy from. Names are matched
+`src/PascalDb.SqlDialect.pas` has the built-in dialects to copy from. Names are matched
 ignoring case; registering a name that is already there raises `EArgumentException`, and so
 does creating a factory whose `SQLDialect` isn't registered (the message lists the registered
 ones).
@@ -100,7 +103,7 @@ in general. None of them was measured here on a database other than the three su
 
 ## Checking it: the contract suite
 
-The suite (`tests/Integration/PascalDb.ContractTests.pas`, 16 tests) only uses `IDBFactory`;
+The suite (`tests/Integration/PascalDb.ContractTests.pas`, 24 tests) only uses `IDBFactory`;
 everything database-specific lives in `tests/Integration/PascalDb.IntegrationEnv.pas`. To run
 it against another database:
 

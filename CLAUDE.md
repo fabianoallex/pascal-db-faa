@@ -126,6 +126,13 @@ versioned (`.gitignore` exception) and regenerated/checked by the test scripts.
 The text is returned as stored (original line endings, no trailing line break added); a
 leading UTF-8 BOM is dropped.
 
+**Paging** (`PascalDb.Paging`): the dialect writes the clause (`IPagingDialect`, separate from
+`ISQLDialect` so applications' own dialects still compile), and the SQL places it with a
+`${PAGE}` literal (`ReplaceLiteral('PAGE', PdbPagingClause(LScope, APage))`). Deliberately no
+SQL parsing: the caller writes the `COUNT` query, and the library never wraps or rewrites a
+statement (a derived table with `ORDER BY` is an error on SQL Server). Limit and offset go in
+as integer literals. Firebird uses `ROWS m TO n` because `OFFSET/FETCH` needs 3.0.
+
 ---
 
 ## Runtime requirements for FPC applications

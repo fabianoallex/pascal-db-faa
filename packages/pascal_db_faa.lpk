@@ -54,6 +54,10 @@
         <UnitName Value="PascalDb.SqlDialect"/>
       </Item>
       <Item>
+        <Filename Value="..\src\PascalDb.Paging.pas"/>
+        <UnitName Value="PascalDb.Paging"/>
+      </Item>
+      <Item>
         <Filename Value="..\src\PascalDb.Registry.pas"/>
         <UnitName Value="PascalDb.Registry"/>
       </Item>

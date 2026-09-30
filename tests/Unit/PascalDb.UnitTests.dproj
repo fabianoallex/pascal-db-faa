@@ -121,6 +121,7 @@
         <DCCReference Include="..\..\src\PascalDb.SqlLoader.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Interfaces.pas"/>
         <DCCReference Include="..\..\src\PascalDb.SqlDialect.pas"/>
+        <DCCReference Include="..\..\src\PascalDb.Paging.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Registry.pas"/>
         <DCCReference Include="..\..\src\PascalDb.SafeLog.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Mock.pas"/>
@@ -136,6 +137,7 @@
         <DCCReference Include="PascalDb.PoolTests.pas"/>
         <DCCReference Include="PascalDb.SqlSourcesTests.pas"/>
         <DCCReference Include="PascalDb.AdapterBaseTests.pas"/>
+        <DCCReference Include="PascalDb.PagingTests.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

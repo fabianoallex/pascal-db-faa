@@ -24,6 +24,7 @@ uses
   PascalDb.SqlLoader in '..\..\src\PascalDb.SqlLoader.pas',
   PascalDb.Interfaces in '..\..\src\PascalDb.Interfaces.pas',
   PascalDb.SqlDialect in '..\..\src\PascalDb.SqlDialect.pas',
+  PascalDb.Paging in '..\..\src\PascalDb.Paging.pas',
   PascalDb.Registry in '..\..\src\PascalDb.Registry.pas',
   PascalDb.SafeLog in '..\..\src\PascalDb.SafeLog.pas',
   PascalDb.Mock in '..\..\src\PascalDb.Mock.pas',
@@ -38,7 +39,8 @@ uses
   PascalDb.MockTests in 'PascalDb.MockTests.pas',
   PascalDb.PoolTests in 'PascalDb.PoolTests.pas',
   PascalDb.SqlSourcesTests in 'PascalDb.SqlSourcesTests.pas',
-  PascalDb.AdapterBaseTests in 'PascalDb.AdapterBaseTests.pas';
+  PascalDb.AdapterBaseTests in 'PascalDb.AdapterBaseTests.pas',
+  PascalDb.PagingTests in 'PascalDb.PagingTests.pas';
 
 // SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
 {$R 'sql\PascalDbTestSql.res'}
