@@ -6,6 +6,8 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-30
+
 ### Added
 
 - SQL Server on SQLdb and Zeos, through Microsoft's ODBC Driver 18 (`ConnectorType=ODBC` on
@@ -184,6 +186,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.5.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.2.0...v0.3.0

@@ -15,7 +15,7 @@
     </CompilerOptions>
     <Description Value="SQLdb adapter for pascal-db-faa (Free Pascal/Lazarus): IDBFactory over TSQLConnector (Firebird, PostgreSQL)."/>
     <License Value="MIT"/>
-    <Version Minor="4" Release="1"/>
+    <Version Minor="5"/>
     <Files>
       <Item>
         <Filename Value="..\adapters\sqldb\PascalDb.Adapter.SQLdb.pas"/>
