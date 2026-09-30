@@ -415,7 +415,7 @@ in "Types", 19 in "Resource files" and 20 in "Threading / interop"; 5–6 in
 the compat adapter bullet of `SKILL.md` ("Mirrored tests"); 8 in "Encoding"; 9 in the
 `lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14, 16, 21–32 and 34–42 in "Database access"; 12
 and 15 in the tests section (`TearDown`, `finalization`). The skill links to this repository
-(https://github.com/fabianoallex/pascal-db-faa) from each of them.
+(https://github.com/fabianoallex/pascal-db-faa) from each of them. 43 is not in the skill yet.
 
 1. **`TDictionary.Create(nil)` raises an Access Violation on FPC.** Symptom: AV in
    `FindBucketIndex` (`generics.dictionaries.inc`) on the first `Add`/`TryGetValue`: 30 of 158
@@ -764,3 +764,12 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     `FireDAC.Phys.MSSQL`, `FireDAC.Phys.Oracle` or `FireDAC.Phys.ODBC` (only `ODBCBase`/`ODBCCli`/
     `ODBCWrapper`), so the FireDAC adapter can't be built against SQL Server here. SQL Server on
     Delphi goes through Zeos; the FireDAC integration runner refuses `PASCALDB_IT_ENGINE=sqlserver`.
+43. **Delphi on Windows: `ExtractFilePath('C:/libs/libmariadb.dll')` is `'C:'`.** A client library
+    given with forward slashes (as `pwd -W` or a config file writes it) made `PdbMySQLPluginDir`
+    look for `C:plugin`: every connection to MySQL 8.4 failed with "Plugin caching_sha2_password
+    could not be loaded" (FireDAC and Zeos, Delphi 12 CE, Win32 and Win64), while MariaDB servers,
+    which don't use that plugin, passed. Delphi's `ExtractFilePath` splits at `PathDelim` and
+    `DriveDelim` only; FPC's accepts both separators on Windows (the SQLdb runner passed with the
+    same path before the fix). Fix: `NativeLibraryPath` turns `/` into `\` on Windows in
+    `PdbMySQLPluginDir` and `PdbPreloadClientLibrary`; unit test
+    `PluginDir_NextToLibrary_AnySlash`.

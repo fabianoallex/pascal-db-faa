@@ -110,6 +110,8 @@ type
     procedure Scope_Main_CommitsTheTransaction;
     procedure Scope_Nested_UsesSavepoints;
     procedure Scope_Nested_NoRelease_CommitRunsNothing;
+    procedure PluginDir_NextToLibrary_AnySlash;
+    procedure PluginDir_NoFolder_IsEmpty;
   end;
 
 implementation
@@ -515,6 +517,47 @@ begin
   TAssert.AssertTrue('The nested scope must create a savepoint: ' + LTransaction.Log[1],
     Pos('SAVE TRANSACTION sp_', LTransaction.Log[1]) = 1);
   TAssert.AssertEquals('COMMIT', LTransaction.Log[2]);
+end;
+
+// A folder next to the test executable, removed by the caller.
+function PluginTestFolder: string;
+begin
+  Result := ExtractFilePath(ParamStr(0)) + 'pdb_plugin_dir_test' + PathDelim;
+end;
+
+procedure TAdapterBaseTests.PluginDir_NextToLibrary_AnySlash;
+var
+  LBase, LSlashed: string;
+begin
+  LBase := PluginTestFolder;
+  ForceDirectories(LBase + 'plugin');
+  try
+    TAssert.AssertEquals(LBase + 'plugin', PdbMySQLPluginDir(LBase + 'libmariadb.dll'));
+    // Forward slashes, as a path often arrives from a shell or a config
+    // file: on Windows, Delphi's ExtractFilePath knew only the backslash.
+    LSlashed := StringReplace(LBase, '\', '/', [rfReplaceAll]);
+    TAssert.AssertTrue('The plugin folder must be found with forward slashes too: ' +
+      PdbMySQLPluginDir(LSlashed + 'libmariadb.dll'),
+      DirectoryExists(PdbMySQLPluginDir(LSlashed + 'libmariadb.dll')));
+  finally
+    RemoveDir(LBase + 'plugin');
+    RemoveDir(LBase);
+  end;
+end;
+
+procedure TAdapterBaseTests.PluginDir_NoFolder_IsEmpty;
+var
+  LBase: string;
+begin
+  TAssert.AssertEquals('A bare file name has no folder', '', PdbMySQLPluginDir('libmariadb.dll'));
+  LBase := PluginTestFolder;
+  ForceDirectories(LBase);
+  try
+    TAssert.AssertEquals('No plugin folder next to the library', '',
+      PdbMySQLPluginDir(LBase + 'libmariadb.dll'));
+  finally
+    RemoveDir(LBase);
+  end;
 end;
 
 initialization

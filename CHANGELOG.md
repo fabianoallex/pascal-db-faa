@@ -6,6 +6,15 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Delphi on Windows: a MySQL/MariaDB client library given with forward slashes
+  (`C:/libs/libmariadb.dll`) no longer hides the `plugin` folder next to it. Delphi's
+  `ExtractFilePath` knows only the backslash on Windows, so `PdbMySQLPluginDir` looked for
+  `C:plugin` and every connection to MySQL 8 failed with "Plugin caching_sha2_password could not
+  be loaded" (FireDAC and Zeos, Win32 and Win64). `PdbPreloadClientLibrary` normalizes the path
+  too. FPC was not affected.
+
 ## [0.5.0] - 2026-09-30
 
 ### Added

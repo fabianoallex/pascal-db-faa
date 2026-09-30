@@ -291,6 +291,8 @@ type
 /// libpq.dll). Adapters call this for the client library path they are
 /// given; no-op for '' or a bare file name, when the library is already
 /// loaded, and outside Windows. A failure is left for the driver to report.
+/// Forward slashes are accepted (turned into backslashes: LoadLibraryEx
+/// doesn't define its behavior with them).
 procedure PdbPreloadClientLibrary(const ALibrary: string);
 
 /// The "plugin" folder next to ALibrary, a MySQL/MariaDB client library given
@@ -302,6 +304,11 @@ procedure PdbPreloadClientLibrary(const ALibrary: string);
 /// Connector/C 3.4.11 copied to another folder ("Plugin caching_sha2_password
 /// could not be loaded", measured on Windows). Adapters pass it as the
 /// MYSQL_PLUGIN_DIR connection option unless the settings give one.
+/// On Windows, forward slashes in ALibrary are accepted: Delphi's
+/// ExtractFilePath knows only the backslash there, so 'C:/libs/libmariadb.dll'
+/// gave 'C:' and the folder was never found (measured: every connection to
+/// MySQL 8.4 failed, FireDAC and Zeos, Delphi Win32 and Win64). FPC's accepts
+/// both separators (SQLdb passed with forward slashes before the fix).
 function PdbMySQLPluginDir(const ALibrary: string): string;
 
 implementation
@@ -312,6 +319,17 @@ uses
   {$ENDIF}
   PascalDb.SqlDialect;
 
+// Windows: a path written with forward slashes, as the system's own. Delphi's
+// ExtractFilePath and LoadLibraryEx expect backslashes (see PdbMySQLPluginDir).
+function NativeLibraryPath(const ALibrary: string): string;
+begin
+  {$IFDEF MSWINDOWS}
+  Result := StringReplace(ALibrary, '/', '\', [rfReplaceAll]);
+  {$ELSE}
+  Result := ALibrary;
+  {$ENDIF}
+end;
+
 procedure PdbPreloadClientLibrary(const ALibrary: string);
 {$IFDEF MSWINDOWS}
 var
@@ -319,20 +337,23 @@ var
 {$ENDIF}
 begin
   {$IFDEF MSWINDOWS}
-  if ExtractFilePath(ALibrary) = '' then
+  if ExtractFilePath(NativeLibraryPath(ALibrary)) = '' then
     Exit;
-  LPath := UnicodeString(ALibrary);
+  LPath := UnicodeString(NativeLibraryPath(ALibrary));
   if GetModuleHandleW(PWideChar(LPath)) = 0 then
     LoadLibraryExW(PWideChar(LPath), 0, LOAD_WITH_ALTERED_SEARCH_PATH);
   {$ENDIF}
 end;
 
 function PdbMySQLPluginDir(const ALibrary: string): string;
+var
+  LFolder: string;
 begin
   Result := '';
-  if ExtractFilePath(ALibrary) = '' then
+  LFolder := ExtractFilePath(NativeLibraryPath(ALibrary));
+  if LFolder = '' then
     Exit;
-  Result := ExtractFilePath(ALibrary) + 'plugin';
+  Result := LFolder + 'plugin';
   if not DirectoryExists(Result) then
     Result := '';
 end;
