@@ -52,7 +52,7 @@ end;  // the connection goes back to the pool when LQuery and LScope are release
   writing an adapter for another component, using another database.
 - [**Samples**](samples/README.md): five console programs, each one source for both compilers.
 
-Current version: **0.5.0**. While it is 0.x the API may still change between minor
+Current version: **0.5.1**. While it is 0.x the API may still change between minor
 versions; every change is listed in the [changelog](CHANGELOG.md).
 
 ## Status
