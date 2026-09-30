@@ -6,6 +6,8 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-30
+
 ### Added
 
 - Offset paging (`PascalDb.Paging`): `TPageRequest` (page and limit normalized: page below 1,
@@ -211,6 +213,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.6.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.4.0...v0.4.1
