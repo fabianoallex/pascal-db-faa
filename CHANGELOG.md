@@ -6,6 +6,12 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Added
+
+- Samples: `Samples.CityRepository.FindByStatePaged` (a `COUNT` plus the page query with
+  `PdbPagingClause`), shown page by page in sample 02 on every database and checked against the
+  mock in sample 01; `tools/test_samples_docker.sh` checks the pages.
+
 ## [0.6.0] - 2026-09-30
 
 ### Added

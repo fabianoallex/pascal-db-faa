@@ -163,6 +163,12 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
     grep -q "^Could not connect" /t/run-Quickstart.log && [ $i -lt 6 ] || exit 1
     echo "(could not connect yet; retrying in 3 s)"; sleep 3
   done
+  # Paging: 5 cities in SP, 2 per page, in name order on every database.
+  grep -q "page 1 of 3: Campinas, Guarulhos" /t/run-Quickstart.log \
+    && grep -q "page 2 of 3: Osasco, Santos" /t/run-Quickstart.log \
+    && grep -q "page 3 of 3: " /t/run-Quickstart.log \
+    && grep -q "(5 cities)" /t/run-Quickstart.log \
+    || { echo "unexpected pages"; exit 1; }
   run Migrations
   grep -q "applied 5; schema version now: 5" /t/run-Migrations.log || { echo "expected 5 migrations applied"; exit 1; }
   run Migrations

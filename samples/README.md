@@ -7,8 +7,8 @@ concepts each one shows.
 
 | Sample | Shows | Needs a database |
 |---|---|---|
-| [01-mock-repository](01-mock-repository/MockRepository.dpr) | A repository that only knows `IDBFactory`, checked against `TMockDBFactory`: canned results, recorded executions and parameters | No |
-| [02-quickstart](02-quickstart/Quickstart.dpr) | Configuration and factory, the acquire / start / commit / rollback pattern, SQL by key with one version per database, the same repository on a real database, a batch rolled back as a whole, error handling | Yes |
+| [01-mock-repository](01-mock-repository/MockRepository.dpr) | A repository that only knows `IDBFactory`, checked against `TMockDBFactory`: canned results, recorded executions and parameters, a paged query | No |
+| [02-quickstart](02-quickstart/Quickstart.dpr) | Configuration and factory, the acquire / start / commit / rollback pattern, SQL by key with one version per database, the same repository on a real database, a batch rolled back as a whole, a state's cities read page by page (the paging clause written by each database's dialect), error handling | Yes |
 | [03-migrations](03-migrations/Migrations.dpr) | Versioned migrations (`TDBMigrationEngine`): `IsDDL` and why DDL and DML go in separate migrations, progress events through a method, running twice applies nothing; SQL in `.sql` files embedded as resources (`build_sql_res.py`), with a folder that overrides them during development | Yes |
 | [04-optionals](04-optionals/Optionals.dpr) | `INullXxx` / `IOptXxx` / `IOptNullXxx` as parameters and column reads; SQL templates shaped by them: optional filters (`ApplyFilter`, `${NAME_OP}`), partial updates where Undefined leaves a column alone and Null clears it (`ProcessTag`), printing the SQL each case produces | Yes |
 | [05-pool](05-pool/PoolUnderLoad.dpr) | The connection pool under concurrent load (worker threads): growth up to the limit, callers waiting their turn, `EPoolTimeoutException` when the wait runs out, the idle sweep; observed through its events (thread-safe handler) and `GetSnapshot` | Yes |

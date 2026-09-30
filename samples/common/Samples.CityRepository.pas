@@ -9,6 +9,11 @@ unit Samples.CityRepository;
   with TMockDBFactory the key itself is the SQL text, which is what the mock
   matches its canned results and recorded executions against.
 
+  FindByStatePaged shows offset paging (PascalDb.Paging): a COUNT with the
+  same filter, then the page query with the clause the connection's dialect
+  writes into its PAGE literal. With the mock, the clause never reaches
+  the key, so a test registers the rows of the page it checks.
+
   Every method follows the library's usage pattern: acquire a query from the
   pool together with its scope transaction, start the transaction, commit on
   success and roll back on any exception. The query and its connection go
@@ -20,7 +25,8 @@ interface
 
 uses
   SysUtils,
-  PascalDb.Interfaces;
+  PascalDb.Interfaces,
+  PascalDb.Paging;
 
 type
   TCity = record
@@ -35,6 +41,7 @@ type
   private
     FFactory: IDBFactory;
     class function Normalized(const ACity: TCity): TCity; static;
+    class function ReadCities(const AResult: IQueryResult): TArray<TCity>; static;
   public
     constructor Create(const AFactory: IDBFactory);
     /// Validates and inserts one city (State is trimmed and upper-cased).
@@ -43,6 +50,8 @@ type
     procedure InsertAll(const ACities: array of TCity);
     /// Cities of AState, ordered by name.
     function FindByState(const AState: string): TArray<TCity>;
+    /// One page of the cities of AState, ordered by name, with the total.
+    function FindByStatePaged(const AState: string; const APage: TPageRequest): TPage<TCity>;
     function Count: Integer;
   end;
 
@@ -113,30 +122,61 @@ begin
   end;
 end;
 
+class function TCityRepository.ReadCities(const AResult: IQueryResult): TArray<TCity>;
+var
+  LCount: Integer;
+begin
+  SetLength(Result, AResult.RecordCount);
+  LCount := 0;
+  while not AResult.Eof do
+  begin
+    Result[LCount] := City(AResult.Strings['CODE'], AResult.Strings['NAME'],
+      AResult.Strings['STATE']);
+    Inc(LCount);
+    AResult.Next;
+  end;
+  SetLength(Result, LCount);
+end;
+
 function TCityRepository.FindByState(const AState: string): TArray<TCity>;
 var
   LQuery: IQuery;
   LScope: IScopeTransaction;
-  LResult: IQueryResult;
-  LCount: Integer;
 begin
-  Result := nil;
   LScope := FFactory.GetPool.AcquireQuery(LQuery);
   LScope.StartTransaction;
   try
     LQuery.Sql := FFactory.SqlLoader['CITY.BY_STATE'].SQL;
     LQuery.Params.Strings['STATE'] := UpperCase(Trim(AState));
-    LResult := LQuery.Open;
-    SetLength(Result, LResult.RecordCount);
-    LCount := 0;
-    while not LResult.Eof do
-    begin
-      Result[LCount] := City(LResult.Strings['CODE'], LResult.Strings['NAME'],
-        LResult.Strings['STATE']);
-      Inc(LCount);
-      LResult.Next;
-    end;
-    SetLength(Result, LCount);
+    Result := ReadCities(LQuery.Open);
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+function TCityRepository.FindByStatePaged(const AState: string;
+  const APage: TPageRequest): TPage<TCity>;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LState: string;
+begin
+  LState := UpperCase(Trim(AState));
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    // The total, with the same filter; in the same transaction as the page.
+    LQuery.Sql := FFactory.SqlLoader['CITY.COUNT_BY_STATE'].SQL;
+    LQuery.Params.Strings['STATE'] := LState;
+    Result.Meta := TPageMeta.Create(APage, LQuery.Open.Int64s['TOTAL']);
+
+    // The page: LIMIT/OFFSET, ROWS or OFFSET/FETCH, as the database needs.
+    LQuery.Sql := FFactory.SqlLoader['CITY.BY_STATE_PAGED']
+      .ReplaceLiteral('PAGE', PdbPagingClause(LScope, APage)).SQL;
+    LQuery.Params.Strings['STATE'] := LState;
+    Result.Items := ReadCities(LQuery.Open);
     LScope.Commit;
   except
     LScope.Rollback;

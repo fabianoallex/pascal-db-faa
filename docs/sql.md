@@ -141,8 +141,12 @@ binding fails with `Parameter "..." not found` (gotcha 26 in [`CLAUDE.md`](../CL
 
 ## Paging
 
-`PascalDb.Paging` pages a query by offset. The SQL marks where the clause goes with a `${PAGE}`
-literal, after the `ORDER BY`:
+`PascalDb.Paging` pages a query by offset (running in
+[sample 02](../samples/02-quickstart/Quickstart.dpr), `PrintStatePages`, on every database; the
+repository method is `FindByStatePaged` in
+[`Samples.CityRepository`](../samples/common/Samples.CityRepository.pas), checked against the
+mock in sample 01). The SQL marks where the clause goes with a `${PAGE}` literal, after the
+`ORDER BY`:
 
 ```sql
 SELECT CODE, NAME, STATE FROM CITIES

@@ -32,6 +32,7 @@ uses
   SysUtils,
   PascalDb.Interfaces,
   PascalDb.Mock,
+  PascalDb.Paging,
   Samples.CityRepository;
 
 var
@@ -144,6 +145,36 @@ begin
   end;
 end;
 
+procedure FindByStatePagedReturnsPageAndTotal;
+var
+  LMock: TMockDBFactory;
+  LFactory: IDBFactory;
+  LRepo: TCityRepository;
+  LPage: TPage<TCity>;
+begin
+  Writeln('FindByStatePaged returns the page''s rows and the total');
+  LMock := TMockDBFactory.Create;
+  LFactory := LMock;
+  // The mock doesn't run the paging clause: register the total and the rows
+  // of the page being checked (page 2 of 3, two per page).
+  LMock.AddResult('CITY.COUNT_BY_STATE', TMockQueryResult.SingleRow(['TOTAL'], [5]));
+  LMock.AddResult('CITY.BY_STATE_PAGED', TMockQueryResult.MultiRows(
+    ['CODE', 'NAME', 'STATE'],
+    [TArray<Variant>.Create('3534401', 'Osasco', 'SP'),
+     TArray<Variant>.Create('3548500', 'Santos', 'SP')]));
+  LRepo := TCityRepository.Create(LFactory);
+  try
+    LPage := LRepo.FindByStatePaged(' sp ', TPageRequest.Create(2, 2));
+    Check(LMock.LastExecution('CITY.COUNT_BY_STATE').AsString('STATE') = 'SP', 'the count uses the normalized filter');
+    Check(LMock.LastExecution('CITY.BY_STATE_PAGED').AsString('STATE') = 'SP', 'so does the page query');
+    Check((Length(LPage.Items) = 2) and (LPage.Items[1].Name = 'Santos'), 'the page''s rows are mapped');
+    Check((LPage.Meta.Total = 5) and (LPage.Meta.TotalPages = 3), 'total 5 in pages of 2: 3 pages');
+    Check(LPage.Meta.HasPrev and LPage.Meta.HasNext, 'page 2 has a previous and a next page');
+  finally
+    LRepo.Free;
+  end;
+end;
+
 procedure MissingResultIsReported;
 var
   LMock: TMockDBFactory;
@@ -182,6 +213,7 @@ begin
     InvalidCityNeverReachesTheDatabase;
     InsertAllRunsOneInsertPerCity;
     FindByStateMapsRows;
+    FindByStatePagedReturnsPageAndTotal;
     MissingResultIsReported;
   except
     on E: Exception do

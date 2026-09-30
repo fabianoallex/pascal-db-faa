@@ -6,8 +6,10 @@
   Steps: build the factory (Samples.Env: adapter and connection settings),
   connect (saying which settings to check when that fails), create the
   table, then use the same TCityRepository
-  that sample 01 tests against the mock: insert a batch, query it, and watch
-  a failing batch roll back as a whole.
+  that sample 01 tests against the mock: insert a batch, query it, watch
+  a failing batch roll back as a whole, and read a state's cities a page at
+  a time (the paging clause comes from the database's dialect, so the page
+  query is the same text for every database).
 
   The SQL lives in a TMemorySqlSource to keep the sample in one file; each
   script is registered under the engine's SQL directory (PG, FB or SQLITE), so the
@@ -44,6 +46,7 @@ uses
   SysUtils,
   PascalDb.Interfaces,
   PascalDb.SqlSources,
+  PascalDb.Paging,
   Samples.Env,
   Samples.CityRepository;
 
@@ -83,7 +86,12 @@ begin
       .Add(LDir, 'CITY.DELETE_ALL', 'DELETE FROM SAMPLE_CITIES')
       .Add(LDir, 'CITY.INSERT', 'INSERT INTO SAMPLE_CITIES (CODE, NAME, STATE) VALUES (:CODE, :NAME, :STATE)')
       .Add(LDir, 'CITY.BY_STATE', 'SELECT CODE, NAME, STATE FROM SAMPLE_CITIES WHERE STATE = :STATE ORDER BY NAME')
-      .Add(LDir, 'CITY.COUNT', 'SELECT COUNT(*) AS TOTAL FROM SAMPLE_CITIES');
+      .Add(LDir, 'CITY.COUNT', 'SELECT COUNT(*) AS TOTAL FROM SAMPLE_CITIES')
+      .Add(LDir, 'CITY.COUNT_BY_STATE', 'SELECT COUNT(*) AS TOTAL FROM SAMPLE_CITIES WHERE STATE = :STATE')
+      // The key ends the ORDER BY so no two rows tie: a tie could put a row
+      // on two pages, or on none.
+      .Add(LDir, 'CITY.BY_STATE_PAGED',
+        'SELECT CODE, NAME, STATE FROM SAMPLE_CITIES WHERE STATE = :STATE ORDER BY NAME, CODE ${PAGE}');
 end;
 
 // The basic pattern, with nothing around it: a query from the pool, its
@@ -112,6 +120,29 @@ begin
   Writeln('Cities in ', AState, ':');
   for LCity in ARepo.FindByState(AState) do
     Writeln('  ', LCity.Code, '  ', LCity.Name);
+end;
+
+procedure PrintStatePages(ARepo: TCityRepository; const AState: string; ALimit: Integer);
+var
+  LPage: TPage<TCity>;
+  LNumber, I: Integer;
+  LLine: string;
+begin
+  Writeln('Cities in ', AState, ', ', ALimit, ' per page:');
+  LNumber := 1;
+  repeat
+    LPage := ARepo.FindByStatePaged(AState, TPageRequest.Create(LNumber, ALimit));
+    LLine := '';
+    for I := 0 to High(LPage.Items) do
+    begin
+      if I > 0 then
+        LLine := LLine + ', ';
+      LLine := LLine + LPage.Items[I].Name;
+    end;
+    Writeln('  page ', LPage.Meta.Page, ' of ', LPage.Meta.TotalPages, ': ', LLine);
+    Inc(LNumber);
+  until not LPage.Meta.HasNext;
+  Writeln('  (', LPage.Meta.Total, ' cities)');
 end;
 
 procedure Run;
@@ -158,6 +189,13 @@ begin
     end;
     Writeln('Cities stored: ', LRepo.Count);
     PrintState(LRepo, 'SP');
+    Writeln;
+
+    LRepo.InsertAll([
+      City('3548500', 'Santos', 'SP'),
+      City('3518800', 'Guarulhos', 'SP'),
+      City('3534401', 'Osasco', 'SP')]);
+    PrintStatePages(LRepo, 'SP', 2);
   finally
     LRepo.Free;
   end;
