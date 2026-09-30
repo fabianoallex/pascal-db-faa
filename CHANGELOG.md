@@ -6,6 +6,14 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Zeos on Firebird (Firebird 3+ client API, e.g. on Linux): connections opened at the same moment
+  could corrupt memory (access violations, "Invalid index ... IMessageMetadata::getScale" from
+  another connection) or hang inside the client library. The adapter now opens Firebird
+  connections one at a time; queries and commits still run in parallel. Reproduced with 16
+  threads connecting at once (hung within 73 rounds); with the fix, 4800 connections clean.
+
 ## [0.4.0] - 2026-09-29
 
 ### Added

@@ -363,22 +363,13 @@ Package Manager under "zeos").
 
 ## Known open items
 
-- **Zeos + Firebird (Linux): connections opened at the same moment sometimes fail inside the
-  connect, with memory corruption.** Reopened on 2026-09-29. GitHub CI run 36644884746 (commit
-  `1d62aa2`, attempt 1), contract test `ConcurrentWriters_AllCommit` (4 threads, each opening a
-  pooled connection): two writers failed in the connect, one with `EAccessViolation`, the other
-  with `EZIBSQLException: Invalid index 1104090048 in function IMessageMetadata::getScale` (GDS
-  335545015, a garbage index), and heaptrc reported 26 unfreed blocks. Attempt 2 of the same
-  run passed; locally, 40 runs of the Zeos + Firebird suite with `--cpus=2` and 40 with
-  `--cpus=1` all passed. Same signature as the failures closed on 2026-09-27 (sample 05, CI run
-  36235419745: `EAccessViolation` in a worker while two connections were created; once 26
-  unfreed blocks locally), which were attributed to the `TClock`/`TSleep` race fixed in
-  `5c853c6`: that attribution was wrong or incomplete. Suspected: shared state in Zeos 8's
-  Firebird 3+ API path (`ZDbcFirebird.pas`) when two `TZConnection`s connect concurrently;
-  per-connection `IStatus`/`IUtil` there look fine, not investigated further. Never seen with
-  SQLdb, with the Windows runners (legacy API, 2.5 client) or on other databases. Next
-  occurrence: keep the CI log; a local reproduction would need a tighter loop of concurrent
-  connects than the contract suite.
+None.
+
+Closed on 2026-09-30: the rare failures with concurrent connections on Zeos + Firebird (Linux),
+sample 05 (CI run 36235419745) and `ConcurrentWriters_AllCommit` (CI run 36644884746, attempt
+1). First attributed to the `TClock`/`TSleep` race (`5c853c6`), which was a separate bug; the
+cause is concurrent `TZConnection.Connect` through the Firebird 3+ API (gotcha 36), fixed by
+serializing Firebird connects in the Zeos adapter.
 
 ---
 
@@ -677,3 +668,19 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     combinations passed, and Linux too. Without any option set, `MySQL 8.0` had passed on Linux,
     which is how it went unnoticed. Fix: `MySQL 5.7` with MariaDB Connector/C (tests and docs);
     `MySQL 8.0` only with Oracle's 8.0 client. Not measured: that client.
+
+36. **Zeos 8 + Firebird 3+ API: connections opened at the same moment corrupt memory or hang.**
+    Seen twice in CI on Linux (sample 05: an access violation in a worker; the contract test
+    `ConcurrentWriters_AllCommit`: an access violation and `Invalid index 1104090048 in function
+    IMessageMetadata::getScale` reported by another connection's `TRANSACTION COMMIT`, 26 unfreed
+    blocks), never in 80 local runs of the suite. A probe (`.ci/probe-zeosfb`, git-ignored: 16
+    threads released together, each connecting, running one SELECT and disconnecting, round after
+    round; FPC 3.2.2, Zeos 8.0.0, Debian's Firebird 3 client, Firebird 5 server, Docker `--cpus=2`)
+    reproduced the same errors within 45 rounds and then hung: one thread stuck on a mutex inside
+    fbclient, under `IStatement.free` of the `SET BIND OF DECFLOAT TO LEGACY` that
+    `TZFirebirdConnection.Open` runs (`ZDbcFirebird.pas:799`). With only `Connect` serialized
+    (queries, commits and disconnects still in parallel): 4800 connections, 0 errors, 0 leaks;
+    with `FirebirdAPI=legacy`: the same. Whether the fault is in Zeos or in fbclient wasn't
+    isolated. Fix: the Zeos adapter opens Firebird connections one at a time (a process-wide
+    lock around `Connect`); through the adapter, 4800 connections clean at `--cpus=2` and
+    `--cpus=1`. The legacy API (the Windows runs, with a 2.5 client) and SQLdb never showed it.

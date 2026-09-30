@@ -101,7 +101,19 @@
     MySQL/MariaDB an expired lock wait undoes only the statement, not the
     transaction (unless the server runs with innodb_rollback_on_timeout).
     Firebird 5 reports an expired lock timeout as isc_deadlock (measured on
-    Linux, Firebird 3 client API). }
+    Linux, Firebird 3 client API).
+  - Firebird connections are opened one at a time (a process-wide lock around
+    TZConnection.Connect). Several opened at the same moment through the
+    Firebird 3+ API corrupted memory: access violations, "Invalid index ...
+    in function IMessageMetadata::getScale" reported by another connection's
+    COMMIT, and a thread stuck for good inside fbclient while Connect ran
+    SET BIND OF DECFLOAT TO LEGACY. Measured with 16 threads connecting at
+    once, Zeos 8.0.0, FPC 3.2.2, Linux, Debian's Firebird 3 client, Firebird 5
+    server: stuck within 73 rounds; with only Connect serialized (queries,
+    commits and disconnects still in parallel), 4800 connections clean, and
+    with the legacy API (FirebirdAPI=legacy) too. Whether the fault is in
+    Zeos or in fbclient wasn't isolated. A pool opens connections rarely, so
+    the lock costs little. }
 
 interface
 
@@ -248,6 +260,7 @@ procedure PdbZeosDropFirebirdDatabase(ASettings: TStrings);
 implementation
 
 uses
+  SyncObjs,
   ZExceptions,
   ZDbcInterbase6,
   ZDbcInterbase6Utils,
@@ -270,6 +283,25 @@ end;
 function IsMySQLProtocol(AConn: TZConnection): Boolean;
 begin
   Result := IsProtocol(AConn, 'mysql') or IsProtocol(AConn, 'mariadb');
+end;
+
+var
+  GFirebirdConnectLock: TCriticalSection = nil;
+
+// See the unit header: Firebird connections are opened one at a time.
+procedure ConnectZeos(AConn: TZConnection);
+begin
+  if not IsProtocol(AConn, 'firebird') then
+  begin
+    AConn.Connect;
+    Exit;
+  end;
+  GFirebirdConnectLock.Enter;
+  try
+    AConn.Connect;
+  finally
+    GFirebirdConnectLock.Leave;
+  end;
 end;
 
 // See the unit header: the lock timeout settings Zeos takes before connecting.
@@ -386,7 +418,7 @@ begin
   try
     // See the unit header: the legacy API, so the drop clears Zeos's handle.
     LConn.Properties.Values['FirebirdAPI'] := 'legacy';
-    LConn.Connect;
+    ConnectZeos(LConn);
     if not Supports(LConn.DbcConnection, IZInterbase6Connection, LLegacy) then
       raise EDatabaseError.Create('PdbZeosDropFirebirdDatabase: not a Firebird connection (Protocol must be firebird)');
     FillChar(LStatus, SizeOf(LStatus), 0);
@@ -428,7 +460,7 @@ end;
 
 procedure TZeosConnectionAdapter.Connect;
 begin
-  FConnection.Connect;
+  ConnectZeos(FConnection);
   ApplyZeosLockTimeout(FConnection, FLockTimeoutMs);
 end;
 
@@ -701,7 +733,7 @@ begin
   LConn := PdbZeosNewConnection(AConfig.ConnectionParams);
   try
     SetZeosLockTimeout(LConn, AConfig.ConnectionParams, AConfig.LockTimeoutMs);
-    LConn.Connect;
+    ConnectZeos(LConn);
     ApplyZeosLockTimeout(LConn, AConfig.LockTimeoutMs);
   except
     LConn.Free;
@@ -740,5 +772,11 @@ constructor TZeosFactory.Create(const AConfig: IDatabaseConfig;
 begin
   inherited Create(AConfig, TZeosProvider.Create, AContextTransactionProvider, AOnPoolEvent, AOnStatement);
 end;
+
+initialization
+  GFirebirdConnectLock := TCriticalSection.Create;
+
+finalization
+  GFirebirdConnectLock.Free;
 
 end.
