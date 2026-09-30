@@ -413,10 +413,9 @@ Format: symptom → cause → fix. Also recorded in the skill: 1–4, 7 in
 "Generics / RTL collections", 18
 in "Types", 19 in "Resource files" and 20 in "Threading / interop"; 5–6 in
 the compat adapter bullet of `SKILL.md` ("Mirrored tests"); 8 in "Encoding"; 9 in the
-`lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14, 16, 21–32 and 34–36 in "Database access"; 12
+`lazbuild` bullets; 10 in the tests/CI sections; 11, 13, 14, 16, 21–32 and 34–42 in "Database access"; 12
 and 15 in the tests section (`TearDown`, `finalization`). The skill links to this repository
-(https://github.com/fabianoallex/pascal-db-faa) from each of them. 37–42 are not in the skill
-yet.
+(https://github.com/fabianoallex/pascal-db-faa) from each of them.
 
 1. **`TDictionary.Create(nil)` raises an Access Violation on FPC.** Symptom: AV in
    `FindBucketIndex` (`generics.dictionaries.inc`) on the first `Add`/`TryGetValue`: 30 of 158
