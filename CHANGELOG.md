@@ -6,6 +6,8 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-30
+
 ### Fixed
 
 - Zeos on Firebird (Firebird 3+ client API, e.g. on Linux): connections opened at the same moment
@@ -163,6 +165,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.4.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.1.0...v0.2.0
