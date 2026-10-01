@@ -118,7 +118,7 @@ PascalDb.lpg            Lazarus project group
 - Delphi: open `PascalDb.groupproj` and run `PascalDb.UnitTests` (Community Edition can't
   compile from the command line).
 
-Conventions, the Delphi × FPC gotchas found so far and open items: see `CLAUDE.md`.
+Conventions, the Delphi × FPC gotchas found so far: see `docs/gotchas.md`; open items: `CLAUDE.md`.
 
 ## License
 

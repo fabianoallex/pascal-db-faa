@@ -95,7 +95,7 @@ in general. None of them was measured here on a database other than the three su
   through the DataSet adapters, since booleans convert through Variant); `NUMERIC` may be stored
   as floating point (as in SQLite); `BIGINT` may be spelled otherwise.
 - **Text encoding.** The connection character set and the column types decide whether non-ASCII
-  text survives; on Delphi, see gotcha 13 in [`CLAUDE.md`](../CLAUDE.md).
+  text survives; on Delphi, see gotcha 13 in [`gotchas.md`](gotchas.md).
 - **Parameters in the SQL text.** How the driver finds `:NAME` can depend on the database's
   quoting rules (gotcha 26: SQLdb loses parameters after a `'\'` on some connectors).
 - **Concurrency.** Locking and waiting for a lock differ; `ConcurrentWriters_AllCommit` checks
@@ -122,6 +122,6 @@ it against another database:
 
 A failing test is either a difference to handle in your SQL or dialect (most of the list above),
 or a driver quirk the adapter should handle, as the existing adapters do for the three supported
-databases (their unit headers and the gotchas in [`CLAUDE.md`](../CLAUDE.md) record each one).
+databases (their unit headers and the gotchas in [`gotchas.md`](gotchas.md) record each one).
 If you get the suite green on another database, the dialect and the environment changes are
 welcome as a contribution: that is how a database becomes supported.

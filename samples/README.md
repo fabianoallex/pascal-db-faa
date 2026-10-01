@@ -28,7 +28,7 @@ Or, with no server at all, `PASCALDB_SAMPLE_ENGINE=sqlite`: the database is the 
 `pascaldb_samples.sqlite` in the current folder (or `PASCALDB_SAMPLE_DATABASE`). FireDAC
 (Delphi) has SQLite built in; SQLdb and Zeos load `sqlite3.dll` / `libsqlite3.so.0`, and on
 Windows it must be a build with the column-metadata functions, such as the official one from
-sqlite.org (see gotcha 23 in `CLAUDE.md`).
+sqlite.org (see gotcha 23 in `docs/gotchas.md`).
 
 Settings come from environment variables (`PASCALDB_SAMPLE_ENGINE`, `_HOST`, `_PORT`,
 `_DATABASE`, `_USER`, `_PASSWORD`, `_CLIENT`); `common/Samples.Env.pas` documents them.

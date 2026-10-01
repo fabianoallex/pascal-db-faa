@@ -58,7 +58,7 @@ and link it into the program on both compilers:
 
 Rebuild the `.res` after editing a `.sql` file. Give it a name different from the program's
 and keep it out of the program's folder: FPC with `-FU` links a same-named `.res` from the
-program folder instead of the one in the `$R` path (gotcha 19 in [`CLAUDE.md`](../CLAUDE.md)).
+program folder instead of the one in the `$R` path (gotcha 19 in [`gotchas.md`](gotchas.md)).
 
 ### Overriding with a folder while developing
 
@@ -137,7 +137,7 @@ LPattern := StringReplace(StringReplace(StringReplace(AText,
 
 With `ESCAPE '\'`, SQLdb's SQLite and PostgreSQL connectors read `\'` as an escaped quote while
 looking for parameters, and every parameter after it disappears without an error, until
-binding fails with `Parameter "..." not found` (gotcha 26 in [`CLAUDE.md`](../CLAUDE.md)).
+binding fails with `Parameter "..." not found` (gotcha 26 in [`gotchas.md`](gotchas.md)).
 
 ## Paging
 

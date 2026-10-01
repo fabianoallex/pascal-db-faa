@@ -25,6 +25,6 @@ Free Pascal (see [`samples/README.md`](../samples/README.md)).
   run by hand in the IDE (Delphi Community Edition can't compile from the command line);
   see the README for what was validated where.
 
-[`CLAUDE.md`](../CLAUDE.md) holds the conventions for working on the library itself and
-the Delphi × FPC behavior differences found by measurement ("Gotchas found"). These guides
-link to it where a gotcha affects how you use the library.
+[`CLAUDE.md`](../CLAUDE.md) holds the conventions for working on the library itself, and
+[`gotchas.md`](gotchas.md) the Delphi × FPC and driver behavior differences found by
+measurement. These guides link to the latter where a gotcha affects how you use the library.

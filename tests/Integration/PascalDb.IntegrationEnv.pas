@@ -18,7 +18,7 @@
     PASCALDB_IT_HOST      server host (default localhost, over TCP). Firebird:
                           'local' = the local protocol (path only), which
                           fails intermittently with concurrent connections on
-                          Firebird 2.5 (CLAUDE.md, gotcha 29). Unused by
+                          Firebird 2.5 (docs/gotchas.md, gotcha 29). Unused by
                           SQLite
     PASCALDB_IT_PORT      server port (default: the driver's; PostgreSQL 5432,
                           MySQL/MariaDB 3306, SQL Server 1433)
@@ -206,7 +206,7 @@ begin
   // Firebird defaults to TCP too, not the local protocol: with Firebird 2.5
   // on Windows, several connections opened at once through the local
   // protocol sometimes failed with "connection lost to database" (see
-  // CLAUDE.md, gotcha 29). 'local' still selects it.
+  // docs/gotchas.md, gotcha 29). 'local' still selects it.
   Result := Env('PASCALDB_IT_HOST', 'localhost');
   if SameText(Result, 'local') then
     Result := '';

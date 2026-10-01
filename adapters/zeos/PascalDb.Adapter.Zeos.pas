@@ -686,7 +686,7 @@ var
 begin
   if FCurrencyAsDouble then
   begin
-    LValue := AValue; // an assignment converts (a Double(...) cast may not: CLAUDE.md, gotcha 18)
+    LValue := AValue; // an assignment converts (a Double(...) cast may not: docs/gotchas.md, gotcha 18)
     FParams.ParamByName(AName).AsDouble := LValue;
   end
   else

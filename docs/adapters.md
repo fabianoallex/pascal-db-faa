@@ -100,7 +100,7 @@ program.
   default names weren't measured.
 - **SQLite on Windows (SQLdb, Zeos):** the DLL must export the column-metadata functions, such
   as the official one from sqlite.org. Other builds (e.g. the one shipped with Python) make every
-  query fail with an access violation at `$0` (gotcha 23 in [`CLAUDE.md`](../CLAUDE.md)).
+  query fail with an access violation at `$0` (gotcha 23 in [`gotchas.md`](gotchas.md)).
 - **MySQL/MariaDB client: MariaDB Connector/C works for both servers.** On Windows, take
   `libmariadb.dll` from its installer (an administrative install, `msiexec /a`, extracts it
   without installing) and keep the `plugin` folder next to it: MySQL 8's default authentication
@@ -233,7 +233,7 @@ program using the library must:
    them as UTF-8.
 
 Delphi needs none of this: its `string` is UTF-16. Details and measurements: "Runtime
-requirements for FPC applications" in [`CLAUDE.md`](../CLAUDE.md).
+requirements for FPC applications" in [`gotchas.md`](gotchas.md).
 
 ## Another driver
 

@@ -165,7 +165,7 @@ scope are not: each thread acquires its own and releases it when done. Workers i
 
 On FPC, `Output` is per thread (a `threadvar`): with the output redirected on Linux, lines from
 different threads came out cut in the middle even under a lock. Call `Flush(Output)` inside the
-lock, after `Writeln` (gotcha 20 in [`CLAUDE.md`](../CLAUDE.md)).
+lock, after `Writeln` (gotcha 20 in [`gotchas.md`](gotchas.md)).
 
 ## Database work off the UI thread
 
