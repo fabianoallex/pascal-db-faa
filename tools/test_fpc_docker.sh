@@ -16,14 +16,19 @@ MOUNT="$ROOT"
 command -v cygpath >/dev/null 2>&1 && MOUNT="$(cygpath -w "$ROOT")"
 
 cd "$ROOT"
+# The jsonmapper bridge's tests build the submodule's sources.
+[ -f external/pascal-jsonmapper-faa/src/PascalJsonMapper.Mapper.pas ] \
+  || { echo "external/pascal-jsonmapper-faa is empty: git submodule update --init"; exit 1; }
 python tools/gen_fpc_mirror.py --check
 python tools/build_sql_res.py tests/Unit/sql tests/Unit/sql/PascalDbTestSql.res --check
 
 MSYS_NO_PATHCONV=1 docker run --rm -v "$MOUNT:/src:ro" "$IMAGE" sh -c '
   set -e
-  mkdir -p /t/u && cp -r /src/src /src/tests /t/
+  mkdir -p /t/u /t/external && cp -r /src/src /src/tests /src/bridges /t/
+  cp -r /src/external/pascal-jsonmapper-faa /t/external/
+  M=/t/external/pascal-jsonmapper-faa/src
   cd /t/tests/Unit/fpc
-  fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src -FU/t/u -gh -gl -o/t/runner PascalDbUnitTestsFpc.lpr > /t/build.log 2>&1 \
+  fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src -Fu/t/bridges/jsonmapper -Fu$M -Fi$M -FU/t/u -gh -gl -o/t/runner PascalDbUnitTestsFpc.lpr > /t/build.log 2>&1 \
     || { grep -iE "error|fatal" /t/build.log | head -30; exit 1; }
   cd /t
   HEAPTRC="log=/t/heap.txt" ./runner --all --format=plain > /t/run.log 2>&1 || true

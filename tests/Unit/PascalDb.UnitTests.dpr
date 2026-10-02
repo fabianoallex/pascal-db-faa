@@ -33,6 +33,9 @@ uses
   PascalDb.Adapter.Base in '..\..\src\PascalDb.Adapter.Base.pas',
   PascalDb.Adapter.DataSet in '..\..\src\PascalDb.Adapter.DataSet.pas',
   PascalDb.Batch in '..\..\src\PascalDb.Batch.pas',
+  PascalJsonMapper.Json in '..\..\external\pascal-jsonmapper-faa\src\PascalJsonMapper.Json.pas',
+  PascalJsonMapper.Mapper in '..\..\external\pascal-jsonmapper-faa\src\PascalJsonMapper.Mapper.pas',
+  PascalDb.JsonMapper.Optionals in '..\..\bridges\jsonmapper\PascalDb.JsonMapper.Optionals.pas',
   PascalDb.DUnitXCompat in 'PascalDb.DUnitXCompat.pas',
   PascalDb.OptionalsTests in 'PascalDb.OptionalsTests.pas',
   PascalDb.ClockCacheTests in 'PascalDb.ClockCacheTests.pas',
@@ -42,7 +45,8 @@ uses
   PascalDb.SqlSourcesTests in 'PascalDb.SqlSourcesTests.pas',
   PascalDb.AdapterBaseTests in 'PascalDb.AdapterBaseTests.pas',
   PascalDb.PagingTests in 'PascalDb.PagingTests.pas',
-  PascalDb.BatchTests in 'PascalDb.BatchTests.pas';
+  PascalDb.BatchTests in 'PascalDb.BatchTests.pas',
+  PascalDb.JsonMapperOptionalsTests in 'PascalDb.JsonMapperOptionalsTests.pas';
 
 // SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
 {$R 'sql\PascalDbTestSql.res'}

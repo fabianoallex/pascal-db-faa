@@ -8,7 +8,7 @@ Free Pascal (see [`samples/README.md`](../samples/README.md)).
 |---|---|---|
 | [1. Getting started](getting-started.md) | The factory and its configuration, the acquire / start / commit / rollback pattern, reading results, nested scopes | 02 |
 | [2. SQL by key](sql.md) | `SqlLoader['KEY']`, one SQL folder per database, SQL sources (resources, directory, memory, composite), template tags and `${...}` literals, paging, statements run many times and batches (`IBatch`) | 02, 03, 04 |
-| [3. Optional and nullable values](optionals.md) | `INullXxx`, `IOptXxx`, `IOptNullXxx` as parameters and column reads; optional filters and partial updates | 04 |
+| [3. Optional and nullable values](optionals.md) | `INullXxx`, `IOptXxx`, `IOptNullXxx` as parameters and column reads; optional filters and partial updates; in JSON DTOs (pascal-jsonmapper-faa) | 04 |
 | [4. Migrations](migrations.md) | `TDBMigrationEngine`, `IsDDL`, the migrations table, how scripts are split | 03 |
 | [5. Testing with the mock](testing-with-the-mock.md) | `TMockDBFactory`: canned results, recorded executions, and its lifetime | 01 |
 | [6. Errors](errors.md) | What raises what, and when: connecting, a connection lost in use, data errors, pool timeouts | 02, 05 |

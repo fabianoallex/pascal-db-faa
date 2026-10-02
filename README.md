@@ -90,6 +90,8 @@ tests/Integration/fpc-zeos/  FPCUnit runner on Zeos (same mirror)
 adapters/sqldb/         SQLdb adapter (package pascal_db_faa_sqldb.lpk)
 adapters/firedac/       FireDAC adapter (Delphi)
 adapters/zeos/          Zeos adapter (both; package pascal_db_faa_zeos.lpk)
+bridges/jsonmapper/     optionals in JSON for pascal-jsonmapper-faa (package pascal_db_faa_jsonmapper.lpk)
+external/               git submodule: pascal-jsonmapper-faa
 docs/                   usage guides (start at docs/README.md)
 samples/                console samples, one source for both compilers (see samples/README.md)
 tools/                  gen_fpc_mirror.py, build_sql_res.py, test_*.sh, ci-test.sh
@@ -98,6 +100,9 @@ PascalDb.lpg            Lazarus project group
 ```
 
 ## Tests
+
+The unit suite builds the pascal-jsonmapper-faa submodule: clone with `--recursive`, or run
+`git submodule update --init` once.
 
 - FPC (Windows): `sh tools/test_fpc.sh`
 - FPC (Linux, via Docker): `sh tools/test_fpc_docker.sh`

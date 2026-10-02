@@ -135,6 +135,27 @@ as integer literals. Firebird uses `ROWS m TO n` because `OFFSET/FETCH` needs 3.
 
 ---
 
+## JSON bridge (pascal-jsonmapper-faa)
+
+`bridges/jsonmapper/PascalDb.JsonMapper.Optionals.pas` (package `pascal_db_faa_jsonmapper.lpk`)
+is the `IJsonConverter` for the 27 optional interfaces, written from the guide
+`external/pascal-jsonmapper-faa/docs/converters.md`. The mapper is a **git submodule**
+(`external/pascal-jsonmapper-faa`); the core never uses it, only the bridge does. The unit
+suites build it (lpi requires the bridge package; the Delphi dproj has the submodule's `src` and
+`bridges/jsonmapper` on its search path; `test_fpc_docker.sh` copies both into the container), so
+a clone without `git submodule update --init` can't run them. CI checks out with
+`submodules: true`.
+
+Decided 2026-10-02 (different from `Common.JsonMapper` in delphi-api-infra-faa, pinned by
+`PascalDb.JsonMapperOptionalsTests`): `null` into an `IOptXxx` raises; a `nil` `INullXxx` is
+written as `null`. Also: an `IOptXxx` holding Null writes `null`; GUIDs go out with braces and are
+read with or without; `DecimalPlaces` isn't in the JSON. Values are fetched through the declared
+interface (`IOptString`...), never `IOptional<T>` (one GUID for every specialization), and read
+from `TValue` raw data, as the mapper does. Number/date text is the mapper's (`1E300`,
+`2000-01-01T00:00:00` without `.000`).
+
+---
+
 ## Runtime requirements for FPC applications
 
 Two things an FPC program using this library must do, or non-ASCII text silently becomes

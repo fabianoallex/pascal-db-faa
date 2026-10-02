@@ -132,6 +132,52 @@ if LEmail.IsNull then ...
 `NullableDateTimes` and `NullableBooleans` exist on `IQueryResult`. The plain getters
 (`Strings[...]`, ...) read a NULL as `''` / `0` / `False`.
 
+## Optionals in JSON DTOs
+
+With [pascal-jsonmapper-faa](https://github.com/fabianoallex/pascal-jsonmapper-faa), a DTO can
+declare optional properties and read and write them as JSON. The converter lives in a unit of
+its own, `PascalDb.JsonMapper.Optionals` (`bridges/jsonmapper`, Lazarus package
+`pascal_db_faa_jsonmapper.lpk`), so the core doesn't depend on the mapper. The mapper is a
+git submodule in `external/pascal-jsonmapper-faa` (`git submodule update --init`); on Delphi,
+add `external/pascal-jsonmapper-faa/src` and `bridges/jsonmapper` to the search path.
+
+Using the unit is all it takes: its initialization registers the converter on
+`TJsonMapper.Shared`. A mapper created by hand gets it from `RegisterOptionalsConverter(M)`.
+
+```pascal
+uses PascalJsonMapper.Mapper, PascalDb.Optionals, PascalDb.JsonMapper.Optionals;
+
+{$M+}
+TCustomerPatch = class(TInterfacedObject, ICustomerPatch)
+published
+  property Name: IOptString read FName write FName;          // may be absent, never null
+  property Email: IOptNullString read FEmail write FEmail;   // absent, null or a value
+  property Phone: INullString read FPhone write FPhone;      // always there, maybe null
+end;
+{$M-}
+
+LPatch := TJsonMapper.Shared.FromJson<ICustomerPatch>('{"email":null}');
+// Name = nil (TOptionals.Safe: Undefined), Email = Null, Phone = nil (Safe: Null)
+```
+
+| | reading `null` | writing `nil` / Undefined | writing Null |
+|---|---|---|---|
+| `IOptXxx` | **error** (`EJsonMapperError`, `$.name: ...`) | member omitted | `null` |
+| `INullXxx` | Null | **`null`** | `null` |
+| `IOptNullXxx` | Null | member omitted | `null` |
+
+An absent member leaves the property untouched (`nil` in a fresh DTO), so `TOptionals.Safe`
+gives Undefined or Null. All 9 value types work; the value follows the mapper's own rules
+(range checks, exact float text, ISO 8601 dates, the JSON path in errors). A GUID is written
+with braces (`GUIDToString`) and read with or without them. `DecimalPlaces` of a Single/Double
+stays out of the JSON.
+
+Two of these rules differ from `delphi-api-infra-faa`'s `Common.JsonMapper`, on purpose:
+it stored `null` into an `IOptXxx` as Null (a state the type can't express), and it omitted a
+`nil` `INullXxx` (which `TOptionals.Safe` reads as Null, so `null` is what goes out now). An
+`IOptXxx` holding Null (`TOptNullXxx.Null` assigned to it compiles) is written as `null`,
+not as its `''`/`0`.
+
 ## Next
 
 [Guide 4](migrations.md): creating and evolving the tables these queries run against.

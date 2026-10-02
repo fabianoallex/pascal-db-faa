@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <PathDelim Value="\"/>
+    <Name Value="pascal_db_faa_jsonmapper"/>
+    <Author Value="Fabiano Arndt"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <PathDelim Value="\"/>
+      <SearchPaths>
+        <IncludeFiles Value="..\src"/>
+        <OtherUnitFiles Value="..\bridges\jsonmapper"/>
+        <UnitOutputDirectory Value="lib\jsonmapper\$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Description Value="Bridge between pascal-db-faa and pascal-jsonmapper-faa (Delphi and Free Pascal/Lazarus): a JSON converter for the optional types (IOptXxx/INullXxx/IOptNullXxx), registered on TJsonMapper.Shared. Requires the pascaljsonmapper_pkg package (submodule external/pascal-jsonmapper-faa)."/>
+    <License Value="MIT"/>
+    <Version Minor="7"/>
+    <Files>
+      <Item>
+        <Filename Value="..\bridges\jsonmapper\PascalDb.JsonMapper.Optionals.pas"/>
+        <UnitName Value="PascalDb.JsonMapper.Optionals"/>
+      </Item>
+    </Files>
+    <RequiredPkgs>
+      <Item>
+        <PackageName Value="pascal_db_faa"/>
+        <DefaultFilename Value="pascal_db_faa.lpk"/>
+      </Item>
+      <Item>
+        <PackageName Value="pascaljsonmapper_pkg"/>
+        <DefaultFilename Value="..\external\pascal-jsonmapper-faa\packages\pascaljsonmapper_pkg.lpk"/>
+      </Item>
+      <Item>
+        <PackageName Value="FCL"/>
+      </Item>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+      <UseFileFilters Value="True"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>

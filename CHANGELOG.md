@@ -6,6 +6,17 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Added
+
+- JSON for the optional types, through [pascal-jsonmapper-faa](https://github.com/fabianoallex/pascal-jsonmapper-faa)
+  (git submodule in `external/pascal-jsonmapper-faa`): `PascalDb.JsonMapper.Optionals`
+  (`bridges/jsonmapper`, Lazarus package `pascal_db_faa_jsonmapper.lpk`) registers a converter
+  for the 27 `IOptXxx`/`INullXxx`/`IOptNullXxx` interfaces on `TJsonMapper.Shared`. `null` into
+  an `IOptXxx` raises `EJsonMapperError` with the JSON path, and a `nil` `INullXxx` is written
+  as `null` (`delphi-api-infra-faa`'s `Common.JsonMapper` accepted the first and omitted the
+  second). The core doesn't use the mapper. Unit tests `PascalDb.JsonMapperOptionalsTests`;
+  the unit suite now needs the submodule (`git submodule update --init`).
+
 ## [0.7.0] - 2026-10-02
 
 ### Added

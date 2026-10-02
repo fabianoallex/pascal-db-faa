@@ -33,6 +33,10 @@
         <DefaultFilename Value="..\..\..\packages\pascal_db_faa.lpk"/>
       </Item>
       <Item>
+        <PackageName Value="pascal_db_faa_jsonmapper"/>
+        <DefaultFilename Value="..\..\..\packages\pascal_db_faa_jsonmapper.lpk"/>
+      </Item>
+      <Item>
         <PackageName Value="FPCUnitTestRunner"/>
       </Item>
       <Item>
