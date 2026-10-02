@@ -66,7 +66,7 @@ type
 
   { TDataSetQueryBase }
 
-  TDataSetQueryBase = class(TInterfacedObject, IQuery, IQueryResult)
+  TDataSetQueryBase = class(TInterfacedObject, IQuery, IQueryResult, INativeBatchQuery)
   private
     FConn: IDBConnection;
     FTransaction: ITransaction;
@@ -97,6 +97,10 @@ type
     /// ELockConflictException); Open and ExecSql then raise
     /// ELockConflictException instead. The default recognizes nothing.
     function IsLockConflictError(E: Exception): Boolean; virtual;
+    /// Runs the query's SQL once per row of ARows as one driver operation;
+    /// called only when SupportsNativeBatch is True. The default raises
+    /// ENotSupportedException.
+    procedure DoExecBatch(const ARows: IBatchRows); virtual;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
     // IQuery
@@ -110,6 +114,11 @@ type
     procedure ExecSql;
     function GetConnection: IDBConnection;
     function GetTransaction: ITransaction;
+    // INativeBatchQuery: an adapter whose driver has an array operation
+    // overrides SupportsNativeBatch (default False: TBatch runs one ExecSql
+    // per row) and DoExecBatch. ExecBatch maps lock conflicts as ExecSql does.
+    function SupportsNativeBatch: Boolean; virtual;
+    procedure ExecBatch(const ARows: IBatchRows);
     // IQueryResult
     function GetAsBoolean(const AName: string): Boolean;
     function GetAsDateTime(const AName: string): TDateTime;
@@ -354,6 +363,30 @@ end;
 function TDataSetQueryBase.IsLockConflictError(E: Exception): Boolean;
 begin
   Result := False;
+end;
+
+function TDataSetQueryBase.SupportsNativeBatch: Boolean;
+begin
+  Result := False;
+end;
+
+procedure TDataSetQueryBase.DoExecBatch(const ARows: IBatchRows);
+begin
+  raise ENotSupportedException.Create(ClassName + ' has no native batch');
+end;
+
+procedure TDataSetQueryBase.ExecBatch(const ARows: IBatchRows);
+begin
+  try
+    DoExecBatch(ARows);
+  except
+    on E: Exception do
+    begin
+      if IsLockConflictError(E) then
+        raise ELockConflictException.Create(E);
+      raise;
+    end;
+  end;
 end;
 
 function TDataSetQueryBase.GetConnection: IDBConnection;

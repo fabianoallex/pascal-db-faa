@@ -27,8 +27,11 @@
   allows one at a time: the others must wait for the lock, not fail), a
   statement waiting for another transaction's lock giving up after
   LockTimeoutMs with ELockConflictException, statement events (the SQL, the
-  rows an Open fetched, the time, a failure), and a failed connect surfacing
-  as EDatabaseConnectException whatever the driver.
+  rows an Open fetched, the time, a failure), a failed connect surfacing
+  as EDatabaseConnectException whatever the driver, and batches (IBatch):
+  2500 rows of every type with NULLs and non-ASCII text, the query usable
+  for single statements afterwards, a rejected row rolled back with the
+  rest, and a lock wait giving up with ELockConflictException.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
   PascalDb.DUnitXCompat). The mirror in tests/Integration/fpc is generated
@@ -46,6 +49,7 @@ uses
   PascalDb.Threading,
   PascalDb.Pool,
   PascalDb.Paging,
+  PascalDb.Batch,
   PascalDb.IntegrationEnv;
 
 type
@@ -55,6 +59,7 @@ type
     procedure ExecCommitted(const ASql: string);
     function CountRows(const AWhere: string): Integer;
     procedure InsertItem(AId: Integer; const AName: string);
+    procedure CheckLockWaitGivesUp(AUseBatch: Boolean);
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -84,6 +89,9 @@ type
     procedure LockWait_GivesUpAfterLockTimeout;
     procedure StatementEvents_ReportSqlRowsTimeAndErrors;
     procedure Unreachable_AcquireRaisesConnectException;
+    procedure Batch_EveryTypeAndNulls_RoundTrip;
+    procedure Batch_RejectedRow_RaisesAndRollbackDiscardsAll;
+    procedure Batch_LockWait_GivesUpAfterLockTimeout;
   end;
 
 implementation
@@ -145,21 +153,24 @@ type
   TLockWaiter = class(TThread)
   private
     FFactory: IDBFactory;
+    FUseBatch: Boolean;
     FElapsedMs: UInt64;
     FErrorClass: string;
     FError: string;
   protected
     procedure Execute; override;
   public
-    constructor Create(const AFactory: IDBFactory);
+    // AUseBatch: the UPDATE goes through an IBatch of one row.
+    constructor Create(const AFactory: IDBFactory; AUseBatch: Boolean);
     property ElapsedMs: UInt64 read FElapsedMs;
     property ErrorClass: string read FErrorClass;
     property Error: string read FError;
   end;
 
-constructor TLockWaiter.Create(const AFactory: IDBFactory);
+constructor TLockWaiter.Create(const AFactory: IDBFactory; AUseBatch: Boolean);
 begin
   FFactory := AFactory;
+  FUseBatch := AUseBatch;
   inherited Create(False);
 end;
 
@@ -167,6 +178,7 @@ procedure TLockWaiter.Execute;
 var
   LQuery: IQuery;
   LScope: IScopeTransaction;
+  LBatch: IBatch;
   LStart: UInt64;
 begin
   LStart := 0;
@@ -174,9 +186,21 @@ begin
     LScope := FFactory.GetPool.AcquireQuery(LQuery);
     LScope.StartTransaction;
     try
-      LQuery.Sql := 'UPDATE ITEMS SET QTY = 2 WHERE ID = 700';
-      LStart := PdbTickMs;
-      LQuery.ExecSql;
+      if FUseBatch then
+      begin
+        LBatch := TBatch.New(LQuery, 'UPDATE ITEMS SET QTY = :QTY WHERE ID = :ID');
+        LBatch.Params.Integers['QTY'] := 2;
+        LBatch.Params.Integers['ID'] := 700;
+        LBatch.AddRow;
+        LStart := PdbTickMs;
+        LBatch.Execute;
+      end
+      else
+      begin
+        LQuery.Sql := 'UPDATE ITEMS SET QTY = 2 WHERE ID = 700';
+        LStart := PdbTickMs;
+        LQuery.ExecSql;
+      end;
       FElapsedMs := PdbTickMs - LStart;
       LScope.Commit;
     except
@@ -195,6 +219,7 @@ begin
           EDatabaseUnavailableException(E).OriginalMessage + ')';
     end;
   end;
+  LBatch := nil;
   LQuery := nil;
   LScope := nil;
   FFactory := nil;
@@ -899,6 +924,11 @@ begin
 end;
 
 procedure TContractTests.LockWait_GivesUpAfterLockTimeout;
+begin
+  CheckLockWaitGivesUp(False);
+end;
+
+procedure TContractTests.CheckLockWaitGivesUp(AUseBatch: Boolean);
 const
   LOCK_TIMEOUT_MS = 1000;
   // The holder releases the row after this, so a waiter that ignores the
@@ -918,7 +948,7 @@ begin
   try
     LQuery.Sql := 'UPDATE ITEMS SET QTY = 1 WHERE ID = 700';
     LQuery.ExecSql; // this transaction now holds the row (SQLite: the database's write lock)
-    LWaiter := TLockWaiter.Create(LockTimeoutFactory(LOCK_TIMEOUT_MS));
+    LWaiter := TLockWaiter.Create(LockTimeoutFactory(LOCK_TIMEOUT_MS), AUseBatch);
     try
       LStart := PdbTickMs;
       while (not LWaiter.Finished) and (PdbTickMs - LStart < HOLD_MS) do
@@ -1040,6 +1070,157 @@ begin
     Length(LOriginal) > Length(': '));
   TAssert.AssertEquals('The failed attempt must not stay counted as active', 0,
     LFactory.GetPool.GetActiveConnections);
+end;
+
+// 2500 rows through an IBatch (three sends: 1000 + 1000 + 500), every
+// parameter type, NULLs in some rows, non-ASCII text; then the same query
+// used again for single statements, which must not be left in array mode.
+procedure TContractTests.Batch_EveryTypeAndNulls_RoundTrip;
+const
+  ROWS = 2500;
+  FIRST_ID = 1000;
+  // First and last rows, around the two sends' boundaries, a non-ASCII name.
+  CHECKED: array[0..4] of Integer = (1, 1000, 1001, 2010, ROWS);
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LBatch: IBatch;
+  LResult: IQueryResult;
+  LBase: TDateTime;
+  LPrice: Currency;
+  I, K: Integer;
+
+  function NameOf(AIndex: Integer): string;
+  begin
+    if AIndex mod 10 = 0 then
+      Result := 'batch ' + IntToStr(AIndex) + ' São Paulo → ok'
+    else
+      Result := 'batch ' + IntToStr(AIndex);
+  end;
+
+begin
+  LBase := EncodeDate(2026, 10, 2) + EncodeTime(9, 0, 0, 0);
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LBatch := TBatch.New(LQuery, 'INSERT INTO ITEMS (ID, NAME, QTY, BIG, PRICE, RATIO, CREATED_AT, ACTIVE) ' +
+      'VALUES (:ID, :NAME, :QTY, :BIG, :PRICE, :RATIO, :CREATED_AT, :ACTIVE)');
+    TAssert.AssertEquals('IsNative for this adapter and database', ExpectsNativeBatch, LBatch.IsNative);
+    for I := 1 to ROWS do
+    begin
+      LBatch.Params.Integers['ID'] := FIRST_ID + I;
+      LBatch.Params.Strings['NAME'] := NameOf(I);
+      if I mod 3 = 0 then
+        LBatch.Params.NullIntegers['QTY'] := TOptNullInteger.Null
+      else
+        LBatch.Params.Integers['QTY'] := I mod 100;
+      LBatch.Params.Int64s['BIG'] := Int64(I) * 1000000000;
+      LBatch.Params.Currencies['PRICE'] := I + 0.25;
+      LBatch.Params.Doubles['RATIO'] := I / 8;
+      if I mod 5 = 0 then
+        LBatch.Params.NullDateTimes['CREATED_AT'] := TOptNullDateTime.Null
+      else
+        LBatch.Params.DateTimes['CREATED_AT'] := LBase + I / 1440; // I minutes later
+      LBatch.Params.Integers['ACTIVE'] := I mod 2;
+      LBatch.AddRow;
+    end;
+    TAssert.AssertEquals('Two sends of 1000 already went at AddRow', 500, LBatch.PendingRows);
+    LBatch.Execute;
+    LBatch := nil;
+
+    // The query again, for ordinary statements.
+    LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME)';
+    LQuery.Params.Integers['ID'] := 999;
+    LQuery.Params.Strings['NAME'] := 'after the batch';
+    LQuery.ExecSql;
+
+    LQuery.Sql := 'SELECT COUNT(*) AS TOTAL, COUNT(QTY) AS WITH_QTY, COUNT(CREATED_AT) AS WITH_DATE ' +
+      'FROM ITEMS WHERE ID > :FIRST_ID';
+    LQuery.Params.Integers['FIRST_ID'] := FIRST_ID;
+    LResult := LQuery.Open;
+    TAssert.AssertEquals('Every row', ROWS, LResult.Integers['TOTAL']);
+    TAssert.AssertEquals('QTY is NULL in every third row', ROWS - ROWS div 3, LResult.Integers['WITH_QTY']);
+    TAssert.AssertEquals('CREATED_AT is NULL in every fifth row', ROWS - ROWS div 5, LResult.Integers['WITH_DATE']);
+
+    LQuery.Sql := 'SELECT * FROM ITEMS WHERE ID = :ID';
+    for K := Low(CHECKED) to High(CHECKED) do
+    begin
+      I := CHECKED[K];
+      LQuery.Params.Integers['ID'] := FIRST_ID + I;
+      LResult := LQuery.Open;
+      TAssert.AssertFalse('Row ' + IntToStr(I) + ' must exist', LResult.IsEmpty);
+      TAssert.AssertEquals(NameOf(I), LResult.Strings['NAME']);
+      if I mod 3 = 0 then
+        TAssert.AssertTrue(LResult.NullableIntegers['QTY'].IsNull)
+      else
+        TAssert.AssertEquals(I mod 100, LResult.Integers['QTY']);
+      TAssert.AssertEquals(Int64(I) * 1000000000, LResult.Int64s['BIG']);
+      LPrice := I + 0.25; // an assignment, not a cast (docs/gotchas.md, gotcha 18)
+      TAssert.AssertEquals(LPrice, LResult.Currencies['PRICE']);
+      TAssert.AssertEquals('RATIO of row ' + IntToStr(I), I / 8, LResult.FieldValue(5), 0);
+      if I mod 5 = 0 then
+        TAssert.AssertTrue(LResult.NullableDateTimes['CREATED_AT'].IsNull)
+      else
+        TAssert.AssertEquals('CREATED_AT of row ' + IntToStr(I), LBase + I / 1440,
+          LResult.DateTimes['CREATED_AT'], 1 / 86400);
+      TAssert.AssertEquals(I mod 2, LResult.Integers['ACTIVE']);
+    end;
+    LQuery.Params.Integers['ID'] := 999;
+    TAssert.AssertEquals('after the batch', LQuery.Open.Strings['NAME']);
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+// A row the database rejects (a duplicate NAME) fails the batch with the
+// driver's data error, not as an unavailable database; the connection stays
+// in the pool, and the rollback undoes the rows sent before.
+procedure TContractTests.Batch_RejectedRow_RaisesAndRollbackDiscardsAll;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LBatch: IBatch;
+  LRaised: string;
+  LActiveBefore: Integer;
+  I: Integer;
+begin
+  LActiveBefore := FFactory.GetPool.GetActiveConnections;
+  LRaised := '';
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LBatch := TBatch.New(LQuery, 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME)', 3);
+    for I := 1 to 6 do
+    begin
+      LBatch.Params.Integers['ID'] := 3000 + I;
+      if I = 5 then
+        LBatch.Params.Strings['NAME'] := 'dup 1' // the second send has the duplicate
+      else
+        LBatch.Params.Strings['NAME'] := 'dup ' + IntToStr(I);
+      LBatch.AddRow;
+    end;
+    LBatch.Execute;
+  except
+    on E: Exception do
+      LRaised := E.ClassName;
+  end;
+  LScope.Rollback;
+  LBatch := nil;
+  LQuery := nil;
+  LScope := nil;
+  TAssert.AssertTrue('The duplicate must raise', LRaised <> '');
+  TAssert.AssertTrue('A data error must not be reported as an unavailable database (' + LRaised + ')',
+    (LRaised <> 'EDatabaseUnavailableException') and (LRaised <> 'EDatabaseConnectException'));
+  TAssert.AssertEquals('The rollback undoes every row, the first send''s too', 0, CountRows('ID > 3000'));
+  TAssert.AssertEquals('The healthy connection must not be discarded',
+    LActiveBefore, FFactory.GetPool.GetActiveConnections);
+end;
+
+procedure TContractTests.Batch_LockWait_GivesUpAfterLockTimeout;
+begin
+  CheckLockWaitGivesUp(True);
 end;
 
 initialization

@@ -198,6 +198,9 @@ program.
   ([guide 6](errors.md#locks-and-conflicts-elockconflictexception); gotcha 32).
 - On Delphi, the adapters bind strings as Unicode; a plain `AsString` on a FireDAC or Data.DB
   parameter would turn characters outside the ANSI code page into `?` (gotcha 13).
+- A batch (`IBatch`) goes to the database as FireDAC's Array DML, one operation per send; SQLdb
+  and Zeos run it one `ExecSql` per row. Same results, very different speed over a network
+  ([guide 2](sql.md#batches-ibatch); gotcha 44).
 
 ## What a Free Pascal program must do
 

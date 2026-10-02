@@ -249,6 +249,11 @@ them the driver's quirks):
   need nothing for them. Timed with `PdbTickUs`: `PdbTickMs` (`GetTickCount64`) moves in 15-16 ms
   steps on Windows (measured). No parameter values on purpose (secrets in logs; `IParams` can't
   list them).
+- Batches (`PascalDb.Batch`, `TBatch.New(Query, Sql, MaxRows)`): the rows are buffered with one
+  type per parameter and sent `MaxRows` at a time, through `INativeBatchQuery` when the adapter's
+  query says `SupportsNativeBatch` (FireDAC's Array DML), otherwise one `ExecSql` per row (SQLdb,
+  Zeos: gotcha 44). The pool's `TQueryWrapper` forwards it (`skExecBatch` event, broken-connection
+  handling). Probe that justified it: `.ci/probe-batch` (git-ignored).
 
 | Adapter | Compiler | Package / unit | Status |
 |---|---|---|---|
@@ -415,7 +420,7 @@ serializing Firebird connects in the Zeos adapter.
 
 ## Gotchas
 
-The numbered gotchas (symptom → cause → fix, 1–43) live in [`docs/gotchas.md`](docs/gotchas.md).
+The numbered gotchas (symptom → cause → fix, 1–44) live in [`docs/gotchas.md`](docs/gotchas.md).
 Read it before touching the pool, an adapter, resources or anything that differs between
 Delphi and FPC, and add new ones there, keeping the numbering. References in this file
 ("gotcha 17") point to it.

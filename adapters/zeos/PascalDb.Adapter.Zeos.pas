@@ -135,7 +135,12 @@
     connecting (in milliseconds), and errors 1222 (lock request time out) and
     1205 (deadlock victim) become ELockConflictException. Measured with 8
     threads x 2000 statements, connecting at the same time, errors included:
-    clean, no lock needed around Connect. }
+    clean, no lock needed around Connect.
+  - Batches (IBatch, PascalDb.Batch) run one ExecSql per row: Zeos's own
+    batch DML (Params.BatchDMLCount) failed on every database tested, and on
+    PostgreSQL, where INSERTs worked, it rewrites the statement with unnest()
+    (an UPDATE's WHERE then fails) and stored date-times as 0
+    (docs/gotchas.md, gotcha 44). }
 
 interface
 

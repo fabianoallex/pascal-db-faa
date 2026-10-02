@@ -29,6 +29,7 @@ uses
   PascalDb.SystemContext,
   PascalDb.Optionals,
   PascalDb.Threading,
+  PascalDb.Batch,
   Variants;
 
 type
@@ -208,7 +209,7 @@ type
 
   { TFakeQuery }
 
-  TFakeQuery = class(TInterfacedObject, IQuery)
+  TFakeQuery = class(TInterfacedObject, IQuery, INativeBatchQuery)
   private
     FSql: string;
     FTransaction: ITransaction;
@@ -216,6 +217,8 @@ type
     FOpenExceptionClass: ExceptClass;
     FOpenExceptionMsg: string;
     FOpenResult: IQueryResult;
+    FNativeBatch: Boolean;
+    FBatchExceptionClass: ExceptClass;
   public
     constructor Create(AConn: IDBConnection; ATrans: ITransaction);
     procedure Close;
@@ -232,6 +235,11 @@ type
     // Test_Pool_ConnectionDiscarded_ExceptionWhileReadingField — Open returns
     // AResult (instead of nil) when no SetRaiseOnOpen is configured.
     procedure SetOpenResult(AResult: IQueryResult);
+    // INativeBatchQuery: off unless SetNativeBatch; ExecBatch records the
+    // rows as a command ('BATCH <rows>') or raises AExceptionClass.
+    function SupportsNativeBatch: Boolean;
+    procedure ExecBatch(const ARows: IBatchRows);
+    procedure SetNativeBatch(AExceptionClass: ExceptClass);
   end;
 
   { TDBFactoryMock }
@@ -250,6 +258,8 @@ type
     // CreateConnection must simulate "database offline" (Connect failing),
     // decremented on each call until it reaches 0.
     FCreateConnectionFailuresRemaining: Integer;
+    FNextQueryNativeBatch: Boolean;
+    FNextQueryBatchExceptionClass: ExceptClass;
   public
     constructor Create;
     destructor Destroy; override;
@@ -267,6 +277,10 @@ type
     // Consumed once by the next CreateQuery — that query's Open returns
     // AResult (successfully) instead of nil (see TFakeQuery.SetOpenResult).
     procedure SetNextQueryOpenResult(AResult: IQueryResult);
+    // Consumed once by the next CreateQuery — that query supports a native
+    // batch, whose ExecBatch raises AExceptionClass when given (see
+    // TFakeQuery.SetNativeBatch).
+    procedure NextQueryNativeBatch(AExceptionClass: ExceptClass = nil);
     // Makes the next ACount calls to CreateConnection raise an exception
     // (simulates Connect failing because the database is offline).
     procedure SimulateCreateConnectionFail(ACount: Integer);
@@ -345,6 +359,8 @@ type
     [Test] procedure Test_Pool_StatementEvent_ReportsOpenAndExecSql;
     [Test] procedure Test_Pool_StatementEvent_ReportsTheFailure;
     [Test] procedure Test_Pool_StatementEvent_FailingCallback_DoesNotChangeTheOutcome;
+    [Test] procedure Test_Pool_NativeBatch_ForwardedWithStatementEvent;
+    [Test] procedure Test_Pool_NativeBatch_ExternalException_DiscardsConnection;
   private
     procedure MaxConnectionsExceeded_Method;
   end;
@@ -759,6 +775,27 @@ begin
   FOpenResult := AResult;
 end;
 
+function TFakeQuery.SupportsNativeBatch: Boolean;
+begin
+  Result := FNativeBatch;
+end;
+
+procedure TFakeQuery.ExecBatch(const ARows: IBatchRows);
+var
+  LTestable: ITestableTransaction;
+begin
+  if Assigned(FBatchExceptionClass) then
+    raise FBatchExceptionClass.Create('fake batch failure');
+  if Assigned(FTransaction) and Supports(FTransaction, ITestableTransaction, LTestable) then
+    LTestable.GetCommands.Add('BATCH ' + IntToStr(ARows.RowCount));
+end;
+
+procedure TFakeQuery.SetNativeBatch(AExceptionClass: ExceptClass);
+begin
+  FNativeBatch := True;
+  FBatchExceptionClass := AExceptionClass;
+end;
+
 { TDBFactoryMock }
 
 constructor TDBFactoryMock.Create;
@@ -813,7 +850,19 @@ begin
     LQuery.SetOpenResult(FNextQueryOpenResult);
     FNextQueryOpenResult := nil;
   end;
+  if FNextQueryNativeBatch then
+  begin
+    LQuery.SetNativeBatch(FNextQueryBatchExceptionClass);
+    FNextQueryNativeBatch := False;
+    FNextQueryBatchExceptionClass := nil;
+  end;
   Result := LQuery;
+end;
+
+procedure TDBFactoryMock.NextQueryNativeBatch(AExceptionClass: ExceptClass);
+begin
+  FNextQueryNativeBatch := True;
+  FNextQueryBatchExceptionClass := AExceptionClass;
 end;
 
 procedure TDBFactoryMock.RaiseOnNextQueryOpen(AExceptionClass: ExceptClass; const AMsg: string);
@@ -2532,6 +2581,95 @@ begin
     LPool := nil;
     LRecorder.Free;
   end;
+end;
+
+procedure TPoolTests.Test_Pool_NativeBatch_ForwardedWithStatementEvent;
+var
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LBatch: IBatch;
+  LRecorder: TStatementRecorder;
+  LCommands: TStringList;
+  I: Integer;
+begin
+  // The adapter's query supports a native batch: the pool's wrapper must
+  // say so too, hand the rows over in one call and report one skExecBatch
+  // event with the row count.
+  LMockFactory := TDBFactoryMock.Create;
+  LFactory := LMockFactory;
+  LRecorder := TStatementRecorder.Create;
+  try
+    LPool := TConnectionPool.Create(LFactory, nil, nil, LRecorder.OnStatement);
+    LMockFactory.NextQueryNativeBatch;
+    LScope := LPool.AcquireQuery(LQuery);
+    LBatch := TBatch.New(LQuery, 'INSERT INTO T (A) VALUES (:A)');
+    TAssert.AssertTrue('The wrapper must expose the adapter''s native batch', LBatch.IsNative);
+    for I := 1 to 3 do
+    begin
+      LBatch.Params.Integers['A'] := I;
+      LBatch.AddRow;
+    end;
+    LBatch.Execute;
+    LCommands := (LScope.OriginalTransaction as ITestableTransaction).GetCommands;
+    TAssert.AssertEquals('One array operation, not one ExecSql per row', 1, LCommands.Count);
+    TAssert.AssertEquals('BATCH 3', LCommands[0]);
+    LBatch := nil;
+    LQuery := nil;
+    LScope := nil;
+
+    TAssert.AssertEquals('One event for the batch', 1, LRecorder.Infos.Count);
+    TAssert.AssertEquals(Ord(skExecBatch), Ord(LRecorder.Infos[0].Kind));
+    TAssert.AssertEquals('INSERT INTO T (A) VALUES (:A)', LRecorder.Infos[0].Sql);
+    TAssert.AssertEquals('The event carries the rows sent', Int64(3), LRecorder.Infos[0].Rows);
+    TAssert.AssertEquals('', LRecorder.Infos[0].ErrorClass);
+  finally
+    LPool := nil;
+    LRecorder.Free;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_NativeBatch_ExternalException_DiscardsConnection;
+var
+  LConfig: IConnectionPoolConfig;
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LBatch: IBatch;
+  LRaised: string;
+begin
+  // An access violation inside the driver's array operation is a broken
+  // connection, as in ExecSql: the caller gets EDatabaseUnavailableException
+  // and the connection doesn't go back to the pool.
+  LConfig := TConnectionPoolConfig.Create;
+  LConfig.IniConnections := 1;
+  LConfig.MaxConnections := 10;
+  LMockFactory := TDBFactoryMock.Create;
+  LFactory := LMockFactory;
+  LPool := TConnectionPool.Create(LFactory, LConfig);
+  LMockFactory.NextQueryNativeBatch(EAccessViolation);
+  LScope := LPool.AcquireQuery(LQuery);
+  LBatch := TBatch.New(LQuery, 'INSERT INTO T (A) VALUES (:A)');
+  LBatch.Params.Integers['A'] := 1;
+  LBatch.AddRow;
+  LRaised := '';
+  try
+    LBatch.Execute;
+  except
+    on E: Exception do
+      LRaised := E.ClassName;
+  end;
+  TAssert.AssertEquals('EDatabaseUnavailableException', LRaised);
+  TAssert.AssertEquals('The failed rows must not stay pending', 0, LBatch.PendingRows);
+  LBatch := nil;
+  LQuery := nil;
+  LScope := nil;
+  TAssert.AssertEquals('The broken connection must not go back to the pool', 0, LPool.GetPoolSize);
+  TAssert.AssertEquals('Nor stay counted as active', 0, LPool.GetActiveConnections);
 end;
 
 procedure TPoolTests.Test_Pool_NewConnectionFails_RaisesConnectException;

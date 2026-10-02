@@ -284,7 +284,7 @@ there; a loop is where one query pays off.
 
 ### Loading many rows
 
-There is no bulk-insert API. What makes a load slow, in this order:
+What makes a load slow, in this order:
 
 1. **A commit per row.** Every commit waits for the database to make it durable. Put the whole
    load (or large chunks of it) in one transaction.
@@ -307,7 +307,69 @@ seconds (SQLite: a quarter of a second) in one transaction. Sending many rows pe
 cuts the round trips: 28 times faster on PostgreSQL, 5.7 on Firebird, and nothing on SQLite,
 which has no server to talk to. The farther the server, the more it pays.
 
-A statement with many rows is plain SQL with numbered parameters, sent through the same loop.
+#### Batches: `IBatch`
+
+`TBatch.New` (unit `PascalDb.Batch`) takes a query and one statement, and you add rows of
+parameters to it:
+
+```pascal
+LScope := LFactory.GetPool.AcquireQuery(LQuery);
+LScope.StartTransaction;
+try
+  LBatch := TBatch.New(LQuery, LFactory.SqlLoader['PRODUCT.INSERT'].SQL);
+  for LProduct in AProducts do
+  begin
+    LBatch.Params.Strings['CODE'] := LProduct.Code;
+    LBatch.Params.Currencies['PRICE'] := LProduct.Price;
+    LBatch.Params.OptNullStrings['NOTE'] := LProduct.Note;
+    LBatch.AddRow;
+  end;
+  LBatch.Execute;   // the rows not sent yet
+  LScope.Commit;
+except
+  LScope.Rollback;
+  raise;
+end;
+```
+
+The rows are sent `MaxRows` at a time (1000 by default, the third argument of `New`): `AddRow`
+sends them when they reach it, `Execute` sends the rest. With FireDAC they go as one Array DML
+operation per send; with SQLdb and Zeos, one `ExecSql` per row on the prepared statement, the
+same as the loop above (`IsNative` tells which). Zeos has an array operation of its own, but it
+failed on most databases and wrote wrong values on PostgreSQL
+([gotcha 44](gotchas.md)). Measured with FireDAC, 10 000 `INSERT`s of four columns in one
+transaction (Delphi 12, Win64; servers in Docker on the same machine, except Firebird):
+
+| | one row per `ExecSql` | `IBatch` (1000 per send) |
+|---|---|---|
+| Firebird 2.5 (local) | 0.63 s | 0.15 s |
+| PostgreSQL 17 | 6.1 s | 0.56 s |
+| SQLite | 80 ms | 23 ms |
+| MySQL 8.4 | 26 s | 0.17 s |
+| MariaDB 11.4 | 20 s | 0.10 s |
+
+What to know:
+
+- **Each row starts empty.** A parameter set in some rows and not in another is NULL in that
+  one (an Undefined optional too), so no value carries over from the previous row.
+- **One type per parameter.** `Integers['QTY']` in one row and `Int64s['QTY']` in another raises
+  `EArgumentException`: an array operation has one type per column. A NULL counts with the type of
+  its setter (`NullIntegers`, ...).
+- **Call `AddRow` for the last row too.** `Execute` with values set and no `AddRow` raises
+  `EInvalidOpException` instead of dropping them. Rows added and never sent are dropped with the
+  batch.
+- **A failure rejects the send**, with the same exceptions as `ExecSql` (`ELockConflictException`,
+  `EDatabaseUnavailableException`, the driver's). Earlier sends are already in the transaction:
+  roll it back. Which row failed isn't reported.
+- **The query is the batch's until you're done** with it; afterwards it runs single statements
+  again. In tests, the mock records one execution per row.
+- The pool's statement events report a native send as one `skExecBatch` with the row count, and
+  a row-by-row batch as one `skExecSql` per row ([guide 7](pool.md#statement-events)).
+
+#### Many rows per statement, by hand
+
+Where `IBatch` runs row by row (SQLdb, Zeos), a statement with many rows still cuts the round
+trips. It is plain SQL with numbered parameters, sent through the same loop.
 PostgreSQL and SQLite take a list of rows:
 
 ```sql
@@ -336,8 +398,7 @@ send the last, shorter batch with a statement of its own size. What it costs:
   transaction.
 
 When the rows are already in the database, none of this applies: `INSERT INTO ... SELECT ...`
-runs as one `ExecSql`. Driver-specific paths (PostgreSQL's `COPY`, FireDAC's Array DML) go
-further, but the adapters don't expose them.
+runs as one `ExecSql`. PostgreSQL's `COPY` goes further still, but no adapter exposes it.
 
 ## Next
 

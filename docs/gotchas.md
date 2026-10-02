@@ -367,3 +367,17 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     same path before the fix). Fix: `NativeLibraryPath` turns `/` into `\` on Windows in
     `PdbMySQLPluginDir` and `PdbPreloadClientLibrary`; unit test
     `PluginDir_NextToLibrary_AnySlash`.
+44. **Zeos 8 batch DML (`Params.BatchDMLCount`) doesn't hold up as a general batch.** Probe
+    (`.ci/probe-batch`, Zeos 8.0.0, FPC 3.2.2, Linux, 10000 INSERTs): Firebird 5 failed with
+    "Wrong parameters block kind 5" (Firebird 3+ API) and, with `FirebirdAPI=legacy`, with "Too
+    many Contexts of Relation/Procedure/Views. Maximum allowed is 256" above ~250 rows (Zeos sends
+    an `EXECUTE BLOCK`); SQLite, MySQL 8.4 and MariaDB 11.4 raised `EZUnsupportedException`; SQL
+    Server (`odbc_w`) refused string arrays ("Unsupported parameter type" with `ftString`,
+    "Invalid Variant-Type for String-Array binding" with `ftWideString`). PostgreSQL ran the
+    INSERTs (35 ms instead of 1.5 s), but the contract suite then showed date-times stored as 0
+    and an `UPDATE ... WHERE ID = :ID` failing with "set-returning functions are not allowed in
+    WHERE": Zeos rewrites the statement with `unnest($1::int4[])`, which only fits
+    `INSERT ... VALUES`. Fix: the Zeos adapter doesn't implement the native batch; `TBatch` runs
+    one `ExecSql` per row there (the statement stays prepared). FireDAC's Array DML passed the same
+    suite (Delphi 12 CE, Win32 and Win64: Firebird 2.5, SQLite, MySQL 8.4, MariaDB 11.4;
+    PostgreSQL 17 on Win64).

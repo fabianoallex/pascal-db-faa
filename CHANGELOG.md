@@ -8,9 +8,29 @@ may change the API; each such change is listed here.
 
 ### Added
 
+- Batches (`PascalDb.Batch`): `TBatch.New(Query, Sql, MaxRows = 1000)` returns an `IBatch`; set a
+  row's values through `Params` (every `IParams` setter, optionals included), `AddRow`, and
+  `Execute`. Rows are sent `MaxRows` at a time. With FireDAC each send is one Array DML
+  operation (measured, 10 000 INSERTs: PostgreSQL 6.1 s → 0.56 s, MySQL 26 s → 0.17 s,
+  Firebird 2.5 local 0.63 s → 0.15 s); SQLdb and Zeos run one `ExecSql` per row on the prepared
+  statement (Zeos's own batch DML failed: gotcha 44). Each row starts empty (a parameter not set
+  in a row is NULL there), a parameter keeps one type, `Execute` with values and no `AddRow`
+  raises. New interfaces `IBatch`, `IBatchRows` and `INativeBatchQuery` (optional on an adapter's
+  query: `TDataSetQueryBase.SupportsNativeBatch`/`DoExecBatch`); the pool's query wrapper forwards
+  it with the broken-connection handling and a new statement event kind, `skExecBatch`. Unit
+  tests (`PascalDb.BatchTests`, two pool tests) and contract tests `Batch_EveryTypeAndNulls_RoundTrip`,
+  `Batch_RejectedRow_RaisesAndRollbackDiscardsAll` and `Batch_LockWait_GivesUpAfterLockTimeout`.
 - Samples: `Samples.CityRepository.FindByStatePaged` (a `COUNT` plus the page query with
   `PdbPagingClause`), shown page by page in sample 02 on every database and checked against the
   mock in sample 01; `tools/test_samples_docker.sh` checks the pages.
+
+### Changed
+
+- `TPdbParamType` is declared in `PascalDb.Interfaces` (batches use it);
+  `PascalDb.Adapter.Base` keeps the name as an alias. Code that names its values (`pptString`,
+  ...) through `PascalDb.Adapter.Base` alone must also use `PascalDb.Interfaces`.
+- `TStatementKind` has a third value, `skExecBatch`: a `case` over it without an `else` must
+  handle it.
 
 ## [0.6.0] - 2026-09-30
 

@@ -158,9 +158,9 @@ type
     procedure SetScript(AValue: TStrings);
   end;
 
-  /// The value type a parameter is meant to hold — lets a driver set the
-  /// right DataType on a NULL parameter (some drivers reject untyped NULLs).
-  TPdbParamType = (pptString, pptBoolean, pptDateTime, pptDouble, pptInteger, pptInt64, pptCurrency);
+  /// Declared in PascalDb.Interfaces (batches use it too); kept here so code
+  /// that names it through this unit still compiles.
+  TPdbParamType = PascalDb.Interfaces.TPdbParamType;
 
   { TParamsBase
     The setters read a nil optional the way TOptionals.Safe does (and the

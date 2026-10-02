@@ -82,6 +82,10 @@
         <UnitName Value="PascalDb.Adapter.Base"/>
       </Item>
       <Item>
+        <Filename Value="..\src\PascalDb.Batch.pas"/>
+        <UnitName Value="PascalDb.Batch"/>
+      </Item>
+      <Item>
         <Filename Value="..\src\PascalDb.Adapter.DataSet.pas"/>
         <UnitName Value="PascalDb.Adapter.DataSet"/>
       </Item>

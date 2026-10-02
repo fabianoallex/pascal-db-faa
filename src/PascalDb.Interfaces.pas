@@ -324,6 +324,73 @@ type
     property Params: IParams read GetParams;
   end;
 
+  /// The value type a parameter is meant to hold — lets a driver set the
+  /// right DataType on a NULL parameter (some drivers reject untyped NULLs)
+  /// and type a batch's parameter arrays.
+  TPdbParamType = (pptString, pptBoolean, pptDateTime, pptDouble, pptInteger, pptInt64, pptCurrency);
+
+  { IBatch
+    One statement run for many rows of parameters (TBatch.New, in
+    PascalDb.Batch): set a row's values through Params, call AddRow, repeat,
+    then Execute. Rows are sent MaxRows at a time, in the query's
+    transaction; where the driver can, as one array operation (see
+    INativeBatchQuery), otherwise one ExecSql per row. }
+
+  IBatch = interface
+    ['{04B873B6-AD25-48E0-A726-D11E328AAFF0}']
+    function GetParams: IParams;
+    function GetMaxRows: Integer;
+    procedure SetMaxRows(AValue: Integer);
+    /// Ends the current row: its values are kept, Params starts empty for the
+    /// next one. Sends the pending rows when they reach MaxRows.
+    procedure AddRow;
+    /// Rows added and not sent yet.
+    function PendingRows: Integer;
+    /// Sends the pending rows (none: does nothing).
+    procedure Execute;
+    /// True when the rows go to the database as an array operation, False
+    /// when they go one ExecSql at a time.
+    function IsNative: Boolean;
+    property Params: IParams read GetParams;
+    property MaxRows: Integer read GetMaxRows write SetMaxRows;
+  end;
+
+  { IBatchRows
+    The rows a batch hands to INativeBatchQuery.ExecBatch: a fixed list of
+    parameters, each with one type, and a value or NULL for each of them in
+    every row. Reading a NULL with AsXxx is an error; check IsNull first. }
+
+  IBatchRows = interface
+    ['{817B34EB-5334-472D-B1DF-D3BE71DBC256}']
+    function RowCount: Integer;
+    function ParamCount: Integer;
+    function ParamName(AParam: Integer): string;
+    function ParamType(AParam: Integer): TPdbParamType;
+    function IsNull(ARow, AParam: Integer): Boolean;
+    function AsString(ARow, AParam: Integer): string;
+    function AsBoolean(ARow, AParam: Integer): Boolean;
+    function AsDateTime(ARow, AParam: Integer): TDateTime;
+    function AsDouble(ARow, AParam: Integer): Double;
+    function AsInteger(ARow, AParam: Integer): Integer;
+    function AsInt64(ARow, AParam: Integer): Int64;
+    function AsCurrency(ARow, AParam: Integer): Currency;
+    /// The longest string of a pptString parameter (0 when every row is NULL).
+    function MaxLength(AParam: Integer): Integer;
+  end;
+
+  { INativeBatchQuery
+    Optional, on an adapter's IQuery: runs the query's SQL once for every row
+    of ARows as one driver operation (FireDAC's Array DML). TBatch uses it
+    when SupportsNativeBatch is True and runs one
+    ExecSql per row otherwise, so an adapter without it still runs batches.
+    The pool's query wrapper forwards it. }
+
+  INativeBatchQuery = interface
+    ['{798E4071-150E-48AF-8F53-C068F15366E7}']
+    function SupportsNativeBatch: Boolean;
+    procedure ExecBatch(const ARows: IBatchRows);
+  end;
+
   { ISqlScript }
 
   ISqlScript = interface

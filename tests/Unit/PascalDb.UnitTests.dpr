@@ -32,6 +32,7 @@ uses
   PascalDb.Migrations in '..\..\src\PascalDb.Migrations.pas',
   PascalDb.Adapter.Base in '..\..\src\PascalDb.Adapter.Base.pas',
   PascalDb.Adapter.DataSet in '..\..\src\PascalDb.Adapter.DataSet.pas',
+  PascalDb.Batch in '..\..\src\PascalDb.Batch.pas',
   PascalDb.DUnitXCompat in 'PascalDb.DUnitXCompat.pas',
   PascalDb.OptionalsTests in 'PascalDb.OptionalsTests.pas',
   PascalDb.ClockCacheTests in 'PascalDb.ClockCacheTests.pas',
@@ -40,7 +41,8 @@ uses
   PascalDb.PoolTests in 'PascalDb.PoolTests.pas',
   PascalDb.SqlSourcesTests in 'PascalDb.SqlSourcesTests.pas',
   PascalDb.AdapterBaseTests in 'PascalDb.AdapterBaseTests.pas',
-  PascalDb.PagingTests in 'PascalDb.PagingTests.pas';
+  PascalDb.PagingTests in 'PascalDb.PagingTests.pas',
+  PascalDb.BatchTests in 'PascalDb.BatchTests.pas';
 
 // SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
 {$R 'sql\PascalDbTestSql.res'}

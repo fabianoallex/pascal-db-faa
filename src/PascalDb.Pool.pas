@@ -203,17 +203,20 @@ type
   TPoolEventProc = {$IFDEF PASCALDB_FUNCREFS}reference to procedure(const AEvent: TPoolEvent)
     {$ELSE}procedure(const AEvent: TPoolEvent) of object{$ENDIF};
 
-  // One statement run through a pooled query (TQueryWrapper): Open or
-  // ExecSql, reported after it ends, successfully or not. Unlike TPoolEvent,
+  // One statement run through a pooled query (TQueryWrapper): Open, ExecSql
+  // or a batch's array operation (skExecBatch, INativeBatchQuery; a batch
+  // that runs row by row reports one skExecSql per row), reported after it
+  // ends, successfully or not. Unlike TPoolEvent,
   // this is the happy path, once per statement: it has its own callback
   // (AOnStatement), nil by default, and costs nothing when unset.
-  TStatementKind = (skOpen, skExecSql);
+  TStatementKind = (skOpen, skExecSql, skExecBatch);
 
   TStatementInfo = record
     Kind: TStatementKind;
     Sql: string;           // the text the query ran, after SQL tags were processed
     ElapsedUs: Int64;      // microseconds (PdbTickUs); for Open, includes fetching every row
-    Rows: Int64;           // Open: rows fetched (RecordCount); ExecSql: -1 (not reported yet)
+    Rows: Int64;           // Open: rows fetched (RecordCount); ExecSql: -1 (not reported yet);
+                           // ExecBatch: the rows of parameters sent
     ErrorClass: string;    // '' when it succeeded; otherwise the class the caller gets
     ErrorMessage: string;  // (EDatabaseUnavailableException, ELockConflictException, the driver's)
   end;
@@ -375,9 +378,11 @@ type
   end;
 
   { TQueryWrapper
-    Returns the query to the pool automatically when destroyed. }
+    Returns the query to the pool automatically when destroyed. Forwards
+    INativeBatchQuery to the adapter's query, when it has it, with the same
+    broken-connection classification and statement event as ExecSql. }
 
-  TQueryWrapper = class(TInterfacedObject, IQuery)
+  TQueryWrapper = class(TInterfacedObject, IQuery, INativeBatchQuery)
   private
     FPool: IDBConnectionPoolInternalActions;
     FInternalQuery: IQuery;
@@ -396,6 +401,9 @@ type
     function GetTransaction: ITransaction;
     function Open: IQueryResult;
     procedure SetSql(const ASql: string);
+    // INativeBatchQuery
+    function SupportsNativeBatch: Boolean;
+    procedure ExecBatch(const ARows: IBatchRows);
   end;
 
   { TQueryResultWrapper
@@ -597,6 +605,45 @@ end;
 procedure TQueryWrapper.SetSql(const ASql: string);
 begin
   FInternalQuery.SetSql(ASql);
+end;
+
+function TQueryWrapper.SupportsNativeBatch: Boolean;
+var
+  LNative: INativeBatchQuery;
+begin
+  Result := Supports(FInternalQuery, INativeBatchQuery, LNative) and LNative.SupportsNativeBatch;
+end;
+
+procedure TQueryWrapper.ExecBatch(const ARows: IBatchRows);
+var
+  LNative: INativeBatchQuery;
+  LNewE: Exception;
+  LStartUs: Int64;
+begin
+  if not Supports(FInternalQuery, INativeBatchQuery, LNative) then
+    raise ENotSupportedException.Create('The adapter''s query has no native batch (INativeBatchQuery)');
+  LStartUs := 0;
+  if Assigned(FOnStatement) then
+    LStartUs := PdbTickUs;
+  try
+    LNative.ExecBatch(ARows);
+  except
+    on E: Exception do
+    begin
+      // Same as ExecSql (see there): never "raise E;".
+      LNewE := BuildDatabaseException(FInternalQuery.GetConnection, E);
+      if Assigned(FOnStatement) then
+        if Assigned(LNewE) then
+          NotifyStatement(skExecBatch, LStartUs, ARows.RowCount, LNewE)
+        else
+          NotifyStatement(skExecBatch, LStartUs, ARows.RowCount, E);
+      if Assigned(LNewE) then
+        raise LNewE;
+      raise;
+    end;
+  end;
+  if Assigned(FOnStatement) then
+    NotifyStatement(skExecBatch, LStartUs, ARows.RowCount, nil);
 end;
 
 { TQueryResultWrapper }

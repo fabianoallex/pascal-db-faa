@@ -419,16 +419,25 @@ Check them against your component's documentation, then let the suite confirm.
   contract test `LockWait_GivesUpAfterLockTimeout` checks both. Measure the codes on every server
   version you support: Firebird 2.5 reports an expired lock wait as `isc_lock_timeout`,
   Firebird 5 as `isc_deadlock`.
+- **Batches work without anything from you.** `TBatch` runs one `ExecSql` per row on any
+  `IQuery`. If the driver has an array operation (FireDAC's Array DML), override
+  `SupportsNativeBatch` (return `True`) and `DoExecBatch` in your `TDataSetQueryBase` subclass:
+  it gets an `IBatchRows` (names, one type per parameter, a value or NULL per row) and must run
+  the query's SQL once per row, in the query's transaction. `TFDQueryAdapter.DoExecBatch` is the
+  example. Say yes only after the contract suite's `Batch_*` tests pass on every database you
+  support: Zeos's array operation ran the benchmark's `INSERT`s on PostgreSQL and still failed
+  the suite (gotcha 44).
 - **Dual-compiler:** if the component exists for both Delphi and Lazarus, keep the unit free of
   compiler-specific code where you can (Zeos's adapter is the example), and check
   [what a Free Pascal program must do](adapters.md#what-a-free-pascal-program-must-do).
 
 ## Checking it: the contract suite
 
-`tests/Integration/PascalDb.ContractTests.pas` is the same suite for every adapter: 16 tests,
+`tests/Integration/PascalDb.ContractTests.pas` is the same suite for every adapter: 27 tests,
 from the ping to typed parameters and NULLs, UTF-8 text, `INSERT ... RETURNING`, commit and
 rollback, savepoints, a constraint violation that keeps the connection, scripts, exact
-`RecordCount`, the same SQL assigned twice and concurrent writers. The tests only see an
+`RecordCount`, the same SQL assigned twice, concurrent writers, lock timeouts, paging, statement
+events and batches. The tests only see an
 `IDBFactory`; the adapter-specific part lives in one unit.
 
 1. In `tests/Integration/PascalDb.IntegrationEnv.pas`, add a `{$IF DEFINED(PASCALDB_IT_XYZ)}`

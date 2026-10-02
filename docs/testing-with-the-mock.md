@@ -74,6 +74,10 @@ end;
 Check(LMock.ExecutionCount('CITY.INSERT') = 0, 'not even the valid one was inserted');
 ```
 
+An [`IBatch`](sql.md#batches-ibatch) runs row by row on the mock: each row is one execution
+of the key, so `ExecutionCount` is the number of rows and `LastExecution` the last row.
+`AddFailure` fails the next row, as a database rejecting it would.
+
 ## Canned results
 
 Every key the code `Open`s needs a registered result (`Open` raises otherwise); `ExecSql`

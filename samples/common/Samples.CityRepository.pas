@@ -14,6 +14,8 @@ unit Samples.CityRepository;
   writes into its PAGE literal. With the mock, the clause never reaches
   the key, so a test registers the rows of the page it checks.
 
+  InsertAll sends its rows through an IBatch (PascalDb.Batch).
+
   Every method follows the library's usage pattern: acquire a query from the
   pool together with its scope transaction, start the transaction, commit on
   success and roll back on any exception. The query and its connection go
@@ -26,7 +28,8 @@ interface
 uses
   SysUtils,
   PascalDb.Interfaces,
-  PascalDb.Paging;
+  PascalDb.Paging,
+  PascalDb.Batch;
 
 type
   TCity = record
@@ -97,6 +100,7 @@ var
   LCities: TArray<TCity>;
   LQuery: IQuery;
   LScope: IScopeTransaction;
+  LBatch: IBatch;
   I: Integer;
 begin
   // Validate everything before touching the database.
@@ -107,14 +111,17 @@ begin
   LScope := FFactory.GetPool.AcquireQuery(LQuery);
   LScope.StartTransaction;
   try
+    // One batch: FireDAC sends the rows as one array operation, SQLdb and
+    // Zeos one ExecSql per row; the mock records one execution per row.
+    LBatch := TBatch.New(LQuery, FFactory.SqlLoader['CITY.INSERT'].SQL);
     for I := 0 to High(LCities) do
     begin
-      LQuery.Sql := FFactory.SqlLoader['CITY.INSERT'].SQL;
-      LQuery.Params.Strings['CODE'] := LCities[I].Code;
-      LQuery.Params.Strings['NAME'] := LCities[I].Name;
-      LQuery.Params.Strings['STATE'] := LCities[I].State;
-      LQuery.ExecSql;
+      LBatch.Params.Strings['CODE'] := LCities[I].Code;
+      LBatch.Params.Strings['NAME'] := LCities[I].Name;
+      LBatch.Params.Strings['STATE'] := LCities[I].State;
+      LBatch.AddRow;
     end;
+    LBatch.Execute;
     LScope.Commit;
   except
     LScope.Rollback;

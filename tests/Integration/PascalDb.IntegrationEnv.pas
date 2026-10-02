@@ -78,6 +78,10 @@ function IntegrationSchemaVersion: Integer;
 /// Server; '' where the database can't (MySQL; MariaDB can since 10.5).
 function InsertReturningSql: string;
 
+/// Whether this runner's adapter sends a batch as one array operation
+/// (IBatch.IsNative): FireDAC yes, SQLdb and Zeos no.
+function ExpectsNativeBatch: Boolean;
+
 /// A SELECT returning the server's id of the current session in column SID,
 /// or '' when the database has no such thing (SQLite: no server).
 function SessionIdSql: string;
@@ -199,6 +203,15 @@ begin
   else
     Result := 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME) RETURNING ID, NAME';
   end;
+end;
+
+function ExpectsNativeBatch: Boolean;
+begin
+  {$IF DEFINED(PASCALDB_IT_ZEOS) or DEFINED(FPC)}
+  Result := False;
+  {$ELSE}
+  Result := True;
+  {$IFEND}
 end;
 
 function Host: string;
