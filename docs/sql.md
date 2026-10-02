@@ -21,6 +21,29 @@ pagination clause doesn't need a copy per database: the dialect writes it ([Pagi
 A missing key raises `ESQLLoaderException` ("SQL not found: PG/CITY.INSERT. Looked in: ...").
 Each loader caches the texts it has read, and is safe to use from several threads.
 
+### Why plain SQL and no query builder
+
+This is a decision, not a gap. The library doesn't generate SQL: the statement you write is
+the statement the database receives (the dialect only writes the few clauses that can't be
+copied between databases, such as paging, a ping or a savepoint). Reasons:
+
+- **Dialects differ where a builder would have to hide it:** `ROWS m TO n` or `OFFSET/FETCH`,
+  `RETURNING` or `OUTPUT INSERTED` or nothing (MySQL), identifier quoting and case, column
+  types. A builder covering only simple `SELECT`s still hits these, and JOINs, subqueries and
+  CTEs make it a project of its own, tested on every database and adapter.
+- **Plain SQL is reviewable.** The text lives in `.sql` files, one folder per database, with a
+  readable diff. With a builder the real statement only exists at run time.
+- **Writing SQL for another dialect is cheap, and checked.** The contract suite and the samples
+  validate a statement on every database, and the SQL is what people and AI assistants already
+  write best; a builder would add an API to learn and to get wrong.
+- **The API would be hard to take back.** Every builder exposes a large, opinionated surface
+  that users then ask to extend.
+
+What exists instead: optional filters and partial updates through template tags and
+[`IOptXxx`](optionals.md), and `${PAGE}` for paging. If a real consumer shows that repetitive
+write statements hurt, a small, optional unit for `INSERT`/`UPDATE` built from `IOptXxx` is
+the candidate to look at, not a general builder. Decided 2026-10-01.
+
 ## Where the text comes from
 
 `IDatabaseConfig.SqlSource` takes any `ISqlSource` (unit `PascalDb.SqlSources`):
