@@ -15,7 +15,7 @@
     </CompilerOptions>
     <Description Value="Bridge between pascal-db-faa and pascal-jsonmapper-faa (Delphi and Free Pascal/Lazarus): a JSON converter for the optional types (IOptXxx/INullXxx/IOptNullXxx), registered on TJsonMapper.Shared. Requires the pascaljsonmapper_pkg package (submodule external/pascal-jsonmapper-faa)."/>
     <License Value="MIT"/>
-    <Version Minor="7"/>
+    <Version Minor="8"/>
     <Files>
       <Item>
         <Filename Value="..\bridges\jsonmapper\PascalDb.JsonMapper.Optionals.pas"/>
