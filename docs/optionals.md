@@ -134,6 +134,9 @@ if LEmail.IsNull then ...
 
 ## Optionals in JSON DTOs
 
+Sample: [`06-json`](../samples/06-json/JsonApi.dpr), a POST / GET / PATCH flow between JSON and
+the database.
+
 With [pascal-jsonmapper-faa](https://github.com/fabianoallex/pascal-jsonmapper-faa), a DTO can
 declare optional properties and read and write them as JSON. The converter lives in a unit of
 its own, `PascalDb.JsonMapper.Optionals` (`bridges/jsonmapper`, Lazarus package

@@ -22,6 +22,7 @@ samples/02-quickstart/Quickstart
 samples/03-migrations/Migrations
 samples/04-optionals/Optionals
 samples/05-pool/PoolUnderLoad
+samples/06-json/JsonApi
 
 # test script logs
 samples/*/build.log

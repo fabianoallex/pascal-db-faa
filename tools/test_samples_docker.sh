@@ -2,9 +2,10 @@
 # Builds the samples on Linux FPC and runs them, SQLdb or Zeos adapter: a
 # database server container plus an FPC container on a private Docker network
 # (same layout as test_integration_docker.sh). Sample 01 needs no database;
-# samples 02 to 05 run against the server (03 twice: every migration applies
-# on the first run, none on the second; the outcomes of 04's partial updates
-# and of 05's three pool phases are checked in their output). Everything is
+# samples 02 to 06 run against the server (03 twice: every migration applies
+# on the first run, none on the second; the outcomes of 04's partial updates,
+# of 05's three pool phases and 06's JSON responses are checked in their
+# output). 06 builds the pascal-jsonmapper-faa submodule. Everything is
 # removed at the end, even on failure. Acceptance: every sample exits with 0
 # and reports 0 unfreed blocks. SQLite needs no server: its database is a file
 # inside the FPC container.
@@ -120,7 +121,8 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   ACCEPT_EULA=Y apt-get install -y -qq $CLIENT_PKG >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
   export PASCALDB_SAMPLE_CLIENT="$(ls $CLIENT_GLOB 2>/dev/null | head -1)"
   [ -n "$PASCALDB_SAMPLE_CLIENT" ] || { echo "client library not installed: $CLIENT_GLOB"; tail -20 /t-apt.log; exit 1; }
-  mkdir -p /t/u1 /t/u2 /t/u3 /t/u4 /t/u5 && cp -r /src/src /src/adapters /src/samples /t/
+  mkdir -p /t/u1 /t/u2 /t/u3 /t/u4 /t/u5 /t/u6 /t/external && cp -r /src/src /src/adapters /src/samples /src/bridges /t/
+  cp -r /src/external/pascal-jsonmapper-faa /t/external/
   build() { # dir program units-folder [extra options]
     cd /t/samples/$1
     fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src -Fu../common -FU/t/$3 -gh -gl -o/t/$2 $4 $2.dpr > /t/build-$2.log 2>&1 \
@@ -142,6 +144,8 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   build 03-migrations Migrations u3 "$ADAPTER_OPTS"
   build 04-optionals Optionals u4 "$ADAPTER_OPTS"
   build 05-pool PoolUnderLoad u5 "$ADAPTER_OPTS"
+  M=/t/external/pascal-jsonmapper-faa/src
+  build 06-json JsonApi u6 "$ADAPTER_OPTS -Fu/t/bridges/jsonmapper -Fu$M -Fi$M"
   run MockRepository
   if [ -n "$DB_PORT" ]; then
     for i in $(seq 1 180); do (echo > /dev/tcp/$PASCALDB_SAMPLE_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
@@ -185,4 +189,11 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   grep -q "result: 6 done, 0 timed out" /t/run-PoolUnderLoad.log \
     && grep -q "result: 3 done, 3 timed out" /t/run-PoolUnderLoad.log \
     && grep -q "pool: 1 open (1 idle), max 3; since start: 3 created, 3 timeouts, 2 swept" /t/run-PoolUnderLoad.log \
-    || { echo "unexpected pool behavior"; exit 1; }'
+    || { echo "unexpected pool behavior"; exit 1; }
+  run JsonApi
+  # Maria: e-mail cleared (null). Ana: renamed, credit set, e-mail untouched.
+  # Joao (non-ASCII on purpose): untouched by the two rejected patches.
+  grep -qF "  200 {\"items\":[{\"id\":1,\"name\":\"Maria\",\"email\":null,\"credit\":150.5},{\"id\":2,\"name\":\"João\",\"email\":null,\"credit\":null},{\"id\":3,\"name\":\"Ana Souza\",\"email\":null,\"credit\":200}]}" /t/run-JsonApi.log \
+    && grep -qF "400 Bad Request: \$.name:" /t/run-JsonApi.log \
+    && grep -qF "400 Bad Request: \$.credit:" /t/run-JsonApi.log \
+    || { echo "unexpected JSON responses"; exit 1; }'

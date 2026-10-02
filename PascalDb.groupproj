@@ -27,6 +27,9 @@
         <Projects Include="samples\05-pool\PoolUnderLoad.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="samples\06-json\JsonApi.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -107,14 +110,23 @@
     <Target Name="PoolUnderLoad:Make">
         <MSBuild Projects="samples\05-pool\PoolUnderLoad.dproj" Targets="Make"/>
     </Target>
+    <Target Name="JsonApi">
+        <MSBuild Projects="samples\06-json\JsonApi.dproj"/>
+    </Target>
+    <Target Name="JsonApi:Clean">
+        <MSBuild Projects="samples\06-json\JsonApi.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="JsonApi:Make">
+        <MSBuild Projects="samples\06-json\JsonApi.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests;PascalDb_IntegrationTestsZeos;MockRepository;Quickstart;Migrations;Optionals;PoolUnderLoad"/>
+        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests;PascalDb_IntegrationTestsZeos;MockRepository;Quickstart;Migrations;Optionals;PoolUnderLoad;JsonApi"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean;PascalDb_IntegrationTestsZeos:Clean;MockRepository:Clean;Quickstart:Clean;Migrations:Clean;Optionals:Clean;PoolUnderLoad:Clean"/>
+        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean;PascalDb_IntegrationTestsZeos:Clean;MockRepository:Clean;Quickstart:Clean;Migrations:Clean;Optionals:Clean;PoolUnderLoad:Clean;JsonApi:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make;PascalDb_IntegrationTestsZeos:Make;MockRepository:Make;Quickstart:Make;Migrations:Make;Optionals:Make;PoolUnderLoad:Make"/>
+        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make;PascalDb_IntegrationTestsZeos:Make;MockRepository:Make;Quickstart:Make;Migrations:Make;Optionals:Make;PoolUnderLoad:Make;JsonApi:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

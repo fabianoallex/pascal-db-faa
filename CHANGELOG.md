@@ -16,6 +16,9 @@ may change the API; each such change is listed here.
   as `null` (`delphi-api-infra-faa`'s `Common.JsonMapper` accepted the first and omitted the
   second). The core doesn't use the mapper. Unit tests `PascalDb.JsonMapperOptionalsTests`;
   the unit suite now needs the submodule (`git submodule update --init`).
+- Sample `06-json` (`JsonApi`): POST / GET / PATCH between JSON and the database with the
+  optional types, including the 400 answers; run and checked by `test_samples_docker.sh` on every
+  database and adapter.
 
 ## [0.7.0] - 2026-10-02
 
