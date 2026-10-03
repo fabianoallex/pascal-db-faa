@@ -6,6 +6,15 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Changed
+
+- The pascal-jsonmapper-faa submodule moves from `6306385` to
+  [v0.2.0](https://github.com/fabianoallex/pascal-jsonmapper-faa/releases/tag/v0.2.0). For code
+  using the mapper this adds `Serialize<T>` / `Deserialize<T>` (arrays and other types at the top
+  level), indented output, `Naming := jnSnakeCase`, `RenameMember` and `UnknownMembers := umError`,
+  all opt-in: the defaults behave as before, and so does the optionals bridge (same unit and
+  sample results).
+
 ## [0.8.0] - 2026-10-02
 
 ### Added
