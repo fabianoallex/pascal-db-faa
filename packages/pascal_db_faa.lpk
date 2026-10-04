@@ -77,7 +77,7 @@
     <RequiredPkgs>
       <Item>
         <PackageName Value="pascal_common_faa"/>
-        <MinVersion Minor="2" Valid="True"/>
+        <MinVersion Major="1" Valid="True"/>
       </Item>
       <Item>
         <PackageName Value="FCL"/>

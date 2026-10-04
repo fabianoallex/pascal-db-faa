@@ -58,7 +58,7 @@ end;  // the connection goes back to the pool when LQuery and LScope are release
 ## Dependency: pascal-common-faa
 
 The optional types, the atomics and monotonic ticks, and the clock/sleep context the pool uses
-come from [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa) (0.2.0 or
+come from [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa) (1.0.0 or
 later), shared with the other `*-faa` libraries. The application provides one copy of it:
 
 - **Lazarus:** open and compile `pascal_common_faa.lpk` once (Lazarus then finds it by name);
@@ -69,7 +69,7 @@ later), shared with the other `*-faa` libraries. The application provides one co
 This repository has it as a git submodule in `external/pascal-common-faa` for its own tests and
 samples only; don't build an application against that copy if it uses another `*-faa` library
 too. An older pascal-common-faa stops the build with "pascal-db-faa needs pascal-common-faa
-0.2.0 or later".
+1.0.0 or later".
 
 Current version: **0.8.0**. While it is 0.x the API may still change between minor
 versions; every change is listed in the [changelog](CHANGELOG.md).

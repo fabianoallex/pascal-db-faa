@@ -10,7 +10,7 @@ may change the API; each such change is listed here.
 
 - **Breaking:** the optional types, the atomics and ticks, the clock/sleep context and the cache
   moved to a new base library,
-  [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa) (0.2.0 or later), shared
+  [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa) (1.0.0 or later), shared
   with the other `*-faa` libraries; the application now provides it (see the README,
   "Dependency: pascal-common-faa"). Renames: `PascalDb.Optionals` → `PascalCommon.Optionals`,
   `PascalDb.SystemContext` → `PascalCommon.SystemContext`, `PascalDb.ClockCache` →

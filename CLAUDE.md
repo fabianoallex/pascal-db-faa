@@ -152,10 +152,10 @@ them. Moved in the pilot migration (pascal-common-faa's plan, phase F6, 2026-10-
   test and sample `.lpi` files point at the submodule's `.lpk` with `Prefer="True"`, listed
   first. The Delphi projects add `external/pascal-common-faa/src` to the search path.
 - **Minimum version** checked in `PascalDb.Interfaces` (every user compiles it):
-  `PASCALCOMMON_VERSION < 200` stops the build with "pascal-db-faa needs pascal-common-faa 0.2.0
+  `PASCALCOMMON_VERSION < 10000` stops the build with "pascal-db-faa needs pascal-common-faa 1.0.0
   or later" (measured by raising the bound: lazbuild "Fatal: (2022) User defined: ...", Delphi 12
-  "F1054 ..."; 0.2.0 is the first version tested, its code is the same as 0.1.0 without the
-  deprecated `TOptNullXxx.Safe*`). Raise it when the library starts using something newer.
+  "F1054 ..."). 1.0.0 is the first stable release (only additions within 1.x); `pascal_db_faa.lpk`
+  has `MinVersion Major="1"`. Raise both when the library starts using something newer.
 - **Checkout without `--recursive`**: pascal-common-faa's own `external/pascal-jsonmapper-faa` is
   for its own tests. CI uses `submodules: true` (not recursive).
 - Something the library needs changed there goes to pascal-common-faa first (strict semver,
@@ -169,10 +169,10 @@ The `IJsonConverter` for the 27 optional interfaces is pascal-common-faa's
 went with it). Only sample 06 uses it. The mapper stays a **git submodule** here
 (`external/pascal-jsonmapper-faa`), and the bridge is built against **this** copy, not
 pascal-common-faa's (which isn't checked out): `JsonApi.lpi` requires `pascaljsonmapper_pkg`
-from `external/pascal-jsonmapper-faa` with `Prefer="True"` before the bridge package. Measured
-with lazbuild: without that item, the bridge's `DefaultFilename` (into pascal-common-faa's empty
-`external/`) misses and Lazarus silently takes whatever `pascaljsonmapper_pkg` the IDE has
-registered (here, a separate `../pascal-jsonmapper-faa` checkout). `JsonApi.dproj` has the
+from `external/pascal-jsonmapper-faa` with `Prefer="True"` before the bridge package (the
+bridge `.lpk` requires the mapper by name only, since pascal-common-faa 1.0.0). Measured with
+lazbuild in the pilot: without that item, Lazarus silently takes whatever `pascaljsonmapper_pkg`
+the IDE has registered (here, a separate `../pascal-jsonmapper-faa` checkout). `JsonApi.dproj` has the
 mapper's `src` and `external/pascal-common-faa/bridges/jsonmapper` on its search path;
 `test_samples_docker.sh` passes the same folders to `fpc`.
 
