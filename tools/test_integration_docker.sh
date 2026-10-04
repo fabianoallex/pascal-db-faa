@@ -89,6 +89,8 @@ trap cleanup EXIT
 cleanup
 
 cd "$ROOT"
+[ -f external/pascal-common-faa/src/PascalCommon.Optionals.pas ] \
+  || { echo "external/pascal-common-faa is empty: git submodule update --init"; exit 1; }
 python tools/gen_fpc_mirror.py --check
 
 docker network create "$NET" >/dev/null
@@ -124,9 +126,11 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   export PASCALDB_IT_CLIENT="$(ls $CLIENT_GLOB 2>/dev/null | head -1)"
   [ -n "$PASCALDB_IT_CLIENT" ] || { echo "client library not installed: $CLIENT_GLOB"; tail -20 /t-apt.log; exit 1; }
   echo "client: $PASCALDB_IT_CLIENT"
-  mkdir -p /t/u && cp -r /src/src /src/adapters /src/tests /t/
+  mkdir -p /t/u /t/external && cp -r /src/src /src/adapters /src/tests /t/
+  cp -r /src/external/pascal-common-faa /t/external/
+  C=/t/external/pascal-common-faa/src
   cd /t/tests/Integration/$RUNNER_DIR
-  fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src $ADAPTER_OPTS -Fu.. -FU/t/u -gh -gl -o/t/runner \
+  fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src -Fu$C -Fi$C $ADAPTER_OPTS -Fu.. -FU/t/u -gh -gl -o/t/runner \
     $RUNNER > /t/build.log 2>&1 || { grep -iE "error|fatal" /t/build.log | head -30; exit 1; }
   if [ -n "$DB_PORT" ]; then
     for i in $(seq 1 180); do (echo > /dev/tcp/$PASCALDB_IT_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done

@@ -39,9 +39,9 @@ uses
   Classes,
   SysUtils,
   PascalDb.Interfaces,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.Migrations,
-  PascalDb.Threading,
+  PascalCommon.Threading,
   PascalDb.Pool,
   PascalDb.Paging,
   PascalDb.Batch,
@@ -189,20 +189,20 @@ begin
         LBatch.Params.Integers['QTY'] := 2;
         LBatch.Params.Integers['ID'] := 700;
         LBatch.AddRow;
-        LStart := PdbTickMs;
+        LStart := PcTickMs;
         LBatch.Execute;
       end
       else
       begin
         LQuery.Sql := 'UPDATE ITEMS SET QTY = 2 WHERE ID = 700';
-        LStart := PdbTickMs;
+        LStart := PcTickMs;
         LQuery.ExecSql;
       end;
-      FElapsedMs := PdbTickMs - LStart;
+      FElapsedMs := PcTickMs - LStart;
       LScope.Commit;
     except
       if LStart <> 0 then
-        FElapsedMs := PdbTickMs - LStart;
+        FElapsedMs := PcTickMs - LStart;
       LScope.Rollback;
       raise;
     end;
@@ -947,8 +947,8 @@ begin
     LQuery.ExecSql; // this transaction now holds the row (SQLite: the database's write lock)
     LWaiter := TLockWaiter.Create(LockTimeoutFactory(LOCK_TIMEOUT_MS), AUseBatch);
     try
-      LStart := PdbTickMs;
-      while (not LWaiter.Finished) and (PdbTickMs - LStart < HOLD_MS) do
+      LStart := PcTickMs;
+      while (not LWaiter.Finished) and (PcTickMs - LStart < HOLD_MS) do
         Sleep(20);
       LScope.Rollback;
       LWaiter.WaitFor;

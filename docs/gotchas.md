@@ -16,12 +16,12 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
    tests failed because of it, all through `TClockCache`. Cause: Delphi replaces a `nil`
    comparer with `TEqualityComparer<T>.Default`; FPC's `rtl-generics` stores the `nil` and
    calls `GetHashCode` on it. Fix: `if Assigned(AComparer) then TMap.Create(AComparer) else
-   TMap.Create` (`PascalDb.ClockCache`).
+   TMap.Create` (`PascalDb.ClockCache`, now `PascalCommon.ClockCache` in pascal-common-faa).
 2. **`IEqualityComparer<T>` has a different signature**: FPC uses `constref` and a `UInt32`
    hash; Delphi uses `const` and an `Integer` hash. `TEqualityComparer<T>.Construct` accepts a
    closure in Delphi and only a plain function / `of object` in FPC. Fix: a named function
    with the signature under `{$IFDEF FPC}`, which both accept (`SingleKeyEquals`/
-   `SingleKeyHash` in `PascalDb.Optionals`).
+   `SingleKeyHash` in `PascalDb.Optionals`, now `PascalCommon.Optionals`).
 3. **`TGuid.Empty` doesn't exist in FPC 3.2.2** (it comes from Delphi's `TGuidHelper`). Fix: a
    typed constant `EMPTY_GUID: TGUID = '{00000000-...}'`.
 4. **In FPC 3.2.2, `RT_RCDATA` is only in the `system` unit on non-Windows targets**; on

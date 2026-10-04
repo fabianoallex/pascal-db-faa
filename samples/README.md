@@ -12,16 +12,19 @@ concepts each one shows.
 | [03-migrations](03-migrations/Migrations.dpr) | Versioned migrations (`TDBMigrationEngine`): `IsDDL` and why DDL and DML go in separate migrations, progress events through a method, running twice applies nothing; SQL in `.sql` files embedded as resources (`build_sql_res.py`), with a folder that overrides them during development | Yes |
 | [04-optionals](04-optionals/Optionals.dpr) | `INullXxx` / `IOptXxx` / `IOptNullXxx` as parameters and column reads; SQL templates shaped by them: optional filters (`ApplyFilter`, `${NAME_OP}`), partial updates where Undefined leaves a column alone and Null clears it (`ProcessTag`), printing the SQL each case produces | Yes |
 | [05-pool](05-pool/PoolUnderLoad.dpr) | The connection pool under concurrent load (worker threads): growth up to the limit, callers waiting their turn, `EPoolTimeoutException` when the wait runs out, the idle sweep; observed through its events (thread-safe handler) and `GetSnapshot` | Yes |
-| [06-json](06-json/JsonApi.dpr) | Optional values between JSON and the database with [pascal-jsonmapper-faa](https://github.com/fabianoallex/pascal-jsonmapper-faa) (submodule in `external/`, bridge `PascalDb.JsonMapper.Optionals`): a small API without a server, POST (a missing member becomes NULL), GET (NULL columns written as `null`), PATCH (absent / `null` / value map to leave / clear / set the column), and the 400 answers for `null` in an `IOptString` and a wrong value type | Yes |
+| [06-json](06-json/JsonApi.dpr) | Optional values between JSON and the database with [pascal-jsonmapper-faa](https://github.com/fabianoallex/pascal-jsonmapper-faa) (submodule in `external/`, bridge `PascalCommon.JsonMapper.Optionals` from pascal-common-faa): a small API without a server, POST (a missing member becomes NULL), GET (NULL columns written as `null`), PATCH (absent / `null` / value map to leave / clear / set the column), and the 400 answers for `null` in an `IOptString` and a wrong value type | Yes |
 
 01 and 02 share `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
 and against PostgreSQL, Firebird, SQLite, MySQL, MariaDB or SQL Server in 02.
 
 ## Running samples 02 to 06
 
-Sample 06 also needs the pascal-jsonmapper-faa submodule (`git submodule update --init`); its
-Lazarus project requires the `pascal_db_faa_jsonmapper` package, and its Delphi project has the
-submodule's `src` and `bridges/jsonmapper` on its search path.
+Every sample builds the pascal-common-faa submodule, and sample 06 the pascal-jsonmapper-faa one
+too (`git submodule update --init`). The Lazarus projects require `pascal_common_faa` from
+`external/pascal-common-faa`; 06 also requires `pascaljsonmapper_pkg` from
+`external/pascal-jsonmapper-faa` and the bridge package `pascal_common_faa_jsonmapper`. The
+Delphi projects have `external/pascal-common-faa/src` on their search path; 06 also the mapper's
+`src` and `external/pascal-common-faa/bridges/jsonmapper`.
 
 They connect to a local PostgreSQL by default:
 

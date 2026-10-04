@@ -29,12 +29,12 @@
     </RunParams>
     <RequiredPackages>
       <Item>
-        <PackageName Value="pascal_db_faa"/>
-        <DefaultFilename Value="..\..\..\packages\pascal_db_faa.lpk"/>
+        <PackageName Value="pascal_common_faa"/>
+        <DefaultFilename Value="..\..\..\external\pascal-common-faa\packages\pascal_common_faa.lpk" Prefer="True"/>
       </Item>
       <Item>
-        <PackageName Value="pascal_db_faa_jsonmapper"/>
-        <DefaultFilename Value="..\..\..\packages\pascal_db_faa_jsonmapper.lpk"/>
+        <PackageName Value="pascal_db_faa"/>
+        <DefaultFilename Value="..\..\..\packages\pascal_db_faa.lpk"/>
       </Item>
       <Item>
         <PackageName Value="FPCUnitTestRunner"/>

@@ -22,7 +22,7 @@ uses
   fpcunit, testregistry,
   SysUtils,
   Variants,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.Interfaces,
   PascalDb.SqlLoader,
   PascalDb.Mock;

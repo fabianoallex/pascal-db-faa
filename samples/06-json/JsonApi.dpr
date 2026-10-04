@@ -2,7 +2,8 @@
 
 (* Sample 06: optional values between JSON and the database, with
   pascal-jsonmapper-faa (the git submodule in external/) and the bridge unit
-  PascalDb.JsonMapper.Optionals.
+  PascalCommon.JsonMapper.Optionals (pascal-common-faa's package
+  pascal_common_faa_jsonmapper).
 
   It plays the part of a small HTTP API without a server: the request bodies
   are strings, and each "endpoint" is a procedure that answers with what an
@@ -40,11 +41,11 @@ uses
   {$ENDIF}
   SysUtils,
   PascalDb.Interfaces,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.SqlLoader,
   PascalDb.SqlSources,
   PascalJsonMapper.Mapper,
-  PascalDb.JsonMapper.Optionals, // using it registers the converter on TJsonMapper.Shared
+  PascalCommon.JsonMapper.Optionals, // using it registers the converter on TJsonMapper.Shared
   Samples.Env;
 
 type

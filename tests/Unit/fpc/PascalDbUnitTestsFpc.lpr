@@ -25,16 +25,13 @@ uses
   Interfaces, Forms, GuiTestRunner,
   {$ENDIF}
   Classes, consoletestrunner, testregistry,
-  PascalDb.OptionalsTests,
-  PascalDb.ClockCacheTests,
   PascalDb.SqlLoaderTests,
   PascalDb.MockTests,
   PascalDb.PoolTests,
   PascalDb.SqlSourcesTests,
   PascalDb.AdapterBaseTests,
   PascalDb.PagingTests,
-  PascalDb.BatchTests,
-  PascalDb.JsonMapperOptionalsTests;
+  PascalDb.BatchTests;
 
 // SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
 {$R ../sql/PascalDbTestSql.res}

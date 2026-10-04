@@ -26,6 +26,10 @@
     </RunParams>
     <RequiredPackages>
       <Item>
+        <PackageName Value="pascal_common_faa"/>
+        <DefaultFilename Value="..\..\external\pascal-common-faa\packages\pascal_common_faa.lpk" Prefer="True"/>
+      </Item>
+      <Item>
         <PackageName Value="pascal_db_faa"/>
         <DefaultFilename Value="..\..\packages\pascal_db_faa.lpk"/>
       </Item>
@@ -34,8 +38,12 @@
         <DefaultFilename Value="..\..\packages\pascal_db_faa_sqldb.lpk"/>
       </Item>
       <Item>
-        <PackageName Value="pascal_db_faa_jsonmapper"/>
-        <DefaultFilename Value="..\..\packages\pascal_db_faa_jsonmapper.lpk"/>
+        <PackageName Value="pascaljsonmapper_pkg"/>
+        <DefaultFilename Value="..\..\external\pascal-jsonmapper-faa\packages\pascaljsonmapper_pkg.lpk" Prefer="True"/>
+      </Item>
+      <Item>
+        <PackageName Value="pascal_common_faa_jsonmapper"/>
+        <DefaultFilename Value="..\..\external\pascal-common-faa\packages\pascal_common_faa_jsonmapper.lpk" Prefer="True"/>
       </Item>
       <Item>
         <PackageName Value="FCL"/>

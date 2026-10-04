@@ -35,9 +35,9 @@ The other direction too: fixed here after the extraction, probably still present
 - The pool's snapshot counters (`TotalTimeouts`, `TotalCreated`, `TotalDiscarded`,
   `TotalIdleSwept`) were incremented with a plain `Inc`, some outside the pool's lock, so
   concurrent events lost counts: sample 05 had 3 timeouts at the same moment and the snapshot
-  said 2. They now use `PdbAtomicInc64`/`PdbAtomicAdd64` and are read with `PdbAtomicRead64`.
-- `TClock` and `TSleep` (`PascalDb.SystemContext`) created their default instance lazily on the
-  first call; two threads making that first call together raced on the shared interface (one
+  said 2. They now use `PcAtomicInc64`/`PcAtomicAdd64` and are read with `PcAtomicRead64`.
+- `TClock` and `TSleep` (then `PascalDb.SystemContext`, now in pascal-common-faa) created their
+  default instance lazily on the first call; two threads making that first call together raced on the shared interface (one
   instance leaked, another was released twice: `EInvalidPointer`/`EAccessViolation` in pool
   workers). Measured on Linux FPC, `--cpus=1`, 4 runners at once, `--suite=TPoolTests` × 400:
   14 failures and 73 leaks before, 0 and 0 after. The defaults are now created in the unit's
@@ -49,8 +49,9 @@ The other direction too: fixed here after the extraction, probably still present
 | `PascalDb.Pool` | `Db.Connection.Pool` |
 | `PascalDb.Migrations` | `Db.Migrations` |
 | `PascalDb.SqlLoader` / `SqlDialect` / `Registry` / `Mock` | `Db.SqlLoader` / `Db.SqlDialect` / `Db.Adapters.Registry` / `Db.Mock` |
-| `PascalDb.Optionals` / `ClockCache` / `SystemContext` / `SafeLog` | `Common.*` with the same name |
-| `PascalDb.Threading` | — (new: portable atomics + tick) |
+| `PascalDb.SafeLog` | `Common.SafeLog` |
+| `PascalCommon.Optionals` / `ClockCache` / `SystemContext` (pascal-common-faa) | `Common.*` with the same name |
+| `PascalCommon.Threading` (pascal-common-faa) | — (new: portable atomics + tick) |
 
 The origin is in Portuguese (comments, messages, some test names); this repository was
 translated to English after the extraction, so identifiers and messages differ where they
@@ -77,9 +78,9 @@ path.
   `reference to` in Delphi and `of object` in FPC. The portable subset is "pass a method": it
   compiles on both. Delphi-only users can still pass a closure. Real examples:
   `TPoolEventProc`, `TMigrationEventProc`.
-- **Atomics and monotonic time only through `PascalDb.Threading`** (`PdbAtomicInc`,
-  `PdbAtomicInc64`, `PdbAtomicRead64`, `PdbTickMs`). `TInterlocked` and `TStopwatch` don't
-  exist in FPC.
+- **Atomics and monotonic time only through `PascalCommon.Threading`** (`PcAtomicInc`,
+  `PcAtomicInc64`, `PcAtomicRead64`, `PcTickMs`, `PcTickUs`). `TInterlocked` and `TStopwatch`
+  don't exist in FPC.
 - **Never `TDictionary.Create(AComparer)` with a possibly-`nil` `AComparer`** (see gotcha 1
   in docs/gotchas.md).
 - **Top-of-file comment in every unit, program and test**, between `unit X;` (+ `{$I
@@ -135,24 +136,50 @@ as integer literals. Firebird uses `ROWS m TO n` because `OFFSET/FETCH` needs 3.
 
 ---
 
+## pascal-common-faa (base library)
+
+The optional types (`PascalCommon.Optionals`), the atomics and ticks (`PascalCommon.Threading`),
+`TClock`/`TTicker`/`TSleep` (`PascalCommon.SystemContext`) and `TClockCache`
+(`PascalCommon.ClockCache`) come from [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa),
+shared with pascal-named-pipes-faa, pascal-amqp-faa and pascal-redis-faa. They lived here as
+`PascalDb.Optionals`, `PascalDb.Threading` (`Pdb*` functions), `PascalDb.SystemContext` and
+`PascalDb.ClockCache` until 0.8.0; their tests (`OptionalsTests`, `ClockCacheTests`) went with
+them. Moved in the pilot migration (pascal-common-faa's plan, phase F6, 2026-10-04).
+
+- **A git submodule in `external/pascal-common-faa`, for tests, CI and samples only.** The
+  application provides the single copy (several `*-faa` libraries may depend on it):
+  `pascal_db_faa.lpk` requires `pascal_common_faa` **by name, with no `DefaultFilename`**, and the
+  test and sample `.lpi` files point at the submodule's `.lpk` with `Prefer="True"`, listed
+  first. The Delphi projects add `external/pascal-common-faa/src` to the search path.
+- **Minimum version** checked in `PascalDb.Interfaces` (every user compiles it):
+  `PASCALCOMMON_VERSION < 200` stops the build with "pascal-db-faa needs pascal-common-faa 0.2.0
+  or later" (measured by raising the bound: lazbuild "Fatal: (2022) User defined: ...", Delphi 12
+  "F1054 ..."; 0.2.0 is the first version tested, its code is the same as 0.1.0 without the
+  deprecated `TOptNullXxx.Safe*`). Raise it when the library starts using something newer.
+- **Checkout without `--recursive`**: pascal-common-faa's own `external/pascal-jsonmapper-faa` is
+  for its own tests. CI uses `submodules: true` (not recursive).
+- Something the library needs changed there goes to pascal-common-faa first (strict semver,
+  additive within a major version), never patched in the submodule.
+
 ## JSON bridge (pascal-jsonmapper-faa)
 
-`bridges/jsonmapper/PascalDb.JsonMapper.Optionals.pas` (package `pascal_db_faa_jsonmapper.lpk`)
-is the `IJsonConverter` for the 27 optional interfaces, written from the guide
-`external/pascal-jsonmapper-faa/docs/converters.md`. The mapper is a **git submodule**
-(`external/pascal-jsonmapper-faa`); the core never uses it, only the bridge does. The unit
-suites build it (lpi requires the bridge package; the Delphi dproj has the submodule's `src` and
-`bridges/jsonmapper` on its search path; `test_fpc_docker.sh` copies both into the container), so
-a clone without `git submodule update --init` can't run them. CI checks out with
-`submodules: true`.
+The `IJsonConverter` for the 27 optional interfaces is pascal-common-faa's
+`PascalCommon.JsonMapper.Optionals` (package `pascal_common_faa_jsonmapper.lpk`; it was
+`PascalDb.JsonMapper.Optionals` / `pascal_db_faa_jsonmapper.lpk` here until 0.8.0, and its tests
+went with it). Only sample 06 uses it. The mapper stays a **git submodule** here
+(`external/pascal-jsonmapper-faa`), and the bridge is built against **this** copy, not
+pascal-common-faa's (which isn't checked out): `JsonApi.lpi` requires `pascaljsonmapper_pkg`
+from `external/pascal-jsonmapper-faa` with `Prefer="True"` before the bridge package. Measured
+with lazbuild: without that item, the bridge's `DefaultFilename` (into pascal-common-faa's empty
+`external/`) misses and Lazarus silently takes whatever `pascaljsonmapper_pkg` the IDE has
+registered (here, a separate `../pascal-jsonmapper-faa` checkout). `JsonApi.dproj` has the
+mapper's `src` and `external/pascal-common-faa/bridges/jsonmapper` on its search path;
+`test_samples_docker.sh` passes the same folders to `fpc`.
 
-Decided 2026-10-02 (different from `Common.JsonMapper` in delphi-api-infra-faa, pinned by
-`PascalDb.JsonMapperOptionalsTests`): `null` into an `IOptXxx` raises; a `nil` `INullXxx` is
-written as `null`. Also: an `IOptXxx` holding Null writes `null`; GUIDs go out with braces and are
-read with or without; `DecimalPlaces` isn't in the JSON. Values are fetched through the declared
-interface (`IOptString`...), never `IOptional<T>` (one GUID for every specialization), and read
-from `TValue` raw data, as the mapper does. Number/date text is the mapper's (`1E300`,
-`2000-01-01T00:00:00` without `.000`).
+The JSON decisions (2026-10-02, now pinned by pascal-common-faa's
+`PascalCommon.JsonMapperOptionalsTests`): `null` into an `IOptXxx` raises; a `nil` `INullXxx` is
+written as `null`; an `IOptXxx` holding Null writes `null`; GUIDs go out with braces and are read
+with or without; `DecimalPlaces` isn't in the JSON.
 
 ---
 
@@ -267,7 +294,7 @@ them the driver's quirks):
   applies `IDatabaseConfig.LockTimeoutMs` its own way (gotcha 32).
 - Statement events (`AOnStatement`, `TStatementInfo` in `PascalDb.Pool`) are raised by the
   pool's `TQueryWrapper`, the one place every pooled `Open`/`ExecSql` goes through, so adapters
-  need nothing for them. Timed with `PdbTickUs`: `PdbTickMs` (`GetTickCount64`) moves in 15-16 ms
+  need nothing for them. Timed with `PcTickUs`: `PcTickMs` (`GetTickCount64`) moves in 15-16 ms
   steps on Windows (measured). No parameter values on purpose (secrets in logs; `IParams` can't
   list them).
 - Batches (`PascalDb.Batch`, `TBatch.New(Query, Sql, MaxRows)`): the rows are buffered with one

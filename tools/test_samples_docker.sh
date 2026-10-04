@@ -5,8 +5,9 @@
 # samples 02 to 06 run against the server (03 twice: every migration applies
 # on the first run, none on the second; the outcomes of 04's partial updates,
 # of 05's three pool phases and 06's JSON responses are checked in their
-# output). 06 builds the pascal-jsonmapper-faa submodule. Everything is
-# removed at the end, even on failure. Acceptance: every sample exits with 0
+# output). Every sample builds the pascal-common-faa submodule, and 06 the
+# pascal-jsonmapper-faa one too. Everything is removed at the end, even on
+# failure. Acceptance: every sample exits with 0
 # and reports 0 unfreed blocks. SQLite needs no server: its database is a file
 # inside the FPC container.
 #
@@ -93,6 +94,10 @@ trap cleanup EXIT
 cleanup
 
 cd "$ROOT"
+# pascal-common-faa (every build) and pascal-jsonmapper-faa (sample 06) are submodules.
+for M in external/pascal-common-faa/src/PascalCommon.Optionals.pas external/pascal-jsonmapper-faa/src/PascalJsonMapper.Mapper.pas; do
+  [ -f "$M" ] || { echo "$M is missing: git submodule update --init"; exit 1; }
+done
 python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sql/MigrationsSql.res --check
 
 docker network create "$NET" >/dev/null
@@ -121,11 +126,12 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   ACCEPT_EULA=Y apt-get install -y -qq $CLIENT_PKG >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
   export PASCALDB_SAMPLE_CLIENT="$(ls $CLIENT_GLOB 2>/dev/null | head -1)"
   [ -n "$PASCALDB_SAMPLE_CLIENT" ] || { echo "client library not installed: $CLIENT_GLOB"; tail -20 /t-apt.log; exit 1; }
-  mkdir -p /t/u1 /t/u2 /t/u3 /t/u4 /t/u5 /t/u6 /t/external && cp -r /src/src /src/adapters /src/samples /src/bridges /t/
-  cp -r /src/external/pascal-jsonmapper-faa /t/external/
+  mkdir -p /t/u1 /t/u2 /t/u3 /t/u4 /t/u5 /t/u6 /t/external && cp -r /src/src /src/adapters /src/samples /t/
+  cp -r /src/external/pascal-jsonmapper-faa /src/external/pascal-common-faa /t/external/
+  C=/t/external/pascal-common-faa/src
   build() { # dir program units-folder [extra options]
     cd /t/samples/$1
-    fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src -Fu../common -FU/t/$3 -gh -gl -o/t/$2 $4 $2.dpr > /t/build-$2.log 2>&1 \
+    fpc -v0 -Mdelphi -Fu/t/src -Fi/t/src -Fu$C -Fi$C -Fu../common -FU/t/$3 -gh -gl -o/t/$2 $4 $2.dpr > /t/build-$2.log 2>&1 \
       || { grep -iE "error|fatal" /t/build-$2.log | head -30; exit 1; }
   }
   run() { # program [arguments]
@@ -145,7 +151,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   build 04-optionals Optionals u4 "$ADAPTER_OPTS"
   build 05-pool PoolUnderLoad u5 "$ADAPTER_OPTS"
   M=/t/external/pascal-jsonmapper-faa/src
-  build 06-json JsonApi u6 "$ADAPTER_OPTS -Fu/t/bridges/jsonmapper -Fu$M -Fi$M"
+  build 06-json JsonApi u6 "$ADAPTER_OPTS -Fu/t/external/pascal-common-faa/bridges/jsonmapper -Fu$M -Fi$M"
   run MockRepository
   if [ -n "$DB_PORT" ]; then
     for i in $(seq 1 180); do (echo > /dev/tcp/$PASCALDB_SAMPLE_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done

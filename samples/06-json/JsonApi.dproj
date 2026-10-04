@@ -38,7 +38,7 @@
         <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
         <DCC_ExeOutput>.\$(Platform)\$(Config)</DCC_ExeOutput>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
-        <DCC_UnitSearchPath>..\..\src;..\..\adapters\firedac;..\common;..\..\external\pascal-jsonmapper-faa\src;..\..\bridges\jsonmapper;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>..\..\src;..\..\external\pascal-common-faa\src;..\..\adapters\firedac;..\common;..\..\external\pascal-jsonmapper-faa\src;..\..\external\pascal-common-faa\bridges\jsonmapper;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <SanitizedProjectName>JsonApi</SanitizedProjectName>
         <UsingDelphiRTL>true</UsingDelphiRTL>
     </PropertyGroup>

@@ -39,7 +39,7 @@ uses
   Variants,
   Generics.Collections,
   PascalDb.Interfaces,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.Adapter.Base;
 
 const

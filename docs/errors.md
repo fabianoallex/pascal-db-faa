@@ -211,7 +211,7 @@ commit), catching `EDatabaseUnavailableException`, which also covers `EDatabaseC
 Bound it by total time and wait longer each round:
 
 ```pascal
-uses PascalDb.Threading; // PdbTickMs: a monotonic clock on both compilers
+uses PascalCommon.Threading; // PcTickMs: a monotonic clock on both compilers (pascal-common-faa)
 
 procedure TOrderService.SaveWithRetry(const AOrder: TOrder);
 const
@@ -220,7 +220,7 @@ var
   LStart: UInt64;
   LDelayMs: Cardinal;
 begin
-  LStart := PdbTickMs;
+  LStart := PcTickMs;
   LDelayMs := 200;
   while True do
     try
@@ -229,7 +229,7 @@ begin
     except
       on E: EDatabaseUnavailableException do
       begin
-        if PdbTickMs - LStart + LDelayMs > DEADLINE_MS then
+        if PcTickMs - LStart + LDelayMs > DEADLINE_MS then
           raise;
         Sleep(LDelayMs);
         LDelayMs := LDelayMs * 2; // 200, 400, 800 ms, ...

@@ -22,7 +22,7 @@ uses
   SysUtils,
   DB,
   PascalDb.Interfaces,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.SqlDialect,
   PascalDb.Adapter.Base,
   PascalDb.Adapter.DataSet;

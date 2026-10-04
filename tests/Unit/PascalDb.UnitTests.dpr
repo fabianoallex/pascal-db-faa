@@ -16,10 +16,6 @@ uses
   DUnitX.Loggers.Console,
   DUnitX.Loggers.Xml.NUnit,
   DUnitX.TestFramework,
-  PascalDb.Threading in '..\..\src\PascalDb.Threading.pas',
-  PascalDb.SystemContext in '..\..\src\PascalDb.SystemContext.pas',
-  PascalDb.ClockCache in '..\..\src\PascalDb.ClockCache.pas',
-  PascalDb.Optionals in '..\..\src\PascalDb.Optionals.pas',
   PascalDb.SqlSources in '..\..\src\PascalDb.SqlSources.pas',
   PascalDb.SqlLoader in '..\..\src\PascalDb.SqlLoader.pas',
   PascalDb.Interfaces in '..\..\src\PascalDb.Interfaces.pas',
@@ -33,20 +29,14 @@ uses
   PascalDb.Adapter.Base in '..\..\src\PascalDb.Adapter.Base.pas',
   PascalDb.Adapter.DataSet in '..\..\src\PascalDb.Adapter.DataSet.pas',
   PascalDb.Batch in '..\..\src\PascalDb.Batch.pas',
-  PascalJsonMapper.Json in '..\..\external\pascal-jsonmapper-faa\src\PascalJsonMapper.Json.pas',
-  PascalJsonMapper.Mapper in '..\..\external\pascal-jsonmapper-faa\src\PascalJsonMapper.Mapper.pas',
-  PascalDb.JsonMapper.Optionals in '..\..\bridges\jsonmapper\PascalDb.JsonMapper.Optionals.pas',
   PascalDb.DUnitXCompat in 'PascalDb.DUnitXCompat.pas',
-  PascalDb.OptionalsTests in 'PascalDb.OptionalsTests.pas',
-  PascalDb.ClockCacheTests in 'PascalDb.ClockCacheTests.pas',
   PascalDb.SqlLoaderTests in 'PascalDb.SqlLoaderTests.pas',
   PascalDb.MockTests in 'PascalDb.MockTests.pas',
   PascalDb.PoolTests in 'PascalDb.PoolTests.pas',
   PascalDb.SqlSourcesTests in 'PascalDb.SqlSourcesTests.pas',
   PascalDb.AdapterBaseTests in 'PascalDb.AdapterBaseTests.pas',
   PascalDb.PagingTests in 'PascalDb.PagingTests.pas',
-  PascalDb.BatchTests in 'PascalDb.BatchTests.pas',
-  PascalDb.JsonMapperOptionalsTests in 'PascalDb.JsonMapperOptionalsTests.pas';
+  PascalDb.BatchTests in 'PascalDb.BatchTests.pas';
 
 // SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
 {$R 'sql\PascalDbTestSql.res'}

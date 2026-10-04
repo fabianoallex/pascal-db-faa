@@ -42,8 +42,8 @@
   Dual-compiler: the sweep thread is a TThread subclass (not
   CreateAnonymousThread), and TPoolEventProc follows PASCALDB_FUNCREFS
   (pascaldb.inc): closure or method in Delphi, method in FPC 3.2.2. Time and
-  waiting go through PascalDb.SystemContext, so tests control the clock and
-  Sleep. Idle times are measured with the monotonic TTicker, never the wall
+  waiting go through PascalCommon.SystemContext, so tests control the clock
+  and Sleep. Idle times are measured with the monotonic TTicker, never the wall
   clock: changing the system time must not age or rejuvenate a connection. }
 
 interface
@@ -54,8 +54,8 @@ uses
   Generics.Collections,
   SyncObjs,
   PascalDb.Interfaces,
-  PascalDb.SystemContext,
-  PascalDb.Optionals;
+  PascalCommon.SystemContext,
+  PascalCommon.Optionals;
 
 type
 
@@ -214,7 +214,7 @@ type
   TStatementInfo = record
     Kind: TStatementKind;
     Sql: string;           // the text the query ran, after SQL tags were processed
-    ElapsedUs: Int64;      // microseconds (PdbTickUs); for Open, includes fetching every row
+    ElapsedUs: Int64;      // microseconds (PcTickUs); for Open, includes fetching every row
     Rows: Int64;           // Open: rows fetched (RecordCount); ExecSql: -1 (not reported yet);
                            // ExecBatch: the rows of parameters sent
     ErrorClass: string;    // '' when it succeeded; otherwise the class the caller gets
@@ -311,7 +311,7 @@ type
 implementation
 
 uses
-  PascalDb.Threading;
+  PascalCommon.Threading;
 
 type
   { Idle-connection sweep thread.
@@ -466,7 +466,7 @@ var
   LInfo: TStatementInfo;
 begin
   LInfo.Kind := AKind;
-  LInfo.ElapsedUs := PdbTickUs - AStartUs;
+  LInfo.ElapsedUs := PcTickUs - AStartUs;
   LInfo.Rows := ARows;
   if Assigned(AError) then
   begin
@@ -506,7 +506,7 @@ var
 begin
   LStartUs := 0;
   if Assigned(FOnStatement) then
-    LStartUs := PdbTickUs;
+    LStartUs := PcTickUs;
   try
     FInternalQuery.ExecSql;
   except
@@ -561,7 +561,7 @@ var
 begin
   LStartUs := 0;
   if Assigned(FOnStatement) then
-    LStartUs := PdbTickUs;
+    LStartUs := PcTickUs;
   try
     LRawResult := FInternalQuery.Open;
   except
@@ -624,7 +624,7 @@ begin
     raise ENotSupportedException.Create('The adapter''s query has no native batch (INativeBatchQuery)');
   LStartUs := 0;
   if Assigned(FOnStatement) then
-    LStartUs := PdbTickUs;
+    LStartUs := PcTickUs;
   try
     LNative.ExecBatch(ARows);
   except
@@ -1230,10 +1230,10 @@ begin
   Result.IniConnections := FIniConnections;
   // Incremented from any thread, some outside FLockPool: atomic reads (a
   // plain 64-bit read can be torn on 32-bit targets).
-  Result.TotalCreated := PdbAtomicRead64(FTotalCreated);
-  Result.TotalDiscarded := PdbAtomicRead64(FTotalDiscarded);
-  Result.TotalTimeouts := PdbAtomicRead64(FTotalTimeouts);
-  Result.TotalIdleSwept := PdbAtomicRead64(FTotalIdleSwept);
+  Result.TotalCreated := PcAtomicRead64(FTotalCreated);
+  Result.TotalDiscarded := PcAtomicRead64(FTotalDiscarded);
+  Result.TotalTimeouts := PcAtomicRead64(FTotalTimeouts);
+  Result.TotalIdleSwept := PcAtomicRead64(FTotalIdleSwept);
 end;
 
 procedure TConnectionPool.StartIdleSweep;
@@ -1307,7 +1307,7 @@ begin
 
     if LToClose.Count > 0 then
     begin
-      PdbAtomicAdd64(FTotalIdleSwept, LToClose.Count);
+      PcAtomicAdd64(FTotalIdleSwept, LToClose.Count);
       LEvent := BaseEvent(pekIdleSweepClosed);
       LEvent.ClosedCount := LToClose.Count;
       Notify(LEvent);
@@ -1385,7 +1385,7 @@ begin
           // ignore — the connection is being discarded anyway
         end;
         DecrementActiveConnections;
-        PdbAtomicInc64(FTotalDiscarded);
+        PcAtomicInc64(FTotalDiscarded);
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrStaleCheckFailed;
         Notify(LEvent);
@@ -1430,7 +1430,7 @@ begin
           TryGetNewConnection) and the pool starts without this pre-warmed
           connection; the next real AcquireConnection (first request, health
           check, etc.) tries again. }
-        PdbAtomicInc64(FTotalDiscarded);
+        PcAtomicInc64(FTotalDiscarded);
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrConnectFailed;
         // The driver's text, not EDatabaseConnectException's generic one.
@@ -1526,7 +1526,7 @@ var
         raise EDatabaseConnectException.Create(E);
       end;
     end;
-    PdbAtomicInc64(FTotalCreated);
+    PcAtomicInc64(FTotalCreated);
     Notify(BaseEvent(pekConnectionCreated));
   end;
 
@@ -1548,7 +1548,7 @@ var
           finally
             DecrementActiveConnections;
           end;
-          PdbAtomicInc64(FTotalDiscarded);
+          PcAtomicInc64(FTotalDiscarded);
           LEvent := BaseEvent(pekConnectionDiscarded);
           LEvent.DiscardReason := pdrConnectFailed;
           LEvent.ErrorMessage := E.Message;
@@ -1569,7 +1569,7 @@ var
         finally
           DecrementActiveConnections;
         end;
-        PdbAtomicInc64(FTotalDiscarded);
+        PcAtomicInc64(FTotalDiscarded);
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrStaleCheckFailed;
         Notify(LEvent);
@@ -1616,7 +1616,7 @@ begin
 
     if WaitAttempts >= FWaitMaxAttemps then
     begin
-      PdbAtomicInc64(FTotalTimeouts);
+      PcAtomicInc64(FTotalTimeouts);
       LThrottleEvent := BaseEvent(pekAcquireTimeout);
       LThrottleEvent.WaitAttempts := WaitAttempts;
       Notify(LThrottleEvent);
@@ -1725,7 +1725,7 @@ begin
   end;
 
   DecrementActiveConnections;
-  PdbAtomicInc64(FTotalDiscarded);
+  PcAtomicInc64(FTotalDiscarded);
   LEvent := BaseEvent(pekConnectionDiscarded);
   LEvent.DiscardReason := pdrBrokenAfterUse;
   Notify(LEvent);

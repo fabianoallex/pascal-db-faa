@@ -18,7 +18,9 @@ for all three adapters and databases.
 - **SQL Server on Delphi: Zeos.** FireDAC's SQL Server driver (`FireDAC.Phys.MSSQL`) is not in
   Delphi's Community Edition, which the library is tested with (only its metadata unit ships), so
   the FireDAC adapter was never run against SQL Server.
-- The core package is `pascal_db_faa.lpk` (Lazarus); on Delphi, add `src` to the search path.
+- The core package is `pascal_db_faa.lpk` (Lazarus), which requires `pascal_common_faa.lpk`
+  ([pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa)); on Delphi, add `src`
+  and pascal-common-faa's `src` to the search path.
 - Which combinations were run where (compiler, bitness, OS, database version) is in the
   [README](../README.md#status). CI covers FPC on Linux; the Delphi side is run by hand.
 

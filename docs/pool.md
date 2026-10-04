@@ -54,7 +54,7 @@ wait a little for a connection is normal.
 
 Idle times are measured on a monotonic clock, so changing the system time (daylight saving, a
 manual adjustment) doesn't age the connections. Tests can replace that clock with
-`TTicker.SetTicker` (`PascalDb.SystemContext`).
+`TTicker.SetTicker` (`PascalCommon.SystemContext`, from pascal-common-faa).
 
 ## Events
 
@@ -149,7 +149,7 @@ LFactory := TSQLdbFactory.Create(LConfig, nil, LMonitor.OnPoolEvent, LSqlLog.OnS
   `IParams` has no way to list them; the SQL text has the placeholders.
 - **Only pooled queries.** A query from `IDBFactory.CreateQuery`, outside the pool, and the mock
   factory's queries aren't reported.
-- Time is measured with `PdbTickUs` (`PascalDb.Threading`): on Windows `GetTickCount64` advances
+- Time is measured with `PcTickUs` (`PascalCommon.Threading`): on Windows `GetTickCount64` advances
   in 15-16 ms steps (measured), too coarse for a statement that takes 2 ms.
 
 For production, the database's own tools see every client and the query plans: PostgreSQL's

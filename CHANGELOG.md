@@ -8,6 +8,24 @@ may change the API; each such change is listed here.
 
 ### Changed
 
+- **Breaking:** the optional types, the atomics and ticks, the clock/sleep context and the cache
+  moved to a new base library,
+  [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa) (0.2.0 or later), shared
+  with the other `*-faa` libraries; the application now provides it (see the README,
+  "Dependency: pascal-common-faa"). Renames: `PascalDb.Optionals` → `PascalCommon.Optionals`,
+  `PascalDb.SystemContext` → `PascalCommon.SystemContext`, `PascalDb.ClockCache` →
+  `PascalCommon.ClockCache`, `PascalDb.Threading` → `PascalCommon.Threading`, `PdbAtomic*` /
+  `PdbTickMs` / `PdbTickUs` → `PcAtomic*` / `PcTickMs` / `PcTickUs`; the type names
+  (`IOptString`, `TOptionals`, `TClock`, `TTicker`...) are unchanged. The JSON bridge moved too:
+  `PascalDb.JsonMapper.Optionals` → `PascalCommon.JsonMapper.Optionals`, package
+  `pascal_db_faa_jsonmapper.lpk` → `pascal_common_faa_jsonmapper.lpk`. `pascal_db_faa.lpk`
+  requires `pascal_common_faa`; on Delphi, add pascal-common-faa's `src` to the search path. An
+  older pascal-common-faa stops the build with a message naming the version needed. Behavior
+  differences that come with it: `TOptNullXxx.SafeNullable` / `SafeOptional` / `SafeOptNull`
+  (deprecated) are gone, use `TOptionals.Safe`; the 64-bit atomics wrap around instead of
+  raising `EIntOverflow` with overflow checks on. pascal-common-faa's
+  [migration guide](https://github.com/fabianoallex/pascal-common-faa/blob/main/docs/migrating.md)
+  has the full name map.
 - The pascal-jsonmapper-faa submodule moves from `6306385` to
   [v0.2.0](https://github.com/fabianoallex/pascal-jsonmapper-faa/releases/tag/v0.2.0). For code
   using the mapper this adds `Serialize<T>` / `Deserialize<T>` (arrays and other types at the top

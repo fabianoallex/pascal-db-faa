@@ -15,7 +15,8 @@ A database access layer for **Delphi and Lazarus/FPC from the same source code**
   composite. `tools/build_sql_res.py` builds the `.res` on any OS.
 - Offset paging: the clause written by each database's dialect into the SQL template, and
   page request/metadata types.
-- Optional/nullable types (`IOptXxx`, `INullXxx`, `IOptNullXxx`) integrated with the
+- Optional/nullable types (`IOptXxx`, `INullXxx`, `IOptNullXxx`, from
+  [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa)) integrated with the
   parameters.
 - `TMockDBFactory`: a complete mock for testing repositories without a database.
 
@@ -54,6 +55,22 @@ end;  // the connection goes back to the pool when LQuery and LScope are release
   writing an adapter for another component, using another database.
 - [**Samples**](samples/README.md): six console programs, each one source for both compilers.
 
+## Dependency: pascal-common-faa
+
+The optional types, the atomics and monotonic ticks, and the clock/sleep context the pool uses
+come from [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa) (0.2.0 or
+later), shared with the other `*-faa` libraries. The application provides one copy of it:
+
+- **Lazarus:** open and compile `pascal_common_faa.lpk` once (Lazarus then finds it by name);
+  `pascal_db_faa.lpk` requires it.
+- **Delphi:** add pascal-common-faa's `src` folder to the search path, next to this library's
+  `src`.
+
+This repository has it as a git submodule in `external/pascal-common-faa` for its own tests and
+samples only; don't build an application against that copy if it uses another `*-faa` library
+too. An older pascal-common-faa stops the build with "pascal-db-faa needs pascal-common-faa
+0.2.0 or later".
+
 Current version: **0.8.0**. While it is 0.x the API may still change between minor
 versions; every change is listed in the [changelog](CHANGELOG.md).
 
@@ -90,8 +107,7 @@ tests/Integration/fpc-zeos/  FPCUnit runner on Zeos (same mirror)
 adapters/sqldb/         SQLdb adapter (package pascal_db_faa_sqldb.lpk)
 adapters/firedac/       FireDAC adapter (Delphi)
 adapters/zeos/          Zeos adapter (both; package pascal_db_faa_zeos.lpk)
-bridges/jsonmapper/     optionals in JSON for pascal-jsonmapper-faa (package pascal_db_faa_jsonmapper.lpk)
-external/               git submodule: pascal-jsonmapper-faa
+external/               git submodules: pascal-common-faa, pascal-jsonmapper-faa (tests and samples)
 docs/                   usage guides (start at docs/README.md)
 samples/                console samples, one source for both compilers (see samples/README.md)
 tools/                  gen_fpc_mirror.py, build_sql_res.py, test_*.sh, ci-test.sh
@@ -101,8 +117,9 @@ PascalDb.lpg            Lazarus project group
 
 ## Tests
 
-The unit suite builds the pascal-jsonmapper-faa submodule: clone with `--recursive`, or run
-`git submodule update --init` once.
+Every suite builds the pascal-common-faa submodule (and sample 06 the pascal-jsonmapper-faa
+one): run `git submodule update --init` once after cloning. Not `--recursive`:
+pascal-common-faa's own submodule is only for its own tests.
 
 - FPC (Windows): `sh tools/test_fpc.sh`
 - FPC (Linux, via Docker): `sh tools/test_fpc_docker.sh`

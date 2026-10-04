@@ -7,7 +7,7 @@
   Violation while reading a field), events, statement events (AOnStatement),
   snapshot and concurrency.
 
-  The monotonic clock and Sleep are replaced through PascalDb.SystemContext
+  The monotonic clock and Sleep are replaced through PascalCommon.SystemContext
   (TFakeTicker, TFakeSleep); events are recorded by TPoolEventRecorder — a method, not a
   closure, because TPoolEventProc is "of object" in FPC 3.2.2.
 
@@ -26,9 +26,9 @@ uses
   PascalDb.Interfaces,
   PascalDb.Pool,
   PascalDb.SqlLoader,
-  PascalDb.SystemContext,
-  PascalDb.Optionals,
-  PascalDb.Threading,
+  PascalCommon.SystemContext,
+  PascalCommon.Optionals,
+  PascalCommon.Threading,
   PascalDb.Batch,
   Variants;
 
@@ -1919,11 +1919,11 @@ begin
   LFactory := LMockFactory;
   LPool := TConnectionPool.Create(LFactory, LConfig);
   try
-    LStart := PdbTickMs;
+    LStart := PcTickMs;
     repeat
       Sleep(20);
       LPinged := LMockFactory.TestedConnections.Count > 0;
-    until LPinged or (PdbTickMs - LStart > 5000);
+    until LPinged or (PcTickMs - LStart > 5000);
   finally
     LPool.Free;
   end;
@@ -1949,9 +1949,9 @@ begin
   LFactory := TDBFactoryMock.Create;
   LPool := TConnectionPool.Create(LFactory, LConfig);
 
-  LStart := PdbTickMs;
+  LStart := PcTickMs;
   LPool.Free;
-  LElapsed := PdbTickMs - LStart;
+  LElapsed := PcTickMs - LStart;
 
   TAssert.AssertTrue(Format('Destroy with an active sweep should be almost instant (SetEvent), took %dms',
       [LElapsed]), LElapsed < 2000);

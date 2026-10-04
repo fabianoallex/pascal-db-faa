@@ -4,8 +4,9 @@ Sample: [`04-optionals`](../samples/04-optionals/Optionals.dpr).
 
 ## Three questions, three interfaces
 
-A plain `string` or `Integer` can't say "NULL" or "not given". Unit `PascalDb.Optionals`
-adds three interface families for that:
+A plain `string` or `Integer` can't say "NULL" or "not given". Unit `PascalCommon.Optionals`
+(from [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa), which the library
+depends on) adds three interface families for that:
 
 | Interface | Answers | Typical use |
 |---|---|---|
@@ -139,16 +140,19 @@ the database.
 
 With [pascal-jsonmapper-faa](https://github.com/fabianoallex/pascal-jsonmapper-faa), a DTO can
 declare optional properties and read and write them as JSON. The converter lives in a unit of
-its own, `PascalDb.JsonMapper.Optionals` (`bridges/jsonmapper`, Lazarus package
-`pascal_db_faa_jsonmapper.lpk`), so the core doesn't depend on the mapper. The mapper is a
-git submodule in `external/pascal-jsonmapper-faa` (`git submodule update --init`); on Delphi,
-add `external/pascal-jsonmapper-faa/src` and `bridges/jsonmapper` to the search path.
+its own, `PascalCommon.JsonMapper.Optionals` (pascal-common-faa's `bridges/jsonmapper`,
+Lazarus package `pascal_common_faa_jsonmapper.lpk`), so neither the database layer nor
+pascal-common-faa depends on the mapper. In this repository the mapper is a git submodule in
+`external/pascal-jsonmapper-faa` (`git submodule update --init`); on Delphi, add the mapper's
+`src` and pascal-common-faa's `bridges/jsonmapper` to the search path. On Lazarus, require
+`pascaljsonmapper_pkg` in the project as well, so the bridge builds against the mapper you
+chose (sample 06 does).
 
 Using the unit is all it takes: its initialization registers the converter on
 `TJsonMapper.Shared`. A mapper created by hand gets it from `RegisterOptionalsConverter(M)`.
 
 ```pascal
-uses PascalJsonMapper.Mapper, PascalDb.Optionals, PascalDb.JsonMapper.Optionals;
+uses PascalJsonMapper.Mapper, PascalCommon.Optionals, PascalCommon.JsonMapper.Optionals;
 
 {$M+}
 TCustomerPatch = class(TInterfacedObject, ICustomerPatch)

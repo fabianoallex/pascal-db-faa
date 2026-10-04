@@ -16,18 +16,28 @@
   safe to expose, with the original detail kept in
   OriginalClassName/OriginalMessage.
 
-  IParams and IQueryResult expose the PascalDb.Optionals types (IOptXxx,
+  IParams and IQueryResult expose the PascalCommon.Optionals types (IOptXxx,
   INullXxx, IOptNullXxx): an optional parameter is only bound when HasValue,
-  and a nullable column is read as INullXxx. }
+  and a nullable column is read as INullXxx.
+
+  The minimum pascal-common-faa version is checked here, since every user of
+  the library compiles this unit: an older copy of pascal-common-faa provided
+  by the application fails the build with that message instead of a missing
+  identifier somewhere inside the library. }
 
 interface
 
 uses
   Classes,
   SysUtils,
-  PascalDb.Optionals,
+  PascalCommon.Version,
+  PascalCommon.Optionals,
   PascalDb.SqlSources,
   PascalDb.SqlLoader;
+
+{$IF PASCALCOMMON_VERSION < 200}
+  {$MESSAGE FATAL 'pascal-db-faa needs pascal-common-faa 0.2.0 or later'}
+{$IFEND}
 
 type
   ISQLDialect = interface

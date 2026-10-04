@@ -2,7 +2,7 @@
 
 (* Sample 04: optional and nullable values, and SQL templates shaped by them.
 
-  Three kinds of value, all from PascalDb.Optionals (one class per type,
+  Three kinds of value, all from PascalCommon.Optionals (one class per type,
   TOptNullXxx, implements the three interfaces):
     INullXxx     "is it NULL?"       (IsNull)   a nullable column or parameter
     IOptXxx      "was it given?"     (HasValue) an optional filter
@@ -40,7 +40,7 @@ uses
   {$ENDIF}
   SysUtils,
   PascalDb.Interfaces,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.SqlLoader,
   PascalDb.SqlSources,
   Samples.Env;

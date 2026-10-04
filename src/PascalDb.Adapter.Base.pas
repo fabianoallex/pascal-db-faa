@@ -38,7 +38,7 @@ uses
   Classes,
   SysUtils,
   PascalDb.Interfaces,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.SqlSources,
   PascalDb.SqlLoader,
   PascalDb.Pool;

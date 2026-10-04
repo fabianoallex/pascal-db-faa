@@ -22,22 +22,6 @@
         <Type Value="Include"/>
       </Item>
       <Item>
-        <Filename Value="..\src\PascalDb.Threading.pas"/>
-        <UnitName Value="PascalDb.Threading"/>
-      </Item>
-      <Item>
-        <Filename Value="..\src\PascalDb.SystemContext.pas"/>
-        <UnitName Value="PascalDb.SystemContext"/>
-      </Item>
-      <Item>
-        <Filename Value="..\src\PascalDb.ClockCache.pas"/>
-        <UnitName Value="PascalDb.ClockCache"/>
-      </Item>
-      <Item>
-        <Filename Value="..\src\PascalDb.Optionals.pas"/>
-        <UnitName Value="PascalDb.Optionals"/>
-      </Item>
-      <Item>
         <Filename Value="..\src\PascalDb.SqlSources.pas"/>
         <UnitName Value="PascalDb.SqlSources"/>
       </Item>
@@ -91,6 +75,10 @@
       </Item>
     </Files>
     <RequiredPkgs>
+      <Item>
+        <PackageName Value="pascal_common_faa"/>
+        <MinVersion Minor="2" Valid="True"/>
+      </Item>
       <Item>
         <PackageName Value="FCL"/>
       </Item>

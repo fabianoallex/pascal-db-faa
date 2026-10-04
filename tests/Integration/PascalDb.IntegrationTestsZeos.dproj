@@ -68,7 +68,7 @@
         <DCC_DcuOutput>.\$(Platform)\$(Config)\Zeos</DCC_DcuOutput>
         <DCC_ExeOutput>.\$(Platform)\$(Config)\Zeos</DCC_ExeOutput>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
-        <DCC_UnitSearchPath>$(DUnitX);..\..\src;..\..\adapters\zeos;..\Unit;$(ZEOSDBO)\src\core;$(ZEOSDBO)\src\parsesql;$(ZEOSDBO)\src\plain;$(ZEOSDBO)\src\dbc;$(ZEOSDBO)\src\component;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>$(DUnitX);..\..\src;..\..\external\pascal-common-faa\src;..\..\adapters\zeos;..\Unit;$(ZEOSDBO)\src\core;$(ZEOSDBO)\src\parsesql;$(ZEOSDBO)\src\plain;$(ZEOSDBO)\src\dbc;$(ZEOSDBO)\src\component;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <DCC_IncludePath>$(ZEOSDBO)\src;$(DCC_IncludePath)</DCC_IncludePath>
         <DCC_Define>PASCALDB_IT_ZEOS;$(DCC_Define)</DCC_Define>
         <SanitizedProjectName>PascalDb_IntegrationTestsZeos</SanitizedProjectName>

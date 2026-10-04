@@ -68,7 +68,7 @@
         <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
         <DCC_ExeOutput>.\$(Platform)\$(Config)</DCC_ExeOutput>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
-        <DCC_UnitSearchPath>$(DUnitX);..\..\src;..\..\external\pascal-jsonmapper-faa\src;..\..\bridges\jsonmapper;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>$(DUnitX);..\..\src;..\..\external\pascal-common-faa\src;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <SanitizedProjectName>PascalDb_UnitTests</SanitizedProjectName>
         <UsingDelphiRTL>true</UsingDelphiRTL>
     </PropertyGroup>
@@ -113,10 +113,6 @@
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
-        <DCCReference Include="..\..\src\PascalDb.Threading.pas"/>
-        <DCCReference Include="..\..\src\PascalDb.SystemContext.pas"/>
-        <DCCReference Include="..\..\src\PascalDb.ClockCache.pas"/>
-        <DCCReference Include="..\..\src\PascalDb.Optionals.pas"/>
         <DCCReference Include="..\..\src\PascalDb.SqlSources.pas"/>
         <DCCReference Include="..\..\src\PascalDb.SqlLoader.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Interfaces.pas"/>
@@ -130,12 +126,7 @@
         <DCCReference Include="..\..\src\PascalDb.Adapter.Base.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Adapter.DataSet.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Batch.pas"/>
-        <DCCReference Include="..\..\external\pascal-jsonmapper-faa\src\PascalJsonMapper.Json.pas"/>
-        <DCCReference Include="..\..\external\pascal-jsonmapper-faa\src\PascalJsonMapper.Mapper.pas"/>
-        <DCCReference Include="..\..\bridges\jsonmapper\PascalDb.JsonMapper.Optionals.pas"/>
         <DCCReference Include="PascalDb.DUnitXCompat.pas"/>
-        <DCCReference Include="PascalDb.OptionalsTests.pas"/>
-        <DCCReference Include="PascalDb.ClockCacheTests.pas"/>
         <DCCReference Include="PascalDb.SqlLoaderTests.pas"/>
         <DCCReference Include="PascalDb.MockTests.pas"/>
         <DCCReference Include="PascalDb.PoolTests.pas"/>
@@ -143,7 +134,6 @@
         <DCCReference Include="PascalDb.AdapterBaseTests.pas"/>
         <DCCReference Include="PascalDb.PagingTests.pas"/>
         <DCCReference Include="PascalDb.BatchTests.pas"/>
-        <DCCReference Include="PascalDb.JsonMapperOptionalsTests.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

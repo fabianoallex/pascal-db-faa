@@ -63,7 +63,7 @@ uses
   SysUtils,
   Variants,
   Generics.Collections,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.Interfaces,
   PascalDb.SqlLoader;
 

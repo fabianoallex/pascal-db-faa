@@ -21,7 +21,7 @@ uses
   Variants,
   Generics.Collections,
   PascalDb.Interfaces,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.Mock,
   PascalDb.Batch;
 

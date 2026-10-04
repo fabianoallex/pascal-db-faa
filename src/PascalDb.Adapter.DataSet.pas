@@ -31,7 +31,7 @@ uses
   Variants,
   DB,
   PascalDb.Interfaces,
-  PascalDb.Optionals,
+  PascalCommon.Optionals,
   PascalDb.Adapter.Base;
 
 type
