@@ -6,6 +6,14 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-05
+
+### Changed
+
+- Tests, CI and samples build against pascal-common-faa 1.2.0 (the `external/pascal-common-faa`
+  submodule). The library's code is unchanged and still requires 1.0.0 or later: it uses nothing
+  added after 1.0.0.
+
 ## [0.10.0] - 2026-10-05
 
 ### Fixed
@@ -303,6 +311,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.10.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.7.0...v0.8.0
