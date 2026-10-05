@@ -15,7 +15,7 @@
     </CompilerOptions>
     <Description Value="ZeosLib 8 adapter for pascal-db-faa (Delphi and Free Pascal/Lazarus): IDBFactory over TZConnection (Firebird, PostgreSQL). Requires the zcomponent package."/>
     <License Value="MIT"/>
-    <Version Minor="9"/>
+    <Version Minor="10"/>
     <Files>
       <Item>
         <Filename Value="..\adapters\zeos\PascalDb.Adapter.Zeos.pas"/>
