@@ -1,8 +1,9 @@
 ﻿unit PascalDb.SqlLoaderTests;
 
 { Tests for SQL template processing (TSQLResult, in PascalDb.SqlLoader):
-  ProcessTag keeping and removing blocks, repeated tags, extra spaces in the
-  tag, removal of COMMENTS and of leftover tags, ReplaceLiteral,
+  ProcessTag keeping and removing blocks, repeated tags, optional spaces in
+  both markers, pairing each opening with its own closing, the errors for
+  malformed blocks, removal of COMMENTS and of leftover tags, ReplaceLiteral,
   ApplyOperator and ApplyFilter. Resource loading is not covered.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
@@ -42,6 +43,32 @@ type
     { ProcessTag: opening tag with multiple spaces, Keep=True }
     [Test] procedure Test_ProcessTag_MultipleSpaces_True;
 
+    (* ProcessTag: the closing marker accepts no space or several, like the
+       opening one: [}FILTER], [}   FILTER ] *)
+    [Test] procedure Test_ProcessTag_ClosingSpaces_False;
+    [Test] procedure Test_ProcessTag_ClosingSpaces_True;
+
+    (* ProcessTag: spaces after the opening bracket: [ FILTER{] *)
+    [Test] procedure Test_ProcessTag_SpaceAfterOpeningBracket;
+
+    { ProcessTag: a tag whose name starts with another tag's name is left alone }
+    [Test] procedure Test_ProcessTag_LongerTagNameUntouched;
+
+    { ProcessTag(False): removes each block, never the SQL between two blocks }
+    [Test] procedure Test_ProcessTag_KeepsSqlBetweenBlocks;
+
+    { GetSQL: leftover markers are removed whatever their spacing }
+    [Test] procedure Test_GetSQL_CleansLeftoverTags_AnySpacing;
+
+    { ProcessTag: a closing marker before any opening one raises (it used to loop forever) }
+    [Test] procedure Test_ProcessTag_ClosingBeforeOpening_Raises;
+
+    { ProcessTag: an opening marker with no closing one raises }
+    [Test] procedure Test_ProcessTag_MissingClosing_Raises;
+
+    { ProcessTag: a block nested in a block of the same tag raises }
+    [Test] procedure Test_ProcessTag_Nested_Raises;
+
     (* ReplaceLiteral: replaces ${TAG} with the given value *)
     [Test] procedure Test_ReplaceLiteral_Simple;
 
@@ -72,6 +99,18 @@ const
 
   SQL_LITERAL =
     'SELECT * FROM ${TABLE} WHERE FIELD ${FIELD_OP} :FIELD';
+
+// The message of the ESQLLoaderException ProcessTag raised, or '' if none.
+function ProcessTagError(const ASql, ATag: string; AKeep: Boolean): string;
+begin
+  Result := '';
+  try
+    TSQLResult.From(ASql).ProcessTag(ATag, AKeep);
+  except
+    on E: ESQLLoaderException do
+      Result := E.Message;
+  end;
+end;
 
 { TSQLLoaderTests }
 
@@ -132,6 +171,83 @@ var
 begin
   LResult := TSQLResult.From(SQL_TAGS_MULTISPACE).ProcessTag('FILTER', True).SQL;
   TAssert.AssertEquals('ProcessTag(True) must keep the content even with extra spaces in the opening tag', 'SELECT * FROM CUSTOMERS WHERE 1=1 AND ACTIVE = ''S''', Trim(LResult));
+end;
+
+procedure TSQLLoaderTests.Test_ProcessTag_ClosingSpaces_False;
+var
+  LResult: string;
+begin
+  LResult := TSQLResult.From('W [FILTER {]A[}FILTER] X [FILTER {]B[}   FILTER ] Y')
+    .ProcessTag('FILTER', False).SQL;
+  TAssert.AssertEquals('ProcessTag(False) must recognize closing markers with no space or several', 'W  X  Y', LResult);
+end;
+
+procedure TSQLLoaderTests.Test_ProcessTag_ClosingSpaces_True;
+var
+  LResult: string;
+begin
+  LResult := TSQLResult.From('W [FILTER {]A[}FILTER] X [FILTER {]B[}   FILTER ] Y')
+    .ProcessTag('FILTER', True).SQL;
+  TAssert.AssertEquals('ProcessTag(True) must remove closing markers with no space or several', 'W A X B Y', LResult);
+end;
+
+procedure TSQLLoaderTests.Test_ProcessTag_SpaceAfterOpeningBracket;
+var
+  LResult: string;
+begin
+  LResult := TSQLResult.From('W [ FILTER{]A[} FILTER] Y').ProcessTag('FILTER', True).SQL;
+  TAssert.AssertEquals('ProcessTag must accept spaces between [ and the tag name', 'W A Y', LResult);
+end;
+
+procedure TSQLLoaderTests.Test_ProcessTag_LongerTagNameUntouched;
+var
+  LResult: string;
+begin
+  LResult := TSQLResult.From('W [FILTER_X {]A[} FILTER_X] Y').ProcessTag('FILTER', False).SQL;
+  TAssert.AssertEquals('ProcessTag(FILTER) must not touch a FILTER_X block', 'W A Y', LResult);
+end;
+
+procedure TSQLLoaderTests.Test_ProcessTag_KeepsSqlBetweenBlocks;
+var
+  LResult: string;
+begin
+  LResult := TSQLResult.From('W [F {]A[}F] X [F {]B[} F] Y').ProcessTag('F', False).SQL;
+  TAssert.AssertEquals('ProcessTag(False) must keep the SQL between two blocks', 'W  X  Y', LResult);
+end;
+
+procedure TSQLLoaderTests.Test_GetSQL_CleansLeftoverTags_AnySpacing;
+var
+  LResult: string;
+begin
+  LResult := TSQLResult.From('W [FILTER{]A[}FILTER] X [ OTHER  {]B[}  OTHER ] Y').SQL;
+  TAssert.AssertEquals('GetSQL must remove leftover markers whatever their spacing', 'W A X B Y', LResult);
+end;
+
+procedure TSQLLoaderTests.Test_ProcessTag_ClosingBeforeOpening_Raises;
+var
+  LMessage: string;
+begin
+  LMessage := ProcessTagError('W [} F] X [F {]B[} F] Y', 'F', False);
+  TAssert.AssertTrue('A closing marker before any opening must raise ESQLLoaderException', LMessage <> '');
+  TAssert.AssertTrue('The message must name the tag', Pos('SQL tag F:', LMessage) > 0);
+end;
+
+procedure TSQLLoaderTests.Test_ProcessTag_MissingClosing_Raises;
+var
+  LMessage: string;
+begin
+  LMessage := ProcessTagError('W [F {]A[} F] X [F {]B Y', 'F', True);
+  TAssert.AssertTrue('An opening marker with no closing must raise ESQLLoaderException', LMessage <> '');
+  TAssert.AssertTrue('The message must say the closing marker is missing', Pos('no closing marker', LMessage) > 0);
+end;
+
+procedure TSQLLoaderTests.Test_ProcessTag_Nested_Raises;
+var
+  LMessage: string;
+begin
+  LMessage := ProcessTagError('W [F {]A [F {]B[} F] C[} F] Y', 'F', False);
+  TAssert.AssertTrue('A block nested in a block of the same tag must raise ESQLLoaderException', LMessage <> '');
+  TAssert.AssertTrue('The message must say the block is nested', Pos('nested', LMessage) > 0);
 end;
 
 procedure TSQLLoaderTests.Test_ReplaceLiteral_Simple;

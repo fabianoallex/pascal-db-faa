@@ -130,6 +130,12 @@ LQuery.Sql := LSql.SQL;
 | `ApplyOperator('TAG', Op)` | `ReplaceLiteral('TAG_OP', Op)` |
 | `ApplyFilter('TAG', Op, HasValue)` | `ProcessTag('TAG', HasValue)`, and `ApplyOperator` when `HasValue` |
 
+Spaces around the tag name are optional in both markers: `[NAME{]`, `[ NAME {]`, `[}NAME]` and
+`[} NAME ]` are the same markers. `ProcessTag` pairs each opening marker with the next closing
+one and raises `ESQLLoaderException` for a closing marker with no opening before it, an opening
+with no closing after it, or a block nested in another block of the same tag. Markers of a tag
+nobody processed are dropped when `.SQL` is read, and their content stays.
+
 The `WHERE 1 = 1` (or `SET ID = ID` in an `UPDATE`) lets every optional part start with
 `AND` (or a comma) whichever of them are kept.
 

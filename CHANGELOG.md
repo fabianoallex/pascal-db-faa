@@ -6,6 +6,21 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Fixed
+
+- SQL templates: the closing marker now accepts optional spaces around the tag name (`[}TAG]`,
+  `[}  TAG ]`), as the opening one already did, and the opening one also accepts spaces after
+  `[`. Before, a closing marker without exactly one space wasn't recognized: `ProcessTag(TAG,
+  False)` kept the block, or paired its opening with the next block's closing and deleted the
+  SQL between them, and looped forever when that closing came before the opening. The cleanup
+  done when `.SQL` is read follows the same rule (it left `[TAG{]` behind).
+
+### Changed
+
+- `ProcessTag` raises `ESQLLoaderException` on a malformed block of the tag: a closing marker
+  with no opening before it, an opening with no closing after it, or a block nested in another
+  block of the same tag. It used to leave markers in the SQL, remove the wrong text or hang.
+
 ## [0.9.0] - 2026-10-04
 
 ### Changed
