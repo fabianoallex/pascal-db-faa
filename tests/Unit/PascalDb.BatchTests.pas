@@ -1,4 +1,4 @@
-unit PascalDb.BatchTests;
+﻿unit PascalDb.BatchTests;
 
 { Tests for TBatch (PascalDb.Batch) over a recording query: one ExecSql per
   row with that row's values, every parameter type and typed NULLs, a
@@ -53,7 +53,7 @@ type
     function GetSql: string;
     function Open: IQueryResult;
     procedure Close;
-    procedure ExecSql;
+    function ExecSql: Int64;
     function GetConnection: IDBConnection;
     function GetTransaction: ITransaction;
     function SupportsNativeBatch: Boolean;
@@ -125,10 +125,11 @@ procedure TRecordingQuery.Close;
 begin
 end;
 
-procedure TRecordingQuery.ExecSql;
+function TRecordingQuery.ExecSql: Int64;
 var
   LSnapshot: TRecordedRow;
 begin
+  Result := 1;
   Inc(FExecCount);
   if FExecCount = FailOnExec then
     raise EConvertError.Create('row rejected');

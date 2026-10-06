@@ -215,10 +215,12 @@ type
     Kind: TStatementKind;
     Sql: string;           // the text the query ran, after SQL tags were processed
     ElapsedUs: Int64;      // microseconds (PcTickUs); for Open, includes fetching every row
-    Rows: Int64;           // Open: rows fetched (RecordCount); ExecSql: -1 (not reported yet);
+    Rows: Int64;           // Open: rows fetched (RecordCount); ExecSql: rows affected (what
+                           // ExecSql returned; -1 when the driver can't tell, or it failed);
                            // ExecBatch: the rows of parameters sent
     ErrorClass: string;    // '' when it succeeded; otherwise the class the caller gets
-    ErrorMessage: string;  // (EDatabaseUnavailableException, ELockConflictException, the driver's)
+    ErrorMessage: string;  // (EDatabaseUnavailableException, ELockConflictException,
+                           // EConstraintViolationException, the driver's)
   end;
 
   // See TPoolEventProc. Called on the thread that ran the statement; an
@@ -394,7 +396,7 @@ type
       AOnStatement: TStatementEventProc = nil);
     destructor Destroy; override;
     procedure Close;
-    procedure ExecSql;
+    function ExecSql: Int64;
     function GetConnection: IDBConnection;
     function GetParams: IParams;
     function GetSql: string;
@@ -499,7 +501,7 @@ begin
   FInternalQuery.Close;
 end;
 
-procedure TQueryWrapper.ExecSql;
+function TQueryWrapper.ExecSql: Int64;
 var
   LNewE: Exception;
   LStartUs: Int64;
@@ -508,7 +510,7 @@ begin
   if Assigned(FOnStatement) then
     LStartUs := PcTickUs;
   try
-    FInternalQuery.ExecSql;
+    Result := FInternalQuery.ExecSql;
   except
     on E: Exception do
     begin
@@ -529,7 +531,7 @@ begin
     end;
   end;
   if Assigned(FOnStatement) then
-    NotifyStatement(skExecSql, LStartUs, -1, nil);
+    NotifyStatement(skExecSql, LStartUs, Result, nil);
 end;
 
 function TQueryWrapper.GetConnection: IDBConnection;

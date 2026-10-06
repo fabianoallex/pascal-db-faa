@@ -156,7 +156,7 @@ type
     function InTransaction: Boolean;
     function GetConnection: IDBConnection;
     function GetNativeTransaction: TObject;
-    procedure ExecSql(const ASql: string);
+    function ExecSql(const ASql: string): Int64;
     // ITestableTransaction
     function GetCommands: TStringList;
     function GetCommitCount: Integer;
@@ -227,7 +227,7 @@ type
   public
     constructor Create(AConn: IDBConnection; ATrans: ITransaction);
     procedure Close;
-    procedure ExecSql;
+    function ExecSql: Int64;
     function GetConnection: IDBConnection;
     function GetParams: IParams;
     function GetSql: string;
@@ -673,8 +673,9 @@ begin
   Result := nil;
 end;
 
-procedure TFakeTransaction.ExecSql(const ASql: string);
+function TFakeTransaction.ExecSql(const ASql: string): Int64;
 begin
+  Result := -1;
 end;
 
 function TFakeTransaction.GetCommands: TStringList;
@@ -728,10 +729,12 @@ end;
 
 procedure TFakeQuery.Close; begin end;
 
-procedure TFakeQuery.ExecSql;
+function TFakeQuery.ExecSql: Int64;
 var
   LTestable: ITestableTransaction;
 begin
+  // A fixed count, so the statement event's Rows can be checked.
+  Result := 3;
   if Assigned(FTransaction) and Supports(FTransaction, ITestableTransaction, LTestable) then
     LTestable.GetCommands.Add(FSql);
 end;
@@ -2479,7 +2482,7 @@ begin
     LQuery.Sql := 'SELECT 1';
     LQuery.Open;
     LQuery.Sql := 'UPDATE T SET A = 1';
-    LQuery.ExecSql;
+    TAssert.AssertEquals('ExecSql returns the adapter''s row count', Int64(3), LQuery.ExecSql);
     LQuery := nil;
     LScope := nil;
 
@@ -2491,7 +2494,7 @@ begin
     TAssert.AssertTrue('Elapsed time is never negative', LRecorder.Infos[0].ElapsedUs >= 0);
     TAssert.AssertEquals(Ord(skExecSql), Ord(LRecorder.Infos[1].Kind));
     TAssert.AssertEquals('UPDATE T SET A = 1', LRecorder.Infos[1].Sql);
-    TAssert.AssertEquals('ExecSql reports no row count', Int64(-1), LRecorder.Infos[1].Rows);
+    TAssert.AssertEquals('ExecSql reports the rows affected', Int64(3), LRecorder.Infos[1].Rows);
     TAssert.AssertEquals('', LRecorder.Infos[1].ErrorClass);
   finally
     LPool := nil;

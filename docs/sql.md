@@ -248,6 +248,27 @@ LPage := LRepo.FindByStatePaged('SC', TPageRequest.Create(LPageNumber, LLimit));
   mock, the clause is a `LIMIT`/`OFFSET` that never reaches the recorded key
   ([guide 5](testing-with-the-mock.md)).
 
+## Rows affected
+
+`ExecSql` is a function: it returns the rows the statement inserted, updated or deleted, so an
+`UPDATE` or `DELETE` by key can tell "not found" apart without a `RETURNING`:
+
+```pascal
+LQuery.Sql := LFactory.SqlLoader['PRODUCT.UPDATE_PRICE'].SQL;
+LQuery.Params.Strings['CODE'] := ACode;
+LQuery.Params.Currencies['PRICE'] := APrice;
+if LQuery.ExecSql = 0 then
+  raise EProductNotFound.CreateFmt('Product %s not found', [ACode]);
+```
+
+An `UPDATE` counts every row its `WHERE` matched, including rows whose values didn't change, on
+every database. MySQL and MariaDB count only the changed rows by default, so an update that
+saves what is already there would look like "not found"; the adapters ask for matched rows
+instead (SQLdb reads them from `mysql_info`, Zeos connects with `CLIENT_FOUND_ROWS`, FireDAC's
+MySQL driver already does). -1 means the driver can't tell (DDL, for example). Calling it as a
+statement, `LQuery.ExecSql;`, still compiles. `ITransaction.ExecSql(Sql)` returns the count too,
+and the pool's statement events report it in `Rows`.
+
 ## Running the same statement many times
 
 There is no `Prepare` to call: each driver prepares a statement the first time it runs, and the
@@ -365,7 +386,7 @@ What to know:
   `EInvalidOpException` instead of dropping them. Rows added and never sent are dropped with the
   batch.
 - **A failure rejects the send**, with the same exceptions as `ExecSql` (`ELockConflictException`,
-  `EDatabaseUnavailableException`, the driver's). Earlier sends are already in the transaction:
+  `EConstraintViolationException`, `EDatabaseUnavailableException`, the driver's). Earlier sends are already in the transaction:
   roll it back. Which row failed isn't reported.
 - **The query is the batch's until you're done** with it; afterwards it runs single statements
   again. In tests, the mock records one execution per row.

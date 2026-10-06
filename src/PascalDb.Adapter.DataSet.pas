@@ -81,6 +81,9 @@ type
     function SqlLines: TStrings; virtual; abstract;
     /// Executes a statement that returns no rows (the driver's ExecSQL).
     procedure DoExecSql; virtual; abstract;
+    /// The rows the statement DoExecSql just ran affected, or -1 when the
+    /// driver can't tell (see IQuery.ExecSql). The default returns -1.
+    function RowsAffected: Int64; virtual;
     /// Opens the dataset (DataSet.Open); an adapter overrides it to handle a
     /// driver-specific failure (e.g. retrying once).
     procedure DoOpen; virtual;
@@ -97,6 +100,14 @@ type
     /// ELockConflictException); Open and ExecSql then raise
     /// ELockConflictException instead. The default recognizes nothing.
     function IsLockConflictError(E: Exception): Boolean; virtual;
+    /// True when E is one of the driver's constraint violations, with its
+    /// kind in AKind (see EConstraintViolationException); Open, ExecSql and
+    /// ExecBatch then raise EConstraintViolationException instead. Checked
+    /// after IsLockConflictError. The default recognizes nothing.
+    function IsConstraintViolationError(E: Exception; out AKind: TConstraintViolationKind): Boolean; virtual;
+    /// Raises ELockConflictException or EConstraintViolationException when E
+    /// is one of those errors; returns otherwise (the caller re-raises E).
+    procedure RaiseDataError(E: Exception);
     /// Runs the query's SQL once per row of ARows as one driver operation;
     /// called only when SupportsNativeBatch is True. The default raises
     /// ENotSupportedException.
@@ -111,12 +122,13 @@ type
     /// this same object as the result.
     function Open: IQueryResult;
     procedure Close;
-    procedure ExecSql;
+    function ExecSql: Int64;
     function GetConnection: IDBConnection;
     function GetTransaction: ITransaction;
     // INativeBatchQuery: an adapter whose driver has an array operation
     // overrides SupportsNativeBatch (default False: TBatch runs one ExecSql
-    // per row) and DoExecBatch. ExecBatch maps lock conflicts as ExecSql does.
+    // per row) and DoExecBatch. ExecBatch maps lock conflicts and constraint
+    // violations as ExecSql does.
     function SupportsNativeBatch: Boolean; virtual;
     procedure ExecBatch(const ARows: IBatchRows);
     // IQueryResult
@@ -327,8 +339,7 @@ begin
     on E: Exception do
     begin
       // A new exception or a bare raise only (see TTransactionBase).
-      if IsLockConflictError(E) then
-        raise ELockConflictException.Create(E);
+      RaiseDataError(E);
       raise;
     end;
   end;
@@ -346,23 +357,46 @@ begin
     DataSet.Close;
 end;
 
-procedure TDataSetQueryBase.ExecSql;
+function TDataSetQueryBase.ExecSql: Int64;
 begin
   try
     DoExecSql;
   except
     on E: Exception do
     begin
-      if IsLockConflictError(E) then
-        raise ELockConflictException.Create(E);
+      RaiseDataError(E);
       raise;
     end;
   end;
+  Result := RowsAffected;
+end;
+
+function TDataSetQueryBase.RowsAffected: Int64;
+begin
+  Result := -1;
 end;
 
 function TDataSetQueryBase.IsLockConflictError(E: Exception): Boolean;
 begin
   Result := False;
+end;
+
+function TDataSetQueryBase.IsConstraintViolationError(E: Exception;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  AKind := cvUnique;
+  Result := False;
+end;
+
+procedure TDataSetQueryBase.RaiseDataError(E: Exception);
+var
+  LKind: TConstraintViolationKind;
+begin
+  // New exceptions only: never "raise E" (see TTransactionBase).
+  if IsLockConflictError(E) then
+    raise ELockConflictException.Create(E);
+  if IsConstraintViolationError(E, LKind) then
+    raise EConstraintViolationException.Create(LKind, E);
 end;
 
 function TDataSetQueryBase.SupportsNativeBatch: Boolean;
@@ -382,8 +416,7 @@ begin
   except
     on E: Exception do
     begin
-      if IsLockConflictError(E) then
-        raise ELockConflictException.Create(E);
+      RaiseDataError(E);
       raise;
     end;
   end;

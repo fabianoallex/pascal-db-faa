@@ -151,6 +151,9 @@ them. Moved in the pilot migration (pascal-common-faa's plan, phase F6, 2026-10-
   `pascal_db_faa.lpk` requires `pascal_common_faa` **by name, with no `DefaultFilename`**, and the
   test and sample `.lpi` files point at the submodule's `.lpk` with `Prefer="True"`, listed
   first. The Delphi projects add `external/pascal-common-faa/src` to the search path.
+- **This library's own version** is in `PascalDb.Version` (`PASCALDB_VERSION`, same `MMmmpp`
+  format; consumers test it with that unit in their `uses`). A release bumps it together with the
+  `.lpk` files, the README and the CHANGELOG.
 - **Minimum version** checked in `PascalDb.Interfaces` (every user compiles it):
   `PASCALCOMMON_VERSION < 10000` stops the build with "pascal-db-faa needs pascal-common-faa 1.0.0
   or later" (measured by raising the bound: lazbuild "Fatal: (2022) User defined: ...", Delphi 12
@@ -292,6 +295,14 @@ them the driver's quirks):
   conflict errors (expired lock wait, immediate lock conflict, update conflict, deadlock) into
   `ELockConflictException` through the adapter's `IsLockConflictError` override; each adapter
   applies `IDatabaseConfig.LockTimeoutMs` its own way (gotcha 32).
+- Constraint violations become `EConstraintViolationException` (`Kind`: `cvUnique`, `cvForeignKey`,
+  `cvNotNull`, `cvCheck`) at the same points, through the adapter's `IsConstraintViolationError`
+  override (checked after `IsLockConflictError`; also on `Commit`, for deferred constraints). The
+  codes of each database are in `PascalDb.Adapter.Base` (`PdbFirebirdConstraintKind`, ...),
+  shared by the three adapters; all measured with the contract suite (`Constraint_*` tests).
+- `IQuery.ExecSql` / `ITransaction.ExecSql` return the rows affected: `TDataSetQueryBase.RowsAffected`
+  and `TTransactionBase.DoExecSqlRows` overrides (-1 by default). An `UPDATE` counts matched rows
+  on every database, MySQL/MariaDB included (gotcha 46).
 - Statement events (`AOnStatement`, `TStatementInfo` in `PascalDb.Pool`) are raised by the
   pool's `TQueryWrapper`, the one place every pooled `Open`/`ExecSql` goes through, so adapters
   need nothing for them. Timed with `PcTickUs`: `PcTickMs` (`GetTickCount64`) moves in 15-16 ms
@@ -340,7 +351,9 @@ read results before committing. Results are fetched completely on `Open`
 by default SQLdb queries the catalog for the table's primary key on every `Open`, to make the
 dataset editable, and the adapter never edits it (2000 SELECTs by key, FPC 3.2.2 Windows:
 PostgreSQL 10.0 s → 3.5 s, Firebird 1.9 s → 0.5 s). `ExecSql` prepares explicitly and keeps the statement
-prepared while the same transaction lasts (gotcha 31); `Open` leaves preparing to SQLdb.
+prepared while the same transaction lasts (gotcha 31); `Open` leaves preparing to SQLdb. On
+PostgreSQL a failed `COMMIT` leaves the `TSQLTransaction` with a dead handle; `DoCommit` ends it
+with `ForcedClose` (gotcha 47).
 
 **Zeos specifics** (ZeosLib 8): `ConnectionParams` takes `Protocol` (`firebird`/`postgresql`;
 `firebird` falls back to the legacy API with a 2.5 client), `HostName`, `Port`, `Database`,
@@ -377,6 +390,8 @@ connect. What the adapters add, all measured on FPC (SQLdb, Zeos) unless noted:
   is linked in, no `VendorLib`), and, unless the settings say otherwise, `LockingMode=Normal`,
   `SharedCache=False`, `StringFormat=Unicode`, `BusyTimeout=5000` and
   `UpdateOptions.LockWait = True` (gotcha 25).
+- foreign keys turned on (SQLdb and Zeos `foreign_keys=ON`, FireDAC `ForeignKeys=On`) unless the
+  settings say otherwise: SQLite doesn't check them by default (gotcha 45).
 SQLite's types are loose: a `NUMERIC(15,2)` is stored as `REAL`, so money keeps a `Double`'s
 precision, not an exact decimal. `CREATE TABLE IF NOT EXISTS`, `RETURNING` and transactional
 DDL all work (the contract suite passes unchanged). `:memory:` gives each pooled connection its
@@ -468,7 +483,7 @@ serializing Firebird connects in the Zeos adapter.
 
 ## Gotchas
 
-The numbered gotchas (symptom → cause → fix, 1–44) live in [`docs/gotchas.md`](docs/gotchas.md).
+The numbered gotchas (symptom → cause → fix, 1–49) live in [`docs/gotchas.md`](docs/gotchas.md).
 Read it before touching the pool, an adapter, resources or anything that differs between
 Delphi and FPC, and add new ones there, keeping the numbering. References in this file
 ("gotcha 17") point to it.

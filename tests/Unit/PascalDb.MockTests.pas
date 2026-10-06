@@ -85,6 +85,8 @@ type
     [Test] procedure AddFailure_ExecSql_RaisesAndRecords;
     [Test] procedure AddFailure_Open_Raises;
     [Test] procedure AddFailure_IsUsedOnce_OtherKeysUnaffected;
+    [Test] procedure AddConstraintViolation_RaisesItsKindOnce;
+    [Test] procedure ExecSql_RowsAffected_DefaultAndConfigured;
   end;
 
 implementation
@@ -709,6 +711,55 @@ begin
       end;
     TAssert.AssertEquals('A failure is used by exactly one execution', 1, LFailures);
     TAssert.AssertEquals(3, F.ExecutionCount('CITY.INSERT'));
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TMockDBFactoryTests.AddConstraintViolation_RaisesItsKindOnce;
+var
+  F: TMockDBFactory;
+  Q: IQuery;
+  Scope: IScopeTransaction;
+  LKind: Integer;
+begin
+  F := TMockDBFactory.Create;
+  try
+    F.AddConstraintViolation('CITY.DELETE', cvForeignKey);
+    Scope := F.GetPool.AcquireQuery(Q);
+    Q.SetSql('CITY.DELETE');
+    LKind := -1;
+    try
+      Q.ExecSql;
+    except
+      on E: EConstraintViolationException do
+        LKind := Ord(E.Kind);
+    end;
+    TAssert.AssertEquals('ExecSql must raise EConstraintViolationException of the registered kind',
+      Ord(cvForeignKey), LKind);
+    Q.ExecSql; // used once: the next execution succeeds
+    TAssert.AssertEquals(2, F.ExecutionCount('CITY.DELETE'));
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TMockDBFactoryTests.ExecSql_RowsAffected_DefaultAndConfigured;
+var
+  F: TMockDBFactory;
+  Q: IQuery;
+  Scope: IScopeTransaction;
+begin
+  F := TMockDBFactory.Create;
+  try
+    Scope := F.GetPool.AcquireQuery(Q);
+    Q.SetSql('CITY.UPDATE');
+    TAssert.AssertEquals('Without SetRowsAffected: -1, as a driver that can''t tell', Int64(-1), Q.ExecSql);
+    F.SetRowsAffected('city.update', 0);
+    TAssert.AssertEquals('The configured count, whatever the key''s case', Int64(0), Q.ExecSql);
+    TAssert.AssertEquals('And on every later execution', Int64(0), Q.ExecSql);
+    Q.SetSql('CITY.DELETE');
+    TAssert.AssertEquals('Other keys are unaffected', Int64(-1), Q.ExecSql);
   finally
     F.Free;
   end;

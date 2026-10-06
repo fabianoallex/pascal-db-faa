@@ -78,6 +78,15 @@ function IntegrationSchemaVersion: Integer;
 /// Server; '' where the database can't (MySQL; MariaDB can since 10.5).
 function InsertReturningSql: string;
 
+/// Whether the database can defer a foreign key check to the commit
+/// (ITEM_LINKS.ITEM_ID is DEFERRABLE INITIALLY DEFERRED there): PostgreSQL
+/// and SQLite.
+function SupportsDeferredConstraints: Boolean;
+
+/// The driver's own detail of E (class, error code, SQLSTATE), for assertion
+/// messages: what an adapter has to recognize.
+function DescribeDriverError(E: Exception): string;
+
 /// Whether this runner's adapter sends a batch as one array operation
 /// (IBatch.IsNative): FireDAC yes, SQLdb and Zeos no.
 function ExpectsNativeBatch: Boolean;
@@ -113,6 +122,7 @@ uses
   PascalDb.Adapter.Base
   {$IF DEFINED(PASCALDB_IT_ZEOS)}
   , ZConnection
+  , ZExceptions
   , PascalDb.Adapter.Zeos
   {$ELSEIF DEFINED(FPC)}
   , sqldb
@@ -122,6 +132,7 @@ uses
   , PascalDb.Adapter.SQLdb
   {$ELSE}
   , FireDAC.Comp.Client
+  , FireDAC.Stan.Error
   , PascalDb.Adapter.FireDAC
   {$IFEND};
 
@@ -203,6 +214,11 @@ begin
   else
     Result := 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME) RETURNING ID, NAME';
   end;
+end;
+
+function SupportsDeferredConstraints: Boolean;
+begin
+  Result := Engine in [engPostgres, engSQLite];
 end;
 
 function ExpectsNativeBatch: Boolean;
@@ -347,12 +363,12 @@ end;
 
 function IntegrationSchemaVersion: Integer;
 begin
-  Result := 2;
+  Result := 3;
 end;
 
 function BuildSqlSource: ISqlSource;
 var
-  LUtf8, LText, LTimestamp: string;
+  LUtf8, LText, LTimestamp, LDeferred: string;
 begin
   // Firebird: the text columns are declared UTF8 (the database default
   // character set is NONE). PostgreSQL: the database encoding (UTF8 in the
@@ -375,6 +391,10 @@ begin
     LText := 'VARCHAR';
     LTimestamp := 'TIMESTAMP';
   end;
+  if SupportsDeferredConstraints then
+    LDeferred := ' DEFERRABLE INITIALLY DEFERRED'
+  else
+    LDeferred := '';
   Result := TMemorySqlSource.Create
     .Add(SQL_DIRECTORY, 'MIG.0001',
       'CREATE TABLE SCHEMA_MIGRATIONS (' +
@@ -395,6 +415,21 @@ begin
       '  CONSTRAINT PK_ITEMS PRIMARY KEY (ID),' +
       '  CONSTRAINT UQ_ITEMS_NAME UNIQUE (NAME))^' +
       'CREATE TABLE LOG_LINES (ID INTEGER NOT NULL PRIMARY KEY, TXT ' + LText + '(50))^')
+    // One table per constraint kind the adapters must recognize, and a
+    // foreign key checked at commit where the database can defer it.
+    .Add(SQL_DIRECTORY, 'MIG.0003',
+      'CREATE TABLE ITEM_TAGS (' +
+      '  ID      INTEGER NOT NULL,' +
+      '  ITEM_ID INTEGER NOT NULL,' +
+      '  QTY     INTEGER,' +
+      '  CONSTRAINT PK_ITEM_TAGS PRIMARY KEY (ID),' +
+      '  CONSTRAINT FK_ITEM_TAGS_ITEM FOREIGN KEY (ITEM_ID) REFERENCES ITEMS (ID),' +
+      '  CONSTRAINT CK_ITEM_TAGS_QTY CHECK (QTY >= 0))^' +
+      'CREATE TABLE ITEM_LINKS (' +
+      '  ID      INTEGER NOT NULL,' +
+      '  ITEM_ID INTEGER,' +
+      '  CONSTRAINT PK_ITEM_LINKS PRIMARY KEY (ID),' +
+      '  CONSTRAINT FK_ITEM_LINKS_ITEM FOREIGN KEY (ITEM_ID) REFERENCES ITEMS (ID)' + LDeferred + ')^')
     .Add(SQL_DIRECTORY, 'ITEMS.INSERT',
       'INSERT INTO ITEMS (ID, NAME, QTY, BIG, PRICE, RATIO, CREATED_AT, ACTIVE' +
       '  [NOTE {], NOTE [} NOTE])' +
@@ -535,6 +570,14 @@ end;
 function NewFactory(const AConfig: IDatabaseConfig; AOnStatement: TStatementEventProc = nil): IDBFactory;
 begin
   Result := TZeosFactory.Create(AConfig, nil, nil, AOnStatement);
+end;
+
+function DescribeDriverError(E: Exception): string;
+begin
+  Result := E.ClassName;
+  if E is EZSQLThrowable then
+    Result := Result + Format(' ErrorCode=%d StatusCode=%s',
+      [EZSQLThrowable(E).ErrorCode, EZSQLThrowable(E).StatusCode]);
 end;
 
 {$ELSEIF DEFINED(FPC)}
@@ -744,6 +787,14 @@ begin
   Result := TSQLdbFactory.Create(AConfig, nil, nil, AOnStatement);
 end;
 
+function DescribeDriverError(E: Exception): string;
+begin
+  Result := E.ClassName;
+  if E is ESQLDatabaseError then
+    Result := Result + Format(' ErrorCode=%d SQLState=%s',
+      [ESQLDatabaseError(E).ErrorCode, ESQLDatabaseError(E).SQLState]);
+end;
+
 {$ELSE}
 
 procedure SetConnectionParams(AParams: TStrings; const ADatabase: string);
@@ -897,6 +948,14 @@ begin
   Result := TFDFactory.Create(AConfig, nil, nil, AOnStatement);
 end;
 
+function DescribeDriverError(E: Exception): string;
+begin
+  Result := E.ClassName;
+  if E is EFDDBEngineException then
+    Result := Result + Format(' Kind=%d ErrorCode=%d',
+      [Ord(EFDDBEngineException(E).Kind), EFDDBEngineException(E).ErrorCode]);
+end;
+
 {$IFEND}
 
 function BuildConfig: IDatabaseConfig;
@@ -989,9 +1048,10 @@ var
 
 function IntegrationFactory: IDBFactory;
 const
-  MIGRATIONS: array[0..1] of TMigrationItem = (
+  MIGRATIONS: array[0..2] of TMigrationItem = (
     (Version: 1; ScriptName: 'MIG.0001'; ParamReplaceProc: nil; Terminator: ';'; IsDDL: True),
-    (Version: 2; ScriptName: 'MIG.0002'; ParamReplaceProc: nil; Terminator: '^'; IsDDL: True));
+    (Version: 2; ScriptName: 'MIG.0002'; ParamReplaceProc: nil; Terminator: '^'; IsDDL: True),
+    (Version: 3; ScriptName: 'MIG.0003'; ParamReplaceProc: nil; Terminator: '^'; IsDDL: True));
 var
   LEngine: TDBMigrationEngine;
 begin

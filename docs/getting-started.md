@@ -39,7 +39,10 @@ end;
 ```
 
 - **Hold the configuration in an `IDatabaseConfig` variable.** `TDatabaseConfig` is
-  reference-counted; with a class variable, handing it to the factory frees it too early.
+  reference-counted; with a class variable, handing it to the factory frees it too early. The
+  properties (`ConnectionParams`, `SQLDialect`, `PoolMaxConnections`, ...) are declared on the
+  interface only: with `LConfig: TDatabaseConfig`, `LConfig.ConnectionParams` doesn't compile
+  ("undeclared identifier"), and the fix is the variable's type, not a cast.
 - **Size the pool for your program.** Without these lines the pool opens 1 connection at
   start, grows to 10, and a caller waits up to 50 × 100 ms for a free one; `PoolMaxConnections`
   below 1 makes the factory raise `EArgumentException`. [Guide 7](pool.md) explains each

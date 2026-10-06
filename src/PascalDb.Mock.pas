@@ -9,8 +9,10 @@
     1. Create a TMockDBFactory.
     2. Register responses with AddResult('SQL.KEY', TMockQueryResult.Xyz)
        (every Open of a key reads its result from the first row), and
-       database errors with AddFailure('SQL.KEY', EClass, 'message') (the next
-       execution of the key raises it).
+       database errors with AddFailure('SQL.KEY', EClass, 'message') or
+       AddConstraintViolation('SQL.KEY', cvUnique) (the next execution of the
+       key raises it), and what ExecSql returns with SetRowsAffected('SQL.KEY',
+       0) (default -1).
     3. Exercise the repository/service.
     4. Inspect the executions with LastExecution / ExecutionCount.
 
@@ -230,7 +232,7 @@ type
     function GetSql: string;
     function Open: IQueryResult;
     procedure Close;
-    procedure ExecSql;
+    function ExecSql: Int64;
     function GetConnection: IDBConnection;
     function GetTransaction: ITransaction;
   end;
@@ -299,7 +301,7 @@ type
     function InTransaction: Boolean;
     function GetConnection: IDBConnection;
     function GetNativeTransaction: TObject;
-    procedure ExecSql(const ASql: string);
+    function ExecSql(const ASql: string): Int64;
   end;
 
   // TSQLLoader that bypasses resource loading.
@@ -312,13 +314,16 @@ type
     constructor Create;
   end;
 
-  // The mock's central factory. Configure the results before using the
-  // repository; inspect the executions with LastExecution / ExecutionCount.
+  // A failure registered with AddFailure or AddConstraintViolation.
   TMockFailure = record
     Key: string;
-    ExceptionClass: ExceptClass;
+    ExceptionClass: ExceptClass;  // nil: an EConstraintViolationException of ConstraintKind
     Message: string;
+    ConstraintKind: TConstraintViolationKind;
   end;
+
+  // The mock's central factory. Configure the results before using the
+  // repository; inspect the executions with LastExecution / ExecutionCount.
 
   TMockDBFactory = class(TInterfacedObject, IDBFactory)
   private
@@ -327,6 +332,7 @@ type
     FResults: TDictionary<string, IQueryResult>;
     FExecutions: TObjectList<TMockExecution>;
     FFailures: TList<TMockFailure>;
+    FRowsAffected: TDictionary<string, Int64>;
   public
     constructor Create;
     destructor Destroy; override;
@@ -343,6 +349,19 @@ type
     // is used once; call it again for more failures, which are used in order.
     procedure AddFailure(const ASqlKey: string; AExceptionClass: ExceptClass;
       const AMessage: string);
+
+    // Makes the NEXT execution of ASqlKey raise EConstraintViolationException
+    // of AKind, as an adapter does when the database rejects the statement
+    // (a duplicate key: cvUnique). Used once and in order, like AddFailure.
+    procedure AddConstraintViolation(const ASqlKey: string; AKind: TConstraintViolationKind);
+
+    // What ExecSql returns for ASqlKey from now on (the rows the statement
+    // affected): 0 makes an UPDATE/DELETE "find nothing". Without it, ExecSql
+    // returns -1, the value of a driver that can't tell.
+    procedure SetRowsAffected(const ASqlKey: string; ARows: Int64);
+
+    // Internal use: called by TMockQuery.
+    function GetRowsAffected(const ASqlKey: string): Int64;
 
     // Internal use: called by TMockQuery. Raises the pending failure for
     // ASqlKey, if any.
@@ -1081,10 +1100,11 @@ begin
     LRewindable.Rewind;
 end;
 
-procedure TMockQuery.ExecSql;
+function TMockQuery.ExecSql: Int64;
 begin
   FOwner.RecordExecution(FSql, FParams as TMockParams, False);
   FOwner.RaisePendingFailure(FSql);
+  Result := FOwner.GetRowsAffected(FSql);
 end;
 
 { TMockScopeTransaction }
@@ -1159,7 +1179,7 @@ function TMockDBConnection.IsConnected: Boolean;           begin Result := True;
 procedure TMockTransaction.StartTransaction;               begin end;
 procedure TMockTransaction.Commit;                         begin end;
 procedure TMockTransaction.Rollback;                       begin end;
-procedure TMockTransaction.ExecSql(const ASql: string);    begin end;
+function TMockTransaction.ExecSql(const ASql: string): Int64; begin Result := -1; end;
 function TMockTransaction.InTransaction: Boolean;          begin Result := False; end;
 function TMockTransaction.GetConnection: IDBConnection;    begin Result := TMockDBConnection.Create; end;
 function TMockTransaction.GetNativeTransaction: TObject;   begin Result := nil;   end;
@@ -1185,6 +1205,7 @@ begin
   FResults    := TDictionary<string, IQueryResult>.Create;
   FExecutions := TObjectList<TMockExecution>.Create(True);
   FFailures   := TList<TMockFailure>.Create;
+  FRowsAffected := TDictionary<string, Int64>.Create;
 end;
 
 destructor TMockDBFactory.Destroy;
@@ -1193,6 +1214,7 @@ begin
   FResults.Free;
   FExecutions.Free;
   FFailures.Free;
+  FRowsAffected.Free;
   inherited;
 end;
 
@@ -1209,7 +1231,31 @@ begin
   LFailure.Key := ASqlKey;
   LFailure.ExceptionClass := AExceptionClass;
   LFailure.Message := AMessage;
+  LFailure.ConstraintKind := cvUnique;
   FFailures.Add(LFailure);
+end;
+
+procedure TMockDBFactory.AddConstraintViolation(const ASqlKey: string;
+  AKind: TConstraintViolationKind);
+var
+  LFailure: TMockFailure;
+begin
+  LFailure.Key := ASqlKey;
+  LFailure.ExceptionClass := nil;
+  LFailure.Message := '';
+  LFailure.ConstraintKind := AKind;
+  FFailures.Add(LFailure);
+end;
+
+procedure TMockDBFactory.SetRowsAffected(const ASqlKey: string; ARows: Int64);
+begin
+  FRowsAffected.AddOrSetValue(AnsiUpperCase(ASqlKey), ARows);
+end;
+
+function TMockDBFactory.GetRowsAffected(const ASqlKey: string): Int64;
+begin
+  if not FRowsAffected.TryGetValue(AnsiUpperCase(ASqlKey), Result) then
+    Result := -1;
 end;
 
 procedure TMockDBFactory.RaisePendingFailure(const ASqlKey: string);
@@ -1222,6 +1268,8 @@ begin
     begin
       LFailure := FFailures[I];
       FFailures.Delete(I);
+      if not Assigned(LFailure.ExceptionClass) then
+        raise EConstraintViolationException.Create(LFailure.ConstraintKind, nil);
       raise LFailure.ExceptionClass.Create(LFailure.Message);
     end;
 end;

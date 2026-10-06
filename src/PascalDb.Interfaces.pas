@@ -23,7 +23,9 @@
   The minimum pascal-common-faa version is checked here, since every user of
   the library compiles this unit: an older copy of pascal-common-faa provided
   by the application fails the build with that message instead of a missing
-  identifier somewhere inside the library. }
+  identifier somewhere inside the library. The library's own version is in
+  PascalDb.Version (used here so it is always compiled; a consumer that
+  checks it uses that unit). }
 
 interface
 
@@ -31,6 +33,7 @@ uses
   Classes,
   SysUtils,
   PascalCommon.Version,
+  PascalDb.Version,
   PascalCommon.Optionals,
   PascalDb.SqlSources,
   PascalDb.SqlLoader;
@@ -149,6 +152,38 @@ type
     property OriginalMessage: string read FOriginalMessage;
   end;
 
+  // Which kind of constraint a statement violated (see
+  // EConstraintViolationException).
+  TConstraintViolationKind = (
+    cvUnique,      // a primary key or unique constraint: the value already exists
+    cvForeignKey,  // a reference to a row that doesn't exist, or a delete/update of a referenced row
+    cvNotNull,     // NULL in a NOT NULL column
+    cvCheck);      // a CHECK constraint
+
+  // Raised by Open/ExecSql (and batches, and a commit that checks deferred
+  // constraints) instead of the driver's exception when a statement violated
+  // a constraint: the data the caller sent is what's wrong, so retrying the
+  // same statement fails again. Kind says which constraint; the message is
+  // generic on purpose (safe to expose to a client), and
+  // OriginalClassName/OriginalMessage keep the driver's detail (constraint
+  // name included). The database is fine and the connection stays in the
+  // pool; on PostgreSQL the transaction can only be rolled back. Each adapter
+  // recognizes its driver's errors (Firebird GDS codes, PostgreSQL SQLSTATE
+  // class 23, MySQL/MariaDB and SQL Server error numbers, SQLite's
+  // constraint errors; FireDAC's own error kinds). An HTTP layer would
+  // typically answer 409 for cvUnique/cvForeignKey and 422 for the others.
+  EConstraintViolationException = class(Exception)
+  private
+    FKind: TConstraintViolationKind;
+    FOriginalClassName: string;
+    FOriginalMessage: string;
+  public
+    constructor Create(AKind: TConstraintViolationKind; AOriginalException: Exception);
+    property Kind: TConstraintViolationKind read FKind;
+    property OriginalClassName: string read FOriginalClassName;
+    property OriginalMessage: string read FOriginalMessage;
+  end;
+
   // Implemented only by the wrapper the pool returns from AcquireConnection
   // (PascalDb.Pool.TConnectionWrapper) — never by the "real" adapters, which
   // know nothing about the pool. See MarkConnectionBrokenIfNeeded below: it is
@@ -169,7 +204,9 @@ type
     function InTransaction: Boolean;
     function GetConnection: IDBConnection;
     function GetNativeTransaction: TObject;
-    procedure ExecSql(const ASql: string);
+    /// Runs a statement that returns no rows; returns the rows it inserted,
+    /// updated or deleted, or -1 when the driver can't tell (see IQuery.ExecSql).
+    function ExecSql(const ASql: string): Int64;
   end;
 
   IScopeTransaction = interface
@@ -327,7 +364,14 @@ type
     function GetSql: string;
     function Open: IQueryResult;
     procedure Close;
-    procedure ExecSql;
+    /// Runs a statement that returns no rows; returns the rows it inserted,
+    /// updated or deleted, or -1 when the driver can't tell (DDL, for
+    /// example). An UPDATE counts every row its WHERE matched, including rows
+    /// whose values didn't change — MySQL/MariaDB too (their default is to
+    /// count only changed rows; the adapters ask for matched rows), so 0 means
+    /// "nothing matched" on every database. Calling it as a statement
+    /// (LQuery.ExecSql;) still compiles.
+    function ExecSql: Int64;
     function GetConnection: IDBConnection;
     function GetTransaction: ITransaction;
     property Sql: string read GetSql write SetSql;
@@ -662,6 +706,26 @@ end;
 constructor ELockConflictException.Create(AOriginalException: Exception);
 begin
   inherited Create('The data is locked or was changed by another transaction.');
+  if Assigned(AOriginalException) then
+  begin
+    FOriginalClassName := AOriginalException.ClassName;
+    FOriginalMessage := AOriginalException.Message;
+  end;
+end;
+
+{ EConstraintViolationException }
+
+constructor EConstraintViolationException.Create(AKind: TConstraintViolationKind;
+  AOriginalException: Exception);
+const
+  MESSAGES: array[TConstraintViolationKind] of string = (
+    'A record with the same key already exists.',
+    'The record refers to a record that doesn''t exist, or is referred to by another record.',
+    'A required value is missing.',
+    'A value breaks a rule of the table.');
+begin
+  inherited Create(MESSAGES[AKind]);
+  FKind := AKind;
   if Assigned(AOriginalException) then
   begin
     FOriginalClassName := AOriginalException.ClassName;

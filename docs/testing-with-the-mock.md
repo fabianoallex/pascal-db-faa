@@ -106,11 +106,13 @@ The execution is still recorded, and each `AddFailure` is used once (call it aga
 failures, used in order). The exception class stands in for the driver's, which the code under
 test shouldn't depend on anyway.
 
-A test for the duplicate-key pattern in [guide 6](errors.md#turning-a-duplicate-key-into-your-own-exception):
+`AddConstraintViolation(Key, Kind)` does the same with the exception the adapters raise for a
+constraint violation, `EConstraintViolationException` of that `Kind`
+([guide 6](errors.md#constraint-violations-econstraintviolationexception)). A test for the
+duplicate-key pattern there:
 
 ```pascal
-LMock.AddFailure('PRODUCT.INSERT', EDatabaseError, 'UNIQUE constraint failed');
-LMock.AddResult('PRODUCT.EXISTS', TMockQueryResult.SingleRow(['TOTAL'], [1]));
+LMock.AddConstraintViolation('PRODUCT.INSERT', cvUnique);
 try
   LRepo.Insert(Product('CAF-001', 'Café torrado', 32.90));
   Check(False, 'EProductAlreadyExists expected');
@@ -121,7 +123,22 @@ end;
 Check(LMock.ExecutionCount('PRODUCT.INSERT') = 1, 'the INSERT was tried once');
 ```
 
-(`EDatabaseError` is in the `DB` unit; any exception class works.)
+## Rows affected
+
+`ExecSql` returns the rows the statement affected ([guide 2](sql.md#rows-affected)); on the mock
+it returns -1, a driver that can't tell, unless `SetRowsAffected(Key, Rows)` says otherwise. The
+value holds for every later `ExecSql` of the key. To test an `UPDATE` by id that finds nothing:
+
+```pascal
+LMock.SetRowsAffected('PRODUCT.UPDATE', 0);
+try
+  LRepo.Update(Product('NOPE-1', 'Nothing', 1));
+  Check(False, 'EProductNotFound expected');
+except
+  on EProductNotFound do
+    Check(True, 'an UPDATE that matches no row becomes EProductNotFound');
+end;
+```
 
 ## What the mock doesn't do
 

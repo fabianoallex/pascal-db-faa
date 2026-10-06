@@ -419,6 +419,22 @@ Check them against your component's documentation, then let the suite confirm.
   contract test `LockWait_GivesUpAfterLockTimeout` checks both. Measure the codes on every server
   version you support: Firebird 2.5 reports an expired lock wait as `isc_lock_timeout`,
   Firebird 5 as `isc_deadlock`.
+- **Constraint violations.** Override `IsConstraintViolationError(E, out AKind)` in both
+  subclasses, the same way: return `True` with the kind for a duplicate key, a foreign key, a NULL
+  in a NOT NULL column and a CHECK, and the base classes raise `EConstraintViolationException`
+  (also from `Commit`, for a deferred constraint). The codes of each database are already in
+  `PascalDb.Adapter.Base` (`PdbFirebirdConstraintKind`, `PdbPostgresConstraintKind`,
+  `PdbMySQLConstraintKind`, `PdbSqlServerConstraintKind`, `PdbSQLiteConstraintKind`): your part is
+  getting the code out of the driver's exception. The contract tests `Constraint_*` check every
+  kind and every path (`ExecSql`, `Open`, a batch, `ITransaction.ExecSql`, a deferred foreign key at
+  commit where the database has them).
+- **Rows affected.** Override `RowsAffected` in the query subclass (read the driver's count
+  after `DoExecSql`) and `DoExecSqlRows` in the transaction subclass (run the statement and return
+  its count; `DoExecSql` can just call it). Without them `ExecSql` returns -1. On MySQL/MariaDB the
+  count must be the rows an `UPDATE` *matched*, not the ones it changed (gotcha 46); the contract
+  test `ExecSql_ReturnsRowsAffected` runs the same `UPDATE` twice to catch it.
+- **SQLite needs its foreign keys turned on** (`PRAGMA foreign_keys`, per connection, outside a
+  transaction): every existing adapter does it unless the settings say otherwise (gotcha 45).
 - **Batches work without anything from you.** `TBatch` runs one `ExecSql` per row on any
   `IQuery`. If the driver has an array operation (FireDAC's Array DML), override
   `SupportsNativeBatch` (return `True`) and `DoExecBatch` in your `TDataSetQueryBase` subclass:
@@ -433,9 +449,10 @@ Check them against your component's documentation, then let the suite confirm.
 
 ## Checking it: the contract suite
 
-`tests/Integration/PascalDb.ContractTests.pas` is the same suite for every adapter: 27 tests,
+`tests/Integration/PascalDb.ContractTests.pas` is the same suite for every adapter: 37 tests,
 from the ping to typed parameters and NULLs, UTF-8 text, `INSERT ... RETURNING`, commit and
-rollback, savepoints, a constraint violation that keeps the connection, scripts, exact
+rollback, savepoints, constraint violations of every kind that keep the connection, rows
+affected, scripts, exact
 `RecordCount`, the same SQL assigned twice, concurrent writers, lock timeouts, paging, statement
 events and batches. The tests only see an
 `IDBFactory`; the adapter-specific part lives in one unit.

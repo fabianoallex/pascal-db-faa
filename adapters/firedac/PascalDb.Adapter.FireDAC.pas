@@ -39,7 +39,10 @@
                         wasn't isolated);
     StringFormat=Unicode  with FireDAC's default, 'São Paulo → ok' came back
                         as 'São Paulo ? ok': VARCHAR columns were handled as
-                        ANSI strings.
+                        ANSI strings;
+    ForeignKeys=On      SQLite checks foreign keys only when the connection
+                        asks for it (set explicitly, whatever FireDAC's
+                        default is).
 
   MySQL/MariaDB (CharacterSet=utf8mb4: their utf8 has no 4-byte
   characters). The client loads its authentication plugins (among them
@@ -85,6 +88,13 @@
   Those become ELockConflictException (see the codes in
   PascalDb.Adapter.SQLdb). The Community Edition has no source for the
   drivers: these came from measurement and the names in the compiled units.
+
+  Constraint violations become EConstraintViolationException: each error
+  item's code first, with the codes in PascalDb.Adapter.Base (the SQLSTATE
+  of a TFDPgError, the server's number of a TFDMySQLError, Firebird's GDS
+  code or SQLite's code and message otherwise), then FireDAC's own kinds
+  ekUKViolated / ekFKViolated, which have no NOT NULL or CHECK
+  counterpart. Rows affected: TFDQuery.RowsAffected.
 
   Batches (IBatch, PascalDb.Batch) use FireDAC's Array DML
   (Params.ArraySize + Execute(N)) on every driver. Measured, 10000 INSERTs
@@ -158,7 +168,9 @@ type
     procedure DoCommit; override;
     procedure DoRollback; override;
     procedure DoExecSql(const ASql: string); override;
+    function DoExecSqlRows(const ASql: string): Int64; override;
     function IsLockConflictError(E: Exception): Boolean; override;
+    function IsConstraintViolationError(E: Exception; out AKind: TConstraintViolationKind): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection);
     destructor Destroy; override;
@@ -208,7 +220,9 @@ type
     procedure DoClearParams; override;
     function ResetParamValues: Boolean; override;
     function CreateParams: IParams; override;
+    function RowsAffected: Int64; override;
     function IsLockConflictError(E: Exception): Boolean; override;
+    function IsConstraintViolationError(E: Exception; out AKind: TConstraintViolationKind): Boolean; override;
     procedure DoExecBatch(const ARows: IBatchRows); override;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
@@ -326,6 +340,42 @@ begin
       (LItem.ErrorCode = ISC_DEADLOCK) or (LItem.ErrorCode = ISC_UPDATE_CONFLICT) then
       Exit(True);
   end;
+end;
+
+// See the unit header: each error item's code (the database's), then
+// FireDAC's own kind.
+function IsFireDACConstraintViolation(E: Exception; out AKind: TConstraintViolationKind): Boolean;
+var
+  LError: EFDDBEngineException;
+  LItem: TFDDBError;
+  I: Integer;
+begin
+  Result := False;
+  AKind := cvUnique;
+  if not (E is EFDDBEngineException) then
+    Exit;
+  LError := EFDDBEngineException(E);
+  for I := 0 to LError.ErrorCount - 1 do
+  begin
+    LItem := LError.Errors[I];
+    if LItem is TFDPgError then
+      Result := PdbPostgresConstraintKind(TFDPgError(LItem).ErrorCode, AKind)
+    else if LItem is TFDMySQLError then
+      Result := PdbMySQLConstraintKind(LItem.ErrorCode, AKind)
+    else
+      // Firebird's GDS codes and SQLite's codes don't overlap.
+      Result := PdbFirebirdConstraintKind(LItem.ErrorCode, LItem.Message, AKind) or
+        PdbSQLiteConstraintKind(LItem.ErrorCode, LItem.Message, AKind);
+    if Result then
+      Exit;
+  end;
+  case LError.Kind of
+    ekUKViolated: AKind := cvUnique;
+    ekFKViolated: AKind := cvForeignKey;
+  else
+    Exit;
+  end;
+  Result := True;
 end;
 
 procedure PdbFireDACUseVendorLib(const ADriverID, AVendorLib: string);
@@ -451,6 +501,11 @@ begin
 end;
 
 procedure TFDTransactionAdapter.DoExecSql(const ASql: string);
+begin
+  DoExecSqlRows(ASql);
+end;
+
+function TFDTransactionAdapter.DoExecSqlRows(const ASql: string): Int64;
 var
   LQuery: TFDQuery;
 begin
@@ -461,6 +516,7 @@ begin
     LQuery.ResourceOptions.ParamCreate := False;
     LQuery.SQL.Text := ASql;
     LQuery.ExecSQL;
+    Result := LQuery.RowsAffected;
   finally
     LQuery.Free;
   end;
@@ -469,6 +525,12 @@ end;
 function TFDTransactionAdapter.IsLockConflictError(E: Exception): Boolean;
 begin
   Result := IsFireDACLockConflict(E);
+end;
+
+function TFDTransactionAdapter.IsConstraintViolationError(E: Exception;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := IsFireDACConstraintViolation(E, AKind);
 end;
 
 function TFDTransactionAdapter.GetNativeTransaction: TObject;
@@ -649,9 +711,20 @@ begin
   Result := TFDParamsAdapter.Create(FQuery);
 end;
 
+function TFDQueryAdapter.RowsAffected: Int64;
+begin
+  Result := FQuery.RowsAffected;
+end;
+
 function TFDQueryAdapter.IsLockConflictError(E: Exception): Boolean;
 begin
   Result := IsFireDACLockConflict(E);
+end;
+
+function TFDQueryAdapter.IsConstraintViolationError(E: Exception;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := IsFireDACConstraintViolation(E, AKind);
 end;
 
 function TFDQueryAdapter.SupportsNativeBatch: Boolean;
@@ -735,6 +808,8 @@ begin
         LConn.Params.Values['SharedCache'] := 'False';
       if LConn.Params.Values['StringFormat'] = '' then
         LConn.Params.Values['StringFormat'] := 'Unicode';
+      if LConn.Params.Values['ForeignKeys'] = '' then
+        LConn.Params.Values['ForeignKeys'] := 'On';
       if LConn.Params.Values['BusyTimeout'] = '' then
         if AConfig.LockTimeoutMs > 0 then
           LConn.Params.Values['BusyTimeout'] := IntToStr(AConfig.LockTimeoutMs)

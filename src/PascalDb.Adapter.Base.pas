@@ -7,7 +7,10 @@
 
   - TDatabaseConfig — IDatabaseConfig: pool settings, SQL dialect, SQL
     directory and source, and the driver's connection settings as
-    Name=Value lines.
+    Name=Value lines. Declare the variable as IDatabaseConfig: the
+    properties exist on the interface only (LConfig.ConnectionParams doesn't
+    compile on a TDatabaseConfig variable), and the object is
+    reference-counted.
   - TTransactionBase — ITransaction skeleton: keeps the in-transaction flag
     and routes every native failure (start, commit, rollback, ExecSql)
     through BuildDatabaseException, so a dropped connection is classified the
@@ -28,6 +31,9 @@
     path.
   - PdbMySQLPluginDir — the plugin folder next to a MySQL/MariaDB client
     library given by full path.
+  - PdbFirebirdConstraintKind and the like — which constraint a database
+    error code means (EConstraintViolationException), per database, for the
+    adapters' IsConstraintViolationError.
 
   Nothing here references a database driver or Data.DB/db; the TDataSet-based
   pieces live in PascalDb.Adapter.DataSet. }
@@ -102,10 +108,20 @@ type
     procedure DoCommit; virtual; abstract;
     procedure DoRollback; virtual; abstract;
     procedure DoExecSql(const ASql: string); virtual; abstract;
+    /// Runs ASql (as DoExecSql) and returns the rows it affected, or -1 when
+    /// the driver can't tell; ExecSql calls this one. The default calls
+    /// DoExecSql and returns -1; an adapter whose driver counts overrides it
+    /// (and can implement DoExecSql by calling it).
+    function DoExecSqlRows(const ASql: string): Int64; virtual;
     /// True when E is one of the driver's lock conflict errors (see
     /// ELockConflictException); ExecSql then raises ELockConflictException
     /// instead. The default recognizes nothing.
     function IsLockConflictError(E: Exception): Boolean; virtual;
+    /// True when E is one of the driver's constraint violations, with its
+    /// kind in AKind (see EConstraintViolationException); ExecSql and Commit
+    /// then raise EConstraintViolationException instead. Checked after
+    /// IsLockConflictError. The default recognizes nothing.
+    function IsConstraintViolationError(E: Exception; out AKind: TConstraintViolationKind): Boolean; virtual;
   public
     constructor Create(const AConn: IDBConnection);
     procedure StartTransaction;
@@ -114,7 +130,7 @@ type
     function InTransaction: Boolean;
     function GetConnection: IDBConnection;
     function GetNativeTransaction: TObject; virtual; abstract;
-    procedure ExecSql(const ASql: string);
+    function ExecSql(const ASql: string): Int64;
   end;
 
   { TScopeTransaction }
@@ -310,6 +326,31 @@ procedure PdbPreloadClientLibrary(const ALibrary: string);
 /// MySQL 8.4 failed, FireDAC and Zeos, Delphi Win32 and Win64). FPC's accepts
 /// both separators (SQLdb passed with forward slashes before the fix).
 function PdbMySQLPluginDir(const ALibrary: string): string;
+
+/// The constraint violations behind each database's error codes (see
+/// EConstraintViolationException), shared by the adapters: each returns True
+/// with the kind in AKind when the code is one, False otherwise. Measured
+/// with the contract suite on every database the adapters are tested with.
+///
+/// Firebird: the first GDS code of the status vector (isc_unique_key_violation,
+/// isc_no_dup, isc_foreign_key, isc_check_constraint; isc_not_valid is a NOT
+/// NULL column when the message has "*** null ***", a domain's CHECK
+/// otherwise).
+function PdbFirebirdConstraintKind(AGdsCode: Integer; const AMessage: string;
+  out AKind: TConstraintViolationKind): Boolean;
+/// PostgreSQL: the SQLSTATE (23505, 23503, 23502, 23514).
+function PdbPostgresConstraintKind(const ASqlState: string; out AKind: TConstraintViolationKind): Boolean;
+/// MySQL and MariaDB: the server's error number (ER_DUP_ENTRY and the like;
+/// MySQL's ER_CHECK_CONSTRAINT_VIOLATED, MariaDB's ER_CONSTRAINT_FAILED).
+function PdbMySQLConstraintKind(AErrorCode: Integer; out AKind: TConstraintViolationKind): Boolean;
+/// SQL Server: the error number (2627, 2601, 515; 547 is a foreign key or a
+/// CHECK, told apart by the message).
+function PdbSqlServerConstraintKind(AErrorCode: Integer; const AMessage: string;
+  out AKind: TConstraintViolationKind): Boolean;
+/// SQLite: the extended result code when the driver has it (2067, 1555,
+/// 787, 1299, 275), otherwise the message ("UNIQUE constraint failed", ...).
+function PdbSQLiteConstraintKind(AErrorCode: Integer; const AMessage: string;
+  out AKind: TConstraintViolationKind): Boolean;
 
 implementation
 
@@ -509,6 +550,115 @@ begin
   Result := FConnectionParams;
 end;
 
+function PdbFirebirdConstraintKind(AGdsCode: Integer; const AMessage: string;
+  out AKind: TConstraintViolationKind): Boolean;
+const
+  ISC_NOT_VALID = 335544347;            // "validation error for column ..."
+  ISC_NO_DUP = 335544349;               // "attempt to store duplicate value ... in unique index"
+  ISC_FOREIGN_KEY = 335544466;          // "violation of FOREIGN KEY constraint"
+  ISC_CHECK_CONSTRAINT = 335544558;     // "Operation violates CHECK constraint"
+  ISC_UNIQUE_KEY_VIOLATION = 335544665; // "violation of PRIMARY or UNIQUE KEY constraint"
+begin
+  Result := True;
+  AKind := cvUnique;
+  case AGdsCode of
+    ISC_UNIQUE_KEY_VIOLATION, ISC_NO_DUP: AKind := cvUnique;
+    ISC_FOREIGN_KEY: AKind := cvForeignKey;
+    ISC_CHECK_CONSTRAINT: AKind := cvCheck;
+    ISC_NOT_VALID:
+      if Pos('*** null ***', AMessage) > 0 then
+        AKind := cvNotNull
+      else
+        AKind := cvCheck;
+  else
+    Result := False;
+  end;
+end;
+
+function PdbPostgresConstraintKind(const ASqlState: string; out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := True;
+  AKind := cvUnique;
+  if ASqlState = '23505' then // unique_violation
+    AKind := cvUnique
+  else if ASqlState = '23503' then // foreign_key_violation
+    AKind := cvForeignKey
+  else if ASqlState = '23502' then // not_null_violation
+    AKind := cvNotNull
+  else if ASqlState = '23514' then // check_violation
+    AKind := cvCheck
+  else
+    Result := False;
+end;
+
+function PdbMySQLConstraintKind(AErrorCode: Integer; out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := True;
+  AKind := cvUnique;
+  case AErrorCode of
+    1062, // ER_DUP_ENTRY
+    1586: // ER_DUP_ENTRY_WITH_KEY_NAME
+      AKind := cvUnique;
+    1216, 1217, // ER_NO_REFERENCED_ROW, ER_ROW_IS_REFERENCED (older servers)
+    1451, 1452: // ER_ROW_IS_REFERENCED_2, ER_NO_REFERENCED_ROW_2
+      AKind := cvForeignKey;
+    1048, // ER_BAD_NULL_ERROR
+    1364: // ER_NO_DEFAULT_FOR_FIELD: a NOT NULL column left out
+      AKind := cvNotNull;
+    3819, // ER_CHECK_CONSTRAINT_VIOLATED (MySQL)
+    4025: // ER_CONSTRAINT_FAILED (MariaDB)
+      AKind := cvCheck;
+  else
+    Result := False;
+  end;
+end;
+
+function PdbSqlServerConstraintKind(AErrorCode: Integer; const AMessage: string;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := True;
+  AKind := cvUnique;
+  case AErrorCode of
+    2627, // "Violation of PRIMARY KEY / UNIQUE KEY constraint"
+    2601: // "Cannot insert duplicate key row ... with unique index"
+      AKind := cvUnique;
+    515: // "Cannot insert the value NULL into column"
+      AKind := cvNotNull;
+    547: // "... conflicted with the FOREIGN KEY / REFERENCE / CHECK constraint"
+      if Pos('CHECK constraint', AMessage) > 0 then
+        AKind := cvCheck
+      else
+        AKind := cvForeignKey;
+  else
+    Result := False;
+  end;
+end;
+
+function PdbSQLiteConstraintKind(AErrorCode: Integer; const AMessage: string;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := True;
+  AKind := cvUnique;
+  case AErrorCode of
+    2067, 1555: AKind := cvUnique; // SQLITE_CONSTRAINT_UNIQUE, SQLITE_CONSTRAINT_PRIMARYKEY
+    787: AKind := cvForeignKey;     // SQLITE_CONSTRAINT_FOREIGNKEY
+    1299: AKind := cvNotNull;       // SQLITE_CONSTRAINT_NOTNULL
+    275: AKind := cvCheck;          // SQLITE_CONSTRAINT_CHECK
+  else
+    // Without extended result codes: SQLITE_CONSTRAINT (19) and the message.
+    if Pos('UNIQUE constraint failed', AMessage) > 0 then
+      AKind := cvUnique
+    else if Pos('FOREIGN KEY constraint failed', AMessage) > 0 then
+      AKind := cvForeignKey
+    else if Pos('NOT NULL constraint failed', AMessage) > 0 then
+      AKind := cvNotNull
+    else if Pos('CHECK constraint failed', AMessage) > 0 then
+      AKind := cvCheck
+    else
+      Result := False;
+  end;
+end;
+
 { TTransactionBase }
 
 constructor TTransactionBase.Create(const AConn: IDBConnection);
@@ -546,12 +696,16 @@ end;
 procedure TTransactionBase.Commit;
 var
   LNewE: Exception;
+  LKind: TConstraintViolationKind;
 begin
   try
     DoCommit;
   except
     on E: Exception do
     begin
+      // A deferred constraint is checked here.
+      if IsConstraintViolationError(E, LKind) then
+        raise EConstraintViolationException.Create(LKind, E);
       LNewE := BuildDatabaseException(FConn, E);
       if Assigned(LNewE) then
         raise LNewE;
@@ -579,17 +733,20 @@ begin
   FInTransaction := False;
 end;
 
-procedure TTransactionBase.ExecSql(const ASql: string);
+function TTransactionBase.ExecSql(const ASql: string): Int64;
 var
   LNewE: Exception;
+  LKind: TConstraintViolationKind;
 begin
   try
-    DoExecSql(ASql);
+    Result := DoExecSqlRows(ASql);
   except
     on E: Exception do
     begin
       if IsLockConflictError(E) then
         raise ELockConflictException.Create(E);
+      if IsConstraintViolationError(E, LKind) then
+        raise EConstraintViolationException.Create(LKind, E);
       LNewE := BuildDatabaseException(FConn, E);
       if Assigned(LNewE) then
         raise LNewE;
@@ -600,6 +757,19 @@ end;
 
 function TTransactionBase.IsLockConflictError(E: Exception): Boolean;
 begin
+  Result := False;
+end;
+
+function TTransactionBase.DoExecSqlRows(const ASql: string): Int64;
+begin
+  DoExecSql(ASql);
+  Result := -1;
+end;
+
+function TTransactionBase.IsConstraintViolationError(E: Exception;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  AKind := cvUnique;
   Result := False;
 end;
 

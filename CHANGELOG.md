@@ -6,6 +6,49 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-06
+
+### Added
+
+- `EConstraintViolationException` (`PascalDb.Interfaces`), with `Kind` (`cvUnique`,
+  `cvForeignKey`, `cvNotNull`, `cvCheck`) and the driver's detail in `OriginalClassName` /
+  `OriginalMessage`: the three adapters raise it instead of the driver's exception when a
+  statement violates a constraint (`Open`, `ExecSql`, batches, `ITransaction.ExecSql`, and the
+  `Commit` that checks a deferred constraint), on every database they are tested with. Adapters
+  recognize their driver's errors through the new virtual `IsConstraintViolationError` of
+  `TTransactionBase` / `TDataSetQueryBase`, with the codes of each database in
+  `PdbFirebirdConstraintKind`, `PdbPostgresConstraintKind`, `PdbMySQLConstraintKind`,
+  `PdbSqlServerConstraintKind` and `PdbSQLiteConstraintKind` (`PascalDb.Adapter.Base`).
+- `IQuery.ExecSql` and `ITransaction.ExecSql` return the rows the statement affected (-1 when
+  the driver can't tell); an `UPDATE` counts the rows it matched, changed or not, MySQL and
+  MariaDB included. The pool's statement events report it in `TStatementInfo.Rows`.
+- `PascalDb.Version`: `PASCALDB_VERSION` (`MMmmpp`, 1100 for 0.11.0) and its parts, for a
+  consumer that needs a minimum version at compile time.
+- The mock: `AddConstraintViolation(Key, Kind)` and `SetRowsAffected(Key, Rows)`.
+
+### Changed
+
+- **Breaking:** `IQuery.ExecSql` and `ITransaction.ExecSql` are functions returning `Int64`.
+  Calling them as statements still compiles; a class that implements `IQuery` or `ITransaction`
+  itself (not through `TDataSetQueryBase` / `TTransactionBase`) must change its signature.
+  Adapters built on the base classes report the count by overriding
+  `TDataSetQueryBase.RowsAffected` and `TTransactionBase.DoExecSqlRows` (-1 otherwise).
+- **Breaking:** constraint violations no longer reach the caller as the driver's exception (see
+  Added). Code that caught the driver's class for a duplicate key must catch
+  `EConstraintViolationException`.
+- SQLite connections check foreign keys: the adapters turn `PRAGMA foreign_keys` on unless the
+  settings say otherwise (`foreign_keys=OFF` with SQLdb and Zeos, `ForeignKeys=Off` with
+  FireDAC). Before, a foreign key on SQLite was not enforced.
+- MySQL / MariaDB with Zeos: connections get `CLIENT_FOUND_ROWS=true` unless the settings set
+  it, so the server reports matched rows.
+
+### Fixed
+
+- SQLdb on PostgreSQL: a failed `Commit` (a deferred constraint, a serialization failure) left
+  the transaction half closed: the `Rollback` that followed failed with "connection pointer is
+  NULL" and the transaction's memory leaked. The transaction is now left inactive, and the next
+  one runs normally.
+
 ## [0.10.1] - 2026-10-05
 
 ### Changed
@@ -311,6 +354,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.11.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.8.0...v0.9.0

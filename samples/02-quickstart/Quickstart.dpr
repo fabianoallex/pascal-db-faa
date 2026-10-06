@@ -25,8 +25,10 @@
   connection that drops while in use raises EDatabaseUnavailableException
   (its parent class), and the pool discards that connection. Both have a
   Message safe to show to a user, with the driver's error kept in
-  OriginalMessage. Any other exception
-  (a constraint violation, a SQL error) arrives as the driver raised it.
+  OriginalMessage. A constraint violation (a duplicate key, below) raises
+  EConstraintViolationException, whose Kind says which constraint, whatever
+  the driver. Any other exception (a SQL error) arrives as the driver
+  raised it.
 
   Runs against a local PostgreSQL by default:
     docker run -d --name pascaldb-sample-pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:17
@@ -182,10 +184,11 @@ begin
         City('3550308', 'São Paulo (again)', 'SP')]);
       Writeln('  unexpected: the batch was accepted');
     except
-      on EDatabaseUnavailableException do
-        raise; // not a data error: let the handler below report it
-      on E: Exception do
-        Writeln('  rejected by the database (', E.ClassName, '); the batch was rolled back.');
+      on E: EConstraintViolationException do
+        if E.Kind = cvUnique then
+          Writeln('  rejected: a duplicate key (', E.ClassName, '); the batch was rolled back.')
+        else
+          raise;
     end;
     Writeln('Cities stored: ', LRepo.Count);
     PrintState(LRepo, 'SP');

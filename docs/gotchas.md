@@ -381,3 +381,39 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     one `ExecSql` per row there (the statement stays prepared). FireDAC's Array DML passed the same
     suite (Delphi 12 CE, Win32 and Win64: Firebird 2.5, SQLite, MySQL 8.4, MariaDB 11.4;
     PostgreSQL 17 on Win64).
+45. **SQLite doesn't check foreign keys unless the connection asks for it.** `PRAGMA foreign_keys`
+    is off by default, per connection: a `DELETE` of a row still referenced and an `INSERT` with a
+    parent that doesn't exist both succeeded (contract tests `Constraint_MissingParent_IsForeignKey`
+    and `Constraint_DeleteReferencedParent_IsForeignKey`, SQLdb and Zeos, SQLite 3.40 on Linux).
+    SQLite's documentation says the pragma is a no-op inside a transaction, so it belongs to the
+    connection's opening, not to a statement. Fix: SQLdb and Zeos get `foreign_keys=ON` (both run the pragma themselves when the
+    connection opens), FireDAC `ForeignKeys=On`, unless the settings say otherwise.
+46. **MySQL / MariaDB report the rows an `UPDATE` changed, not the rows it matched.** Saving a row
+    with the values it already has reports 0 affected rows, which reads as "not found". The client
+    flag `CLIENT_FOUND_ROWS` makes the server report matched rows, but FPC 3.2.2's MySQL connectors
+    call `mysql_real_connect` with fixed flags (`CLIENT_MULTI_RESULTS`) and no setting for it. Fix:
+    SQLdb reads the matched rows from `mysql_info` right after the statement ("Rows matched: 2
+    Changed: 0 Warnings: 0"; the 8.0 and 5.7 connectors each through their own header's
+    `mysql_info`); Zeos connects with `CLIENT_FOUND_ROWS=true` (its client flags are properties
+    named after the enum). Contract test `ExecSql_ReturnsRowsAffected` (the same `UPDATE` twice).
+47. **SQLdb + PostgreSQL: a failed `COMMIT` breaks the transaction.** `TPQConnection.Commit` checks
+    the result with `CheckResultError`, which calls `PQfinish` on the transaction's own server
+    connection before raising. `TSQLTransaction` stays active with a dead handle, and the
+    `Rollback` that has to follow raised "connection pointer is NULL"; 268 blocks leaked (FPC 3.2.2,
+    Linux, a deferred foreign key violated at commit). The same happens on any failed `COMMIT`
+    (a serialization failure under `SERIALIZABLE`). Fix: the adapter's `DoCommit` rolls back with
+    the connector's `ForcedClose` set, the path SQLdb itself takes on a forced disconnect:
+    `AttemptRollBack` ignores the failure and frees the handle; the next transaction gets a new
+    server connection. Contract test `Constraint_DeferredForeignKey_RaisedByCommit`.
+48. **SQLdb + SQLite: a failed `COMMIT` is a plain `EDatabaseError`.** A deferred foreign key
+    violated at commit arrived as `EDatabaseError: FOREIGN KEY constraint failed`, not as an
+    `ESQLDatabaseError` with a code (FPC 3.2.2, Linux), unlike a failed statement (extended code
+    787). Fix: on SQLite the adapter also recognizes the constraint violations by SQLite's message.
+49. **Zeos 8 + SQLite: a statement that failed in `Open` raises its error again when finalized.**
+    An `INSERT ... RETURNING` violating a key raised in `Open` (correctly), but freeing the query
+    later, in the pool's release, raised `EZSQLException` "constraint failed ... sqlite3_finalize"
+    from a destructor: Zeos doesn't reset a statement whose first `sqlite3_step` failed in
+    `ExecuteQueryPrepared`, so `sqlite3_finalize` returns that error again (FPC 3.2.2, Linux, SQLite
+    3.40). Found with a probe in the contract test (`Open` raised, `Close` and `Rollback` didn't,
+    releasing the query did). Fix: on SQLite the Zeos adapter's `DoOpen` unprepares the query right
+    after a failed `Open`, ignoring that second error.

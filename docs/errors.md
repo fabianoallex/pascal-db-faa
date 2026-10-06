@@ -13,7 +13,8 @@ the failure happens:
 | Creating the factory | nothing because the server is down | the pool's initial connections that fail are retried on the next acquire |
 | Opening a **new** connection fails (server down, wrong host or port, bad credentials, missing client library) | `EDatabaseConnectException`, a subclass of `EDatabaseUnavailableException`; the driver's detail is in `OriginalClassName` / `OriginalMessage` | `AcquireQuery` / `AcquireConnection` |
 | An **open** connection drops while in use | `EDatabaseUnavailableException` | `Open`, `ExecSql`, `StartTransaction`, `Commit`, `Rollback` |
-| A data error: constraint violation, bad SQL, wrong type | the driver's own exception, unchanged | `Open`, `ExecSql`, `Commit` |
+| A constraint violation: duplicate key, missing or still referenced row, NULL in a NOT NULL column, a CHECK | `EConstraintViolationException`, with `Kind`; the driver's detail is in `OriginalClassName` / `OriginalMessage` | `Open`, `ExecSql`, a batch's `Execute`; `Commit` for a deferred constraint |
+| Any other data error: bad SQL, wrong type, value too long | the driver's own exception, unchanged | `Open`, `ExecSql`, `Commit` |
 | Another transaction holds or changed the data: a lock wait longer than `LockTimeoutMs`, an update conflict, a deadlock | `ELockConflictException`; the driver's detail is in `OriginalClassName` / `OriginalMessage` | `Open`, `ExecSql` |
 | No free connection within the wait limit | `EPoolTimeoutException` (unit `PascalDb.Pool`) | `AcquireQuery` / `AcquireConnection` |
 | A SQL key that doesn't exist | `ESQLLoaderException` | `SqlLoader['KEY']` |
@@ -85,15 +86,29 @@ end;
 ```
 
 In [sample 02](../samples/02-quickstart/Quickstart.dpr), a batch whose second insert violates the
-primary key raises the driver's exception and the rollback leaves none of the batch in the
-table.
+primary key raises `EConstraintViolationException` and the rollback leaves none of the batch in
+the table.
 
-## Turning a duplicate key into your own exception
+## Constraint violations: `EConstraintViolationException`
 
-A constraint violation arrives as the driver's exception, whose class and error code differ
-for every driver and database, so matching on them ties the repository to one driver. A
-portable way: let the database enforce the key, and when the `INSERT` fails, ask, in a new
-transaction, whether the key exists now.
+When the database rejects a statement because of a constraint, the adapters raise
+`EConstraintViolationException` instead of the driver's exception, whatever the driver.
+`Kind` says which constraint:
+
+| `Kind` | The statement | A layer on top would usually answer |
+|---|---|---|
+| `cvUnique` | repeated a primary key or a unique column | 409 |
+| `cvForeignKey` | referred to a row that doesn't exist, or deleted (or changed the key of) a row others refer to | 409 |
+| `cvNotNull` | left a NOT NULL column NULL | 422 (or 400) |
+| `cvCheck` | broke a CHECK constraint | 422 (or 400) |
+
+`Message` is generic and safe to show ("A record with the same key already exists.", ...); the
+driver's class and text, with the constraint's name, are in `OriginalClassName` /
+`OriginalMessage`. The connection is healthy and stays in the pool. As after any error, roll the
+transaction back: on PostgreSQL nothing else runs in it.
+
+Let the database enforce the key and turn the exception into your own where the caller needs to
+know:
 
 ```pascal
 procedure TProductRepository.Insert(const AProduct: TProduct);
@@ -101,40 +116,52 @@ var
   LQuery: IQuery;
   LScope: IScopeTransaction;
 begin
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
   try
-    LScope := FFactory.GetPool.AcquireQuery(LQuery);
-    LScope.StartTransaction;
-    try
-      LQuery.Sql := FFactory.SqlLoader['PRODUCT.INSERT'].SQL;
-      // ... bind the parameters ...
-      LQuery.ExecSql;
-      LScope.Commit;
-    except
+    LQuery.Sql := FFactory.SqlLoader['PRODUCT.INSERT'].SQL;
+    // ... bind the parameters ...
+    LQuery.ExecSql;
+    LScope.Commit;
+  except
+    on E: EConstraintViolationException do
+    begin
       LScope.Rollback;
+      if E.Kind = cvUnique then
+        raise EProductAlreadyExists.CreateFmt('Product %s already exists', [AProduct.Code]);
       raise;
     end;
-  except
-    on E: Exception do
+    on Exception do
     begin
-      LQuery := nil;  // give the connection back before Exists takes one
-      LScope := nil;
-      // Not EDatabaseUnavailableException: a lost connection is not a duplicate.
-      if not (E is EDatabaseUnavailableException) and Exists(AProduct.Code) then
-        raise EProductAlreadyExists.CreateFmt('Product %s already exists', [AProduct.Code]);
+      LScope.Rollback;
       raise;
     end;
   end;
 end;
 ```
 
-`Exists` is a plain `SELECT` by key in its own scope. Checking *before* the insert instead would
-leave a gap in which another connection inserts the same key; the database's constraint is what
-actually decides. Where every target database supports it, `INSERT ... ON CONFLICT DO NOTHING
-RETURNING ...` (PostgreSQL, SQLite) opened with `Open` answers in one statement, but Firebird has
-no `ON CONFLICT`.
+Checking *before* the insert instead would leave a gap in which another connection inserts the
+same key; the database's constraint is what actually decides.
 
-To test this without a database, make the mock fail the `INSERT` with `AddFailure` and answer
-the existence check with `AddResult` ([guide 5](testing-with-the-mock.md#simulating-a-database-error)).
+A constraint declared `DEFERRABLE INITIALLY DEFERRED` (PostgreSQL, SQLite) is checked by the
+`Commit`, which then raises the same exception.
+
+What each adapter recognizes (measured with the contract suite on every database):
+
+| Database | `cvUnique` | `cvForeignKey` | `cvNotNull` | `cvCheck` |
+|---|---|---|---|---|
+| Firebird | GDS `isc_unique_key_violation`, `isc_no_dup` | `isc_foreign_key` | `isc_not_valid` with `*** null ***` | `isc_check_constraint`; `isc_not_valid` otherwise (a domain's CHECK) |
+| PostgreSQL | SQLSTATE `23505` | `23503` | `23502` | `23514` |
+| MySQL / MariaDB | errors 1062, 1586 | 1451, 1452 (1216, 1217 on old servers) | 1048, 1364 | 3819 (MySQL), 4025 (MariaDB) |
+| SQL Server | errors 2627, 2601 | 547 (FOREIGN KEY / REFERENCE) | 515 | 547 (CHECK) |
+| SQLite | extended codes 2067, 1555 | 787 | 1299 | 275 |
+
+**SQLite checks foreign keys only when the connection asks for it** (`PRAGMA foreign_keys`).
+The adapters turn it on for every connection unless the settings say otherwise:
+`foreign_keys=OFF` (SQLdb, Zeos) or `ForeignKeys=Off` (FireDAC).
+
+To test this without a database, make the mock fail the `INSERT` with `AddConstraintViolation`
+([guide 5](testing-with-the-mock.md#simulating-a-database-error)).
 
 ## Locks and conflicts: `ELockConflictException`
 
@@ -242,7 +269,7 @@ Things to decide before using it:
 
 - **Is the work idempotent?** A read is. An `UPDATE ... SET STATUS = 'PAID'` is. An `INSERT` with
   a key the database generates is not: after a failed `Commit`, check whether the row is there
-  before inserting again (as in [the duplicate key section](#turning-a-duplicate-key-into-your-own-exception)),
+  before inserting again (a `cvUnique` [constraint violation](#constraint-violations-econstraintviolationexception) says it is),
   or generate the key in the caller.
 - **How long can the caller wait?** Each round holds a thread. In a server, a short deadline and
   then a 503 (letting the client or the load balancer try again) usually hold up better than

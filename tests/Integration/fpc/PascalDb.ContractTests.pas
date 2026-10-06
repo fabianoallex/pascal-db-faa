@@ -15,8 +15,13 @@
   library's own engine), a round trip of every parameter type, typed NULLs,
   optional columns through SQL tags, an INSERT returning its row through
   Open (RETURNING, or OUTPUT on SQL Server; not on MySQL), UTF-8 text,
-  commit/rollback, nested scopes with savepoints, a constraint violation
-  that must not discard the connection, scripts, row counts, the dialect's
+  commit/rollback, nested scopes with savepoints, constraint violations
+  raised as EConstraintViolationException of the right kind (unique key
+  through ExecSql, Open, a batch and ITransaction.ExecSql; foreign key on
+  insert and delete, and at commit where it can be deferred; NOT NULL;
+  CHECK), each leaving the connection usable and in the pool, the rows
+  ExecSql affected (UPDATE counts matched rows, changed or not), scripts,
+  row counts, the dialect's
   paging clause (pages in order, a partial last page, one past the end),
   parameters
   after the same SQL text is assigned again (still bound, without the
@@ -60,6 +65,7 @@ type
     function CountRows(const AWhere: string): Integer;
     procedure InsertItem(AId: Integer; const AName: string);
     procedure CheckLockWaitGivesUp(AUseBatch: Boolean);
+    function ViolationOf(const ASql: string; AViaOpen: Boolean = False): string;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -77,6 +83,16 @@ type
     procedure Rollback_Discards;
     procedure NestedScope_RollbackToSavepoint_KeepsOuterWork;
     procedure ConstraintViolation_RaisesDataError_KeepsConnection;
+    procedure Constraint_DuplicatePrimaryKey_IsUnique;
+    procedure Constraint_DuplicateThroughOpen_IsUnique;
+    procedure Constraint_DuplicateThroughTransactionExecSql_IsUnique;
+    procedure Constraint_MissingParent_IsForeignKey;
+    procedure Constraint_DeleteReferencedParent_IsForeignKey;
+    procedure Constraint_DeferredForeignKey_RaisedByCommit;
+    procedure Constraint_NullInNotNullColumn_IsNotNull;
+    procedure Constraint_CheckFails_IsCheck;
+    procedure ExecSql_ReturnsRowsAffected;
+    procedure TransactionExecSql_ReturnsRowsAffected;
     procedure SqlScript_RunsEveryStatement;
     procedure RecordCount_CountsEveryRow;
     procedure Paging_PagesCoverAllRowsInOrder;
@@ -245,6 +261,8 @@ end;
 procedure TContractTests.Setup;
 begin
   FFactory := IntegrationFactory;
+  ExecCommitted('DELETE FROM ITEM_LINKS');
+  ExecCommitted('DELETE FROM ITEM_TAGS');
   ExecCommitted('DELETE FROM ITEMS');
   ExecCommitted('DELETE FROM LOG_LINES');
 end;
@@ -569,11 +587,13 @@ var
   LRaised: Boolean;
   LUnavailable: Boolean;
   LActiveBefore: Integer;
+  LKind: string;
 begin
   InsertItem(11, 'unique name');
   LActiveBefore := FFactory.GetPool.GetActiveConnections;
   LRaised := False;
   LUnavailable := False;
+  LKind := '';
   LScope := FFactory.GetPool.AcquireQuery(LQuery);
   LScope.StartTransaction;
   try
@@ -582,16 +602,235 @@ begin
   except
     on E: EDatabaseUnavailableException do
       LUnavailable := True;
-    on E: Exception do
+    on E: EConstraintViolationException do
+    begin
       LRaised := True;
+      if E.Kind = cvUnique then
+        LKind := 'unique';
+    end;
+    on E: Exception do
+    begin
+      LRaised := True;
+      LKind := DescribeDriverError(E) + ': ' + E.Message;
+    end;
   end;
   LScope.Rollback;
   LQuery := nil;
   LScope := nil;
   TAssert.AssertTrue('A duplicate key must raise', LRaised or LUnavailable);
   TAssert.AssertFalse('A data error must not be reported as an unavailable database', LUnavailable);
+  TAssert.AssertEquals('A duplicate unique column is EConstraintViolationException(cvUnique)', 'unique', LKind);
   TAssert.AssertEquals('The healthy connection must not be discarded',
     LActiveBefore, FFactory.GetPool.GetActiveConnections);
+end;
+
+// Runs ASql in a pooled transaction, expecting a constraint violation, and
+// returns its kind ('unique', 'foreign key', 'not null', 'check') or, when
+// something else was raised, the driver's detail; '' when nothing was. Then
+// rolls back and checks the same query still works, and that the pool kept
+// the connection.
+function TContractTests.ViolationOf(const ASql: string; AViaOpen: Boolean): string;
+const
+  KIND_NAMES: array[TConstraintViolationKind] of string = ('unique', 'foreign key', 'not null', 'check');
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LActiveBefore: Integer;
+  LDetailKept: Boolean;
+begin
+  Result := '';
+  LDetailKept := True;
+  LActiveBefore := FFactory.GetPool.GetActiveConnections;
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := ASql;
+    if AViaOpen then
+      LQuery.Open
+    else
+      LQuery.ExecSql;
+  except
+    on E: EConstraintViolationException do
+    begin
+      Result := KIND_NAMES[E.Kind];
+      LDetailKept := E.OriginalMessage <> '';
+    end;
+    on E: Exception do
+      Result := DescribeDriverError(E) + ': ' + E.Message;
+  end;
+  LScope.Rollback;
+  LScope.StartTransaction;
+  LQuery.Sql := 'SELECT COUNT(*) AS TOTAL FROM ITEMS';
+  TAssert.AssertTrue('The query works after the rollback', LQuery.Open.Integers['TOTAL'] >= 0);
+  LQuery.Close;
+  LScope.Commit;
+  LQuery := nil;
+  LScope := nil;
+  TAssert.AssertTrue('The driver''s detail is kept', LDetailKept);
+  TAssert.AssertEquals('The healthy connection must not be discarded',
+    LActiveBefore, FFactory.GetPool.GetActiveConnections);
+end;
+
+procedure TContractTests.Constraint_DuplicatePrimaryKey_IsUnique;
+begin
+  InsertItem(21, 'first');
+  TAssert.AssertEquals('unique', ViolationOf('INSERT INTO ITEMS (ID, NAME) VALUES (21, ''second'')'));
+end;
+
+procedure TContractTests.Constraint_DuplicateThroughOpen_IsUnique;
+var
+  LSql: string;
+begin
+  if InsertReturningSql = '' then
+    Exit; // MySQL: no INSERT ... RETURNING
+  InsertItem(22, 'first');
+  LSql := StringReplace(InsertReturningSql, ':ID', '22', []);
+  LSql := StringReplace(LSql, ':NAME', '''second''', []);
+  TAssert.AssertEquals('unique', ViolationOf(LSql, True));
+end;
+
+procedure TContractTests.Constraint_DuplicateThroughTransactionExecSql_IsUnique;
+var
+  LConn: IDBConnection;
+  LTransaction: ITransaction;
+  LResult: string;
+begin
+  InsertItem(23, 'first');
+  LConn := FFactory.CreateConnection;
+  LTransaction := FFactory.CreateTransaction(LConn);
+  LTransaction.StartTransaction;
+  LResult := '';
+  try
+    LTransaction.ExecSql('INSERT INTO ITEMS (ID, NAME) VALUES (23, ''second'')');
+  except
+    on E: EConstraintViolationException do
+      if E.Kind = cvUnique then
+        LResult := 'unique';
+    on E: Exception do
+      LResult := DescribeDriverError(E) + ': ' + E.Message;
+  end;
+  LTransaction.Rollback;
+  TAssert.AssertEquals('unique', LResult);
+end;
+
+procedure TContractTests.Constraint_MissingParent_IsForeignKey;
+begin
+  TAssert.AssertEquals('foreign key', ViolationOf('INSERT INTO ITEM_TAGS (ID, ITEM_ID, QTY) VALUES (1, 999, 1)'));
+end;
+
+procedure TContractTests.Constraint_DeleteReferencedParent_IsForeignKey;
+begin
+  InsertItem(24, 'parent');
+  ExecCommitted('INSERT INTO ITEM_TAGS (ID, ITEM_ID, QTY) VALUES (2, 24, 1)');
+  TAssert.AssertEquals('foreign key', ViolationOf('DELETE FROM ITEMS WHERE ID = 24'));
+  TAssert.AssertEquals('The parent is still there', 1, CountRows('ID = 24'));
+end;
+
+procedure TContractTests.Constraint_DeferredForeignKey_RaisedByCommit;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LResult: string;
+  LRows: Int64;
+  LCount: Integer;
+  LActiveBefore: Integer;
+begin
+  if not SupportsDeferredConstraints then
+    Exit;
+  LResult := '';
+  LActiveBefore := FFactory.GetPool.GetActiveConnections;
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  LQuery.Sql := 'INSERT INTO ITEM_LINKS (ID, ITEM_ID) VALUES (1, 999)';
+  LRows := LQuery.ExecSql;
+  try
+    LScope.Commit;
+  except
+    on E: EConstraintViolationException do
+      if E.Kind = cvForeignKey then
+        LResult := 'foreign key';
+    on E: Exception do
+      LResult := DescribeDriverError(E) + ': ' + E.Message;
+  end;
+  if LResult <> '' then
+    LScope.Rollback;
+  // The same pooled query works afterwards.
+  LScope.StartTransaction;
+  LQuery.Sql := 'SELECT COUNT(*) AS TOTAL FROM ITEM_LINKS';
+  LCount := LQuery.Open.Integers['TOTAL'];
+  LQuery.Close;
+  LScope.Commit;
+  LQuery := nil;
+  LScope := nil;
+  TAssert.AssertEquals('The deferred check lets the statement through', Int64(1), LRows);
+  TAssert.AssertEquals('The commit raises the deferred violation', 'foreign key', LResult);
+  TAssert.AssertEquals('Nothing was committed', 0, LCount);
+  TAssert.AssertEquals('The healthy connection must not be discarded',
+    LActiveBefore, FFactory.GetPool.GetActiveConnections);
+end;
+
+procedure TContractTests.Constraint_NullInNotNullColumn_IsNotNull;
+begin
+  InsertItem(25, 'parent');
+  TAssert.AssertEquals('not null', ViolationOf('INSERT INTO ITEM_TAGS (ID, ITEM_ID, QTY) VALUES (3, NULL, 1)'));
+end;
+
+procedure TContractTests.Constraint_CheckFails_IsCheck;
+begin
+  InsertItem(26, 'parent');
+  TAssert.AssertEquals('check', ViolationOf('INSERT INTO ITEM_TAGS (ID, ITEM_ID, QTY) VALUES (4, 26, -1)'));
+end;
+
+procedure TContractTests.ExecSql_ReturnsRowsAffected;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  I: Integer;
+begin
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME, QTY) VALUES (:ID, :NAME, 1)';
+    for I := 41 to 43 do
+    begin
+      LQuery.Params.Integers['ID'] := I;
+      LQuery.Params.Strings['NAME'] := 'rows ' + IntToStr(I);
+      TAssert.AssertEquals('An INSERT affects its row', Int64(1), LQuery.ExecSql);
+    end;
+    LQuery.Sql := 'UPDATE ITEMS SET QTY = 5 WHERE ID IN (41, 42)';
+    TAssert.AssertEquals('An UPDATE counts the rows it matched', Int64(2), LQuery.ExecSql);
+    TAssert.AssertEquals('Matched rows count even when no value changes', Int64(2), LQuery.ExecSql);
+    LQuery.Sql := 'UPDATE ITEMS SET QTY = :QTY WHERE ID = :ID';
+    LQuery.Params.Integers['QTY'] := 7;
+    LQuery.Params.Integers['ID'] := 999;
+    TAssert.AssertEquals('An UPDATE that matches nothing', Int64(0), LQuery.ExecSql);
+    LQuery.Sql := 'DELETE FROM ITEMS WHERE ID = 43';
+    TAssert.AssertEquals('A DELETE counts its rows', Int64(1), LQuery.ExecSql);
+    TAssert.AssertEquals('A DELETE that matches nothing', Int64(0), LQuery.ExecSql);
+    LScope.Rollback;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+procedure TContractTests.TransactionExecSql_ReturnsRowsAffected;
+var
+  LConn: IDBConnection;
+  LTransaction: ITransaction;
+begin
+  LConn := FFactory.CreateConnection;
+  LTransaction := FFactory.CreateTransaction(LConn);
+  LTransaction.StartTransaction;
+  try
+    TAssert.AssertEquals(Int64(1), LTransaction.ExecSql('INSERT INTO ITEMS (ID, NAME) VALUES (51, ''a'')'));
+    TAssert.AssertEquals(Int64(1), LTransaction.ExecSql('INSERT INTO ITEMS (ID, NAME) VALUES (52, ''b'')'));
+    TAssert.AssertEquals('Matched rows, changed or not', Int64(2),
+      LTransaction.ExecSql('UPDATE ITEMS SET QTY = NULL WHERE ID IN (51, 52)'));
+    TAssert.AssertEquals(Int64(0), LTransaction.ExecSql('DELETE FROM ITEMS WHERE ID = 999'));
+  finally
+    LTransaction.Rollback;
+  end;
 end;
 
 procedure TContractTests.SqlScript_RunsEveryStatement;
@@ -1029,6 +1268,7 @@ begin
     begin
       TAssert.AssertEquals(Ord(skExecSql), Ord(LLog.Infos[I].Kind));
       TAssert.AssertEquals('The SQL as the query ran it', INSERT_SQL, LLog.Infos[I].Sql);
+      TAssert.AssertEquals('ExecSql reports the rows it affected', Int64(1), LLog.Infos[I].Rows);
       TAssert.AssertEquals('', LLog.Infos[I].ErrorClass);
     end;
     TAssert.AssertEquals(Ord(skOpen), Ord(LLog.Infos[3].Kind));
@@ -1203,16 +1443,17 @@ begin
     end;
     LBatch.Execute;
   except
-    on E: Exception do
+    on E: EConstraintViolationException do
       LRaised := E.ClassName;
+    on E: Exception do
+      LRaised := DescribeDriverError(E) + ': ' + E.Message;
   end;
   LScope.Rollback;
   LBatch := nil;
   LQuery := nil;
   LScope := nil;
-  TAssert.AssertTrue('The duplicate must raise', LRaised <> '');
-  TAssert.AssertTrue('A data error must not be reported as an unavailable database (' + LRaised + ')',
-    (LRaised <> 'EDatabaseUnavailableException') and (LRaised <> 'EDatabaseConnectException'));
+  TAssert.AssertEquals('The duplicate raises a constraint violation',
+    'EConstraintViolationException', LRaised);
   TAssert.AssertEquals('The rollback undoes every row, the first send''s too', 0, CountRows('ID > 3000'));
   TAssert.AssertEquals('The healthy connection must not be discarded',
     LActiveBefore, FFactory.GetPool.GetActiveConnections);

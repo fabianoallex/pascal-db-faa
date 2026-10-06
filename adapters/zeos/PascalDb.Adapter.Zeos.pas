@@ -90,7 +90,14 @@
     connection that tries to write fails at once with "database is locked"
     (measured: 3 of 4 concurrent writers failed within 4 ms). SQLite
     connections get Zeos's busytimeout=5000 (milliseconds) unless the
-    settings say otherwise.
+    settings say otherwise, and foreign_keys=ON (SQLite checks foreign keys
+    only when the connection asks) unless the settings set foreign_keys.
+  - SQLite: a statement that fails in Open (an INSERT ... RETURNING
+    violating a key) keeps its error, and Zeos 8.0.0 raises it again when
+    the statement is finalized: freeing the query raised EZSQLException from
+    sqlite3_finalize, inside the pool's release (measured, FPC 3.2.2, Linux,
+    SQLite 3.40). A failed Open unprepares the query at once, ignoring that
+    second error, and the original one reaches the caller.
   - IDatabaseConfig.LockTimeoutMs: Firebird gets isc_tpb_wait and
     isc_tpb_lock_timeout (whole seconds, rounded up) in its transaction
     parameters; PostgreSQL a SET lock_timeout right after connecting (one
@@ -136,6 +143,16 @@
     1205 (deadlock victim) become ELockConflictException. Measured with 8
     threads x 2000 statements, connecting at the same time, errors included:
     clean, no lock needed around Connect.
+  - Constraint violations become EConstraintViolationException (see
+    PascalDb.Adapter.Base for the codes): Firebird by the GDS code in
+    TZIBSpecificData (ErrorCode is the SQLCODE, -803 for every unique
+    violation), PostgreSQL by the SQLSTATE in StatusCode, the others by
+    ErrorCode (SQLite's extended codes: Zeos turns them on).
+  - Rows affected: TZQuery.RowsAffected. MySQL/MariaDB count only the rows
+    an UPDATE changed unless the client connects with CLIENT_FOUND_ROWS;
+    connections get CLIENT_FOUND_ROWS=true (a Zeos client flag property)
+    unless the settings set it, so an UPDATE counts the rows it matched, as
+    on the other databases.
   - Batches (IBatch, PascalDb.Batch) run one ExecSql per row: Zeos's own
     batch DML (Params.BatchDMLCount) failed on every database tested, and on
     PostgreSQL, where INSERTs worked, it rewrites the statement with unnest()
@@ -194,7 +211,9 @@ type
     procedure DoCommit; override;
     procedure DoRollback; override;
     procedure DoExecSql(const ASql: string); override;
+    function DoExecSqlRows(const ASql: string): Int64; override;
     function IsLockConflictError(E: Exception): Boolean; override;
+    function IsConstraintViolationError(E: Exception; out AKind: TConstraintViolationKind): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection);
     destructor Destroy; override;
@@ -244,10 +263,13 @@ type
     function DataSet: TDataSet; override;
     function SqlLines: TStrings; override;
     procedure DoExecSql; override;
+    procedure DoOpen; override;
     procedure DoClearParams; override;
     function ResetParamValues: Boolean; override;
     function CreateParams: IParams; override;
+    function RowsAffected: Int64; override;
     function IsLockConflictError(E: Exception): Boolean; override;
+    function IsConstraintViolationError(E: Exception; out AKind: TConstraintViolationKind): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
     destructor Destroy; override;
@@ -400,6 +422,31 @@ begin
       (EZSQLThrowable(E).ErrorCode = MSSQL_DEADLOCK_VICTIM);
 end;
 
+// See the unit header: the driver's constraint violations.
+function IsZeosConstraintViolation(E: Exception; AConn: TZConnection;
+  out AKind: TConstraintViolationKind): Boolean;
+var
+  LError: EZSQLThrowable;
+begin
+  Result := False;
+  AKind := cvUnique;
+  if not (E is EZSQLThrowable) then
+    Exit;
+  LError := EZSQLThrowable(E);
+  // Firebird: ErrorCode is the SQLCODE (-803, -530, ...); the GDS code is
+  // in the specific data.
+  if LError.SpecificData is TZIBSpecificData then
+    Result := PdbFirebirdConstraintKind(TZIBSpecificData(LError.SpecificData).IBErrorCode, E.Message, AKind)
+  else if IsProtocol(AConn, 'postgresql') then
+    Result := PdbPostgresConstraintKind(LError.StatusCode, AKind)
+  else if IsMySQLProtocol(AConn) then
+    Result := PdbMySQLConstraintKind(LError.ErrorCode, AKind)
+  else if IsProtocol(AConn, 'sqlite') then
+    Result := PdbSQLiteConstraintKind(LError.ErrorCode, E.Message, AKind)
+  else if IsODBCProtocol(AConn) then
+    Result := PdbSqlServerConstraintKind(LError.ErrorCode, E.Message, AKind);
+end;
+
 function PdbZeosNewConnection(ASettings: TStrings): TZConnection;
 var
   I: Integer;
@@ -439,6 +486,10 @@ begin
       Result.Properties.Values['hard_commit'] := 'true';
     if SameText(Copy(Result.Protocol, 1, 6), 'sqlite') and (Result.Properties.Values['busytimeout'] = '') then
       Result.Properties.Values['busytimeout'] := '5000';
+    if SameText(Copy(Result.Protocol, 1, 6), 'sqlite') and (Result.Properties.Values['foreign_keys'] = '') then
+      Result.Properties.Values['foreign_keys'] := 'ON';
+    if IsMySQLProtocol(Result) and (Result.Properties.Values['CLIENT_FOUND_ROWS'] = '') then
+      Result.Properties.Values['CLIENT_FOUND_ROWS'] := 'true';
     if IsODBCProtocol(Result) and (Pos('MARS_CONNECTION', UpperCase(Result.Database)) = 0) then
     begin
       if (Result.Database <> '') and (Result.Database[Length(Result.Database)] <> ';') then
@@ -566,6 +617,11 @@ begin
 end;
 
 procedure TZeosTransactionAdapter.DoExecSql(const ASql: string);
+begin
+  DoExecSqlRows(ASql);
+end;
+
+function TZeosTransactionAdapter.DoExecSqlRows(const ASql: string): Int64;
 var
   LQuery: TZQuery;
 begin
@@ -577,6 +633,7 @@ begin
     LQuery.ParamCheck := False;
     LQuery.SQL.Text := ASql;
     LQuery.ExecSQL;
+    Result := LQuery.RowsAffected;
   finally
     LQuery.Free;
   end;
@@ -585,6 +642,12 @@ end;
 function TZeosTransactionAdapter.IsLockConflictError(E: Exception): Boolean;
 begin
   Result := IsZeosLockConflict(E, FConnection);
+end;
+
+function TZeosTransactionAdapter.IsConstraintViolationError(E: Exception;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := IsZeosConstraintViolation(E, FConnection, AKind);
 end;
 
 function TZeosTransactionAdapter.GetNativeTransaction: TObject;
@@ -722,6 +785,23 @@ begin
     GetTransaction.StartTransaction;
 end;
 
+procedure TZeosQueryAdapter.DoOpen;
+begin
+  try
+    inherited DoOpen;
+  except
+    // See the unit header: on SQLite the failed statement keeps its error
+    // until it is finalized; finalize it now, while the error is expected.
+    if IsProtocol(FQuery.Connection as TZConnection, 'sqlite') then
+      try
+        FQuery.Unprepare;
+      except
+        // the statement's own error, raised again by sqlite3_finalize
+      end;
+    raise;
+  end;
+end;
+
 procedure TZeosQueryAdapter.QueryAfterOpen(ADataSet: TDataSet);
 begin
   FQuery.FetchAll;
@@ -765,9 +845,20 @@ begin
     SameText(Copy(FQuery.Connection.Protocol, 1, 6), 'sqlite'));
 end;
 
+function TZeosQueryAdapter.RowsAffected: Int64;
+begin
+  Result := FQuery.RowsAffected;
+end;
+
 function TZeosQueryAdapter.IsLockConflictError(E: Exception): Boolean;
 begin
   Result := IsZeosLockConflict(E, FQuery.Connection as TZConnection);
+end;
+
+function TZeosQueryAdapter.IsConstraintViolationError(E: Exception;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := IsZeosConstraintViolation(E, FQuery.Connection as TZConnection, AKind);
 end;
 
 { TZeosProvider }

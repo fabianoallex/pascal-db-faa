@@ -41,6 +41,8 @@
                    MySQL only: the client's plugin folder (default: the
                    plugin folder next to ClientLibrary, if there is one;
                    see PdbMySQLPluginDir)
+    foreign_keys   SQLite only: ON (default) or OFF, SQLite's own pragma
+                   (SQLdb runs it when the connection opens)
   Any other line is passed to the connection's Params as is (SQL Server:
   keywords of the ODBC connection string, e.g. TrustServerCertificate=yes or
   Encrypt=no).
@@ -65,6 +67,29 @@
     (measured: 3 of 4 concurrent writers failed within 4 ms). Every SQLite
     connection gets PRAGMA busy_timeout (BusyTimeout, default 5000 ms) when
     it opens.
+  - SQLite checks foreign keys only when the connection asks for it: SQLite
+    connections get foreign_keys=ON unless the settings set it.
+  - Constraint violations become EConstraintViolationException (the codes
+    are in PascalDb.Adapter.Base): ESQLDatabaseError.ErrorCode (Firebird's
+    GDS code, MySQL's and SQL Server's error number, SQLite's extended code,
+    which sqlite3conn turns on), EPQDatabaseError.SQLSTATE. A COMMIT that
+    fails on SQLite (a deferred foreign key) raises a plain EDatabaseError
+    with SQLite's message only, which is recognized by its text.
+  - PostgreSQL: a COMMIT that fails (a deferred constraint, a serialization
+    failure) makes the connector close that transaction's server connection
+    (TPQConnection.CheckResultError calls PQfinish), so the Rollback that
+    must follow failed with "connection pointer is NULL" and the
+    transaction's handle leaked (measured: 268 unfreed blocks). DoCommit then
+    rolls back with the connector's ForcedClose set, the path SQLdb itself
+    takes on a forced disconnect: the failure is ignored and the
+    transaction ends; the next one gets a new server connection.
+  - Rows affected: TSQLQuery.RowsAffected. MySQL/MariaDB count only the rows
+    an UPDATE changed unless the client connects with CLIENT_FOUND_ROWS,
+    and FPC 3.2.2's MySQL connectors pass fixed client flags to
+    mysql_real_connect (no setting for it). The matched rows are read from
+    mysql_info right after the statement ("Rows matched: N  Changed: M
+    Warnings: W", sent by the server after an UPDATE), so an UPDATE counts
+    the rows it matched, as on the other databases.
   - IDatabaseConfig.LockTimeoutMs: Firebird gets it in every transaction's
     TPB (isc_tpb_lock_timeout, whole seconds, rounded up, with SQLdb's
     default concurrency/wait/write spelled out, since a TPB with any item
@@ -172,6 +197,12 @@ type
     /// ODBC only: runs ASql with SQLExecDirect on the open connection's own
     /// handle, outside SQLdb (see the unit header: session settings).
     procedure ExecDirectOnSession(const ASql: string);
+    /// The rows the statement just run affected, given SQLdb's count: on
+    /// MySQL/MariaDB, an UPDATE's matched rows (see the unit header).
+    function MatchedRows(ARowsAffected: Int64): Int64;
+    /// Rolls ATransaction back, ignoring a failure, and leaves it inactive
+    /// (see the unit header: a failed COMMIT on PostgreSQL).
+    procedure DiscardTransaction(ATransaction: TSQLTransaction);
   end;
 
   { TSQLdbConnectionAdapter }
@@ -205,7 +236,9 @@ type
     procedure DoCommit; override;
     procedure DoRollback; override;
     procedure DoExecSql(const ASql: string); override;
+    function DoExecSqlRows(const ASql: string): Int64; override;
     function IsLockConflictError(E: Exception): Boolean; override;
+    function IsConstraintViolationError(E: Exception; out AKind: TConstraintViolationKind): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection);
     destructor Destroy; override;
@@ -226,7 +259,9 @@ type
     procedure DoClearParams; override;
     function ResetParamValues: Boolean; override;
     function CreateParams: IParams; override;
+    function RowsAffected: Int64; override;
     function IsLockConflictError(E: Exception): Boolean; override;
+    function IsConstraintViolationError(E: Exception; out AKind: TConstraintViolationKind): Boolean; override;
   public
     constructor Create(const AConn: IDBConnection; const ATransaction: ITransaction);
     destructor Destroy; override;
@@ -266,7 +301,9 @@ implementation
 
 uses
   SyncObjs,
-  odbcsqldyn;
+  odbcsqldyn,
+  mysql57dyn,
+  mysql80dyn;
 
 var
   GLibraryLoaders: TList = nil;
@@ -351,6 +388,55 @@ begin
       raise EDatabaseError.CreateFmt('PascalDb.Adapter.SQLdb: SQLExecDirect failed (%d) for "%s"', [LResult, ASql]);
   finally
     SQLFreeHandle(SQL_HANDLE_STMT, LStatement);
+  end;
+end;
+
+// See the unit header: mysql_info has "Rows matched: N  Changed: M
+// Warnings: W" after an UPDATE (and nothing, or another text, after other
+// statements).
+function TPdbSQLConnector.MatchedRows(ARowsAffected: Int64): Int64;
+const
+  PREFIX = 'Rows matched:';
+var
+  LInfo: PAnsiChar;
+  LText: string;
+  I: Integer;
+begin
+  Result := ARowsAffected;
+  if not IsMySQLConnector(ConnectorType) then
+    Exit;
+  CheckProxy;
+  if Proxy is TMySQL80Connection then
+    LInfo := mysql80dyn.mysql_info(mysql80dyn.PMYSQL(Proxy.Handle))
+  else
+    LInfo := mysql57dyn.mysql_info(mysql57dyn.PMYSQL(Proxy.Handle));
+  if LInfo = nil then
+    Exit;
+  LText := string(LInfo);
+  if Copy(LText, 1, Length(PREFIX)) <> PREFIX then
+    Exit;
+  LText := TrimLeft(Copy(LText, Length(PREFIX) + 1, MaxInt));
+  I := 1;
+  while (I <= Length(LText)) and (LText[I] in ['0'..'9']) do
+    Inc(I);
+  Result := StrToInt64Def(Copy(LText, 1, I - 1), ARowsAffected);
+end;
+
+// See the unit header: AttemptRollBack ignores the failure while ForcedClose
+// is set, and then frees the transaction's handle, as a forced close does.
+procedure TPdbSQLConnector.DiscardTransaction(ATransaction: TSQLTransaction);
+begin
+  if not ATransaction.Active then
+    Exit;
+  ForcedClose := True;
+  try
+    try
+      ATransaction.Rollback;
+    except
+      // ignored: the server already ended the transaction
+    end;
+  finally
+    ForcedClose := False;
   end;
 end;
 
@@ -462,6 +548,42 @@ begin
       Result := (LCode = MYSQL_ER_LOCK_WAIT_TIMEOUT) or (LCode = MYSQL_ER_LOCK_DEADLOCK)
     else if IsODBCConnector(LType) then
       Result := (LCode = MSSQL_LOCK_TIMEOUT) or (LCode = MSSQL_DEADLOCK_VICTIM);
+  end;
+end;
+
+// See the unit header: the driver's constraint violations.
+function IsSQLdbConstraintViolation(E: Exception; ADataBase: TDatabase;
+  out AKind: TConstraintViolationKind): Boolean;
+var
+  LType: string;
+  LCode: Integer;
+begin
+  Result := False;
+  AKind := cvUnique;
+  if not (ADataBase is TSQLConnector) then
+    Exit;
+  LType := TSQLConnector(ADataBase).ConnectorType;
+  if E is EPQDatabaseError then
+    Result := PdbPostgresConstraintKind(EPQDatabaseError(E).SQLSTATE, AKind)
+  // A failed COMMIT on SQLite (a deferred foreign key) is a plain
+  // EDatabaseError with SQLite's message only.
+  else if SameText(LType, 'SQLite3') and (E is EDatabaseError) then
+  begin
+    if E is ESQLDatabaseError then
+      LCode := ESQLDatabaseError(E).ErrorCode
+    else
+      LCode := 0;
+    Result := PdbSQLiteConstraintKind(LCode, E.Message, AKind);
+  end
+  else if E is ESQLDatabaseError then
+  begin
+    LCode := ESQLDatabaseError(E).ErrorCode;
+    if SameText(LType, 'Firebird') then
+      Result := PdbFirebirdConstraintKind(LCode, E.Message, AKind)
+    else if IsMySQLConnector(LType) then
+      Result := PdbMySQLConstraintKind(LCode, AKind)
+    else if IsODBCConnector(LType) then
+      Result := PdbSqlServerConstraintKind(LCode, E.Message, AKind);
   end;
 end;
 
@@ -608,8 +730,17 @@ end;
 
 procedure TSQLdbTransactionAdapter.DoCommit;
 begin
-  if FTransaction.Active then
+  if not FTransaction.Active then
+    Exit;
+  try
     FTransaction.Commit;
+  except
+    // See the unit header: the PostgreSQL connector has already closed the
+    // transaction's server connection; leave the transaction inactive.
+    if SameText((FTransaction.DataBase as TPdbSQLConnector).ConnectorType, 'PostgreSQL') then
+      (FTransaction.DataBase as TPdbSQLConnector).DiscardTransaction(FTransaction);
+    raise;
+  end;
 end;
 
 procedure TSQLdbTransactionAdapter.DoRollback;
@@ -619,6 +750,11 @@ begin
 end;
 
 procedure TSQLdbTransactionAdapter.DoExecSql(const ASql: string);
+begin
+  DoExecSqlRows(ASql);
+end;
+
+function TSQLdbTransactionAdapter.DoExecSqlRows(const ASql: string): Int64;
 var
   LQuery: TSQLQuery;
 begin
@@ -640,6 +776,7 @@ begin
         LQuery.ExecSQL;
       end;
     end;
+    Result := (LQuery.DataBase as TPdbSQLConnector).MatchedRows(LQuery.RowsAffected);
   finally
     LQuery.Free;
   end;
@@ -648,6 +785,12 @@ end;
 function TSQLdbTransactionAdapter.IsLockConflictError(E: Exception): Boolean;
 begin
   Result := IsSQLdbLockConflict(E, FTransaction.DataBase);
+end;
+
+function TSQLdbTransactionAdapter.IsConstraintViolationError(E: Exception;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := IsSQLdbConstraintViolation(E, FTransaction.DataBase, AKind);
 end;
 
 function TSQLdbTransactionAdapter.GetNativeTransaction: TObject;
@@ -761,9 +904,20 @@ begin
   Result := TDBParams.Create(FQuery.Params);
 end;
 
+function TSQLdbQueryAdapter.RowsAffected: Int64;
+begin
+  Result := (FQuery.DataBase as TPdbSQLConnector).MatchedRows(FQuery.RowsAffected);
+end;
+
 function TSQLdbQueryAdapter.IsLockConflictError(E: Exception): Boolean;
 begin
   Result := IsSQLdbLockConflict(E, FQuery.DataBase);
+end;
+
+function TSQLdbQueryAdapter.IsConstraintViolationError(E: Exception;
+  out AKind: TConstraintViolationKind): Boolean;
+begin
+  Result := IsSQLdbConstraintViolation(E, FQuery.DataBase, AKind);
 end;
 
 { TSQLdbProvider }
@@ -834,6 +988,9 @@ begin
       LConn.Params.Values['Server'] := LServer;
     end;
     ApplyPostgresLockTimeout(LConn);
+    // See the unit header: SQLite checks foreign keys only when asked to.
+    if SameText(LConn.ConnectorType, 'SQLite3') and (LParams.IndexOfName('foreign_keys') < 0) then
+      LConn.Params.Values['foreign_keys'] := 'ON';
     if IsMySQLConnector(LConn.ConnectorType) and (LParams.Values['MYSQL_PLUGIN_DIR'] = '') and
       (PdbMySQLPluginDir(LParams.Values['ClientLibrary']) <> '') then
       LConn.Params.Values['MYSQL_PLUGIN_DIR'] := PdbMySQLPluginDir(LParams.Values['ClientLibrary']);

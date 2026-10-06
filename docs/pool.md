@@ -134,8 +134,8 @@ LFactory := TSQLdbFactory.Create(LConfig, nil, LMonitor.OnPoolEvent, LSqlLog.OnS
 | `Kind` | `skOpen`, `skExecSql`, or `skExecBatch` (one send of an [`IBatch`](sql.md#batches-ibatch) as an array operation; a batch that runs row by row reports `skExecSql` per row) |
 | `Sql` | the text the query ran, after the SQL tags were processed (not the loader's key: the query never sees it) |
 | `ElapsedUs` | microseconds; for `Open`, including fetching every row (what the caller waited) |
-| `Rows` | `Open`: the rows fetched; `ExecSql`: -1 (rows affected aren't reported); `skExecBatch`: the rows of parameters sent |
-| `ErrorClass`, `ErrorMessage` | empty when it worked; otherwise the class and message the caller gets (`EDatabaseUnavailableException`, `ELockConflictException` or the driver's own) |
+| `Rows` | `Open`: the rows fetched; `ExecSql`: the rows affected, what `ExecSql` returned (-1 when the driver can't tell, or the statement failed); `skExecBatch`: the rows of parameters sent |
+| `ErrorClass`, `ErrorMessage` | empty when it worked; otherwise the class and message the caller gets (`EDatabaseUnavailableException`, `ELockConflictException`, `EConstraintViolationException` or the driver's own) |
 
 - **Once per statement, on the happy path too.** That is why it has its own handler, apart from
   the pool events: without one there is no cost. With one, the handler runs inside every call,
