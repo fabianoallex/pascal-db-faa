@@ -6,6 +6,28 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-06
+
+### Changed
+
+- **Breaking:** `PascalDb.SafeLog` is gone; `SafeWriteln` comes from pascal-common-faa's
+  `PascalCommon.SafeLog` (same two overloads), which `PascalDb.Migrations` now uses. Replace
+  `PascalDb.SafeLog` with `PascalCommon.SafeLog` in any `uses`. The point is one console lock for
+  the whole process: this library and delphi-api-infra-faa each had a copy with its own lock, so
+  their lines could still mix. Removed rather than kept as a deprecated alias, following
+  pascal-common-faa's migration guide (no alias units; no user of the unit outside these libraries
+  is known), as 0.x allows. On FPC the new `SafeWriteln` also flushes `Output` inside the lock,
+  which keeps lines whole when stdout is a file or a pipe.
+- Requires pascal-common-faa **1.3.0** or later (`PASCALCOMMON_VERSION < 10300` stops the build;
+  `pascal_db_faa.lpk` has `MinVersion` 1.3). The tests, CI and samples use 1.3.0.
+- `TDatabaseConfig` says, in its own comment as well as in `PascalDb.Adapter.Base`'s header and
+  `docs/getting-started.md`, that the variable must be an `IDatabaseConfig`. Adding the
+  properties to the class too was considered and left out: they would make `LConfig:
+  TDatabaseConfig` compile, and that variable is the trap (the object is reference-counted; a
+  factory that keeps it as an interface frees it while the class variable still points to it).
+  Today the missing property is a compile error that the comment explains; with the properties it
+  would be a use-after-free at run time.
+
 ## [0.11.0] - 2026-10-06
 
 ### Added
@@ -354,6 +376,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.12.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.9.0...v0.10.0

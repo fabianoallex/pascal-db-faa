@@ -50,7 +50,16 @@ uses
   PascalDb.Pool;
 
 type
-  { TDatabaseConfig }
+  { TDatabaseConfig
+    Declare the variable as IDatabaseConfig, never TDatabaseConfig:
+      LConfig: IDatabaseConfig;
+      LConfig := TDatabaseConfig.Create;
+    The class has no properties on purpose, only the interface's getters
+    and setters: it is reference-counted, and a class variable handed to a
+    factory (which keeps it as an interface) frees the object when the
+    factory lets go, leaving the variable dangling. With a class variable,
+    LConfig.ConnectionParams is an "undeclared identifier": the fix is the
+    variable's type. }
 
   TDatabaseConfig = class(TInterfacedObject, IDatabaseConfig)
   private

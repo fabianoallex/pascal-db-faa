@@ -38,8 +38,8 @@ uses
   PascalDb.SqlSources,
   PascalDb.SqlLoader;
 
-{$IF PASCALCOMMON_VERSION < 10000}
-  {$MESSAGE FATAL 'pascal-db-faa needs pascal-common-faa 1.0.0 or later'}
+{$IF PASCALCOMMON_VERSION < 10300}
+  {$MESSAGE FATAL 'pascal-db-faa needs pascal-common-faa 1.3.0 or later'}
 {$IFEND}
 
 type

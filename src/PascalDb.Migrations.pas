@@ -44,7 +44,8 @@
   INSERT — the error that motivated the flag.
 
   Without AOnEvent, events become a line of text through SafeWriteln
-  (PascalDb.SafeLog). The callback follows PASCALDB_FUNCREFS (pascaldb.inc):
+  (PascalCommon.SafeLog, pascal-common-faa: one console lock for every
+  library in the process). The callback follows PASCALDB_FUNCREFS (pascaldb.inc):
   closure or method in Delphi, method in FPC 3.2.2. }
 
 interface
@@ -133,7 +134,7 @@ type
 implementation
 
 uses
-  PascalDb.SafeLog;
+  PascalCommon.SafeLog;
 
 { TDBMigrationEngine }
 

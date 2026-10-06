@@ -23,7 +23,6 @@ uses
   PascalDb.Paging in '..\..\src\PascalDb.Paging.pas',
   PascalDb.Registry in '..\..\src\PascalDb.Registry.pas',
   PascalDb.Version in '..\..\src\PascalDb.Version.pas',
-  PascalDb.SafeLog in '..\..\src\PascalDb.SafeLog.pas',
   PascalDb.Mock in '..\..\src\PascalDb.Mock.pas',
   PascalDb.Pool in '..\..\src\PascalDb.Pool.pas',
   PascalDb.Migrations in '..\..\src\PascalDb.Migrations.pas',
