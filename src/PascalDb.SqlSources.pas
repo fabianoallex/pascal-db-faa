@@ -19,7 +19,8 @@
     (e.g. a directory for local overrides, then the embedded resources).
 
   Files and resources are read as bytes and decoded as UTF-8 by
-  PdbUtf8BytesToString. On FPC, `string` is an AnsiString in the process's
+  PdbUtf8BytesToString (on pascal-common-faa's PcTryUtf8BytesToString since
+  0.12.1). On FPC, `string` is an AnsiString in the process's
   default code page; unless that code page is UTF-8, characters outside it
   silently become "?". So when the SQL has non-ASCII characters and the code
   page isn't UTF-8, decoding raises ESqlSourceException instead of corrupting
@@ -111,10 +112,11 @@ function PdbUtf8BytesToString(const ABytes: TBytes; const AOrigin: string): stri
 
 implementation
 
-{$IFNDEF FPC}
 uses
-  Winapi.Windows;
-{$ENDIF}
+  {$IFNDEF FPC}
+  Winapi.Windows,
+  {$ENDIF}
+  PascalCommon.Utf8;
 
 const
   // RT_RCDATA comes from Winapi.Windows in Delphi; in FPC 3.2.2 it is only in
@@ -129,40 +131,15 @@ begin
 end;
 
 function PdbUtf8BytesToString(const ABytes: TBytes; const AOrigin: string): string;
-var
-  LStart, LLen: Integer;
-  {$IFDEF FPC}
-  I: Integer;
-  LUtf8: UTF8String;
-  LNonAscii: Boolean;
-  {$ENDIF}
 begin
-  LStart := 0;
-  LLen := Length(ABytes);
-  if (LLen >= 3) and (ABytes[0] = $EF) and (ABytes[1] = $BB) and (ABytes[2] = $BF) then
-    LStart := 3;
-  if LLen - LStart <= 0 then
-    Exit('');
-  {$IFDEF FPC}
-  LNonAscii := False;
-  for I := LStart to LLen - 1 do
-    if ABytes[I] >= $80 then
-    begin
-      LNonAscii := True;
-      Break;
-    end;
-  if LNonAscii and (DefaultSystemCodePage <> CP_UTF8) then
+  // The decoding is pascal-common-faa's (1.4.0); this keeps the exception and
+  // the message this library always raised.
+  if not PcTryUtf8BytesToString(ABytes, Result) then
     raise ESqlSourceException.CreateFmt(
       'SQL %s contains non-ASCII characters, but the process default code page is %d, ' +
       'not UTF-8 (65001): FPC would silently turn characters outside that code page into "?". ' +
       'Call SetMultiByteConversionCodePage(CP_UTF8) at startup (LCL applications already run in UTF-8).',
       [AOrigin, DefaultSystemCodePage]);
-  SetLength(LUtf8, LLen - LStart);
-  Move(ABytes[LStart], LUtf8[1], LLen - LStart);
-  Result := string(LUtf8);
-  {$ELSE}
-  Result := TEncoding.UTF8.GetString(ABytes, LStart, LLen - LStart);
-  {$ENDIF}
 end;
 
 function ReadFileBytes(const APath: string): TBytes;

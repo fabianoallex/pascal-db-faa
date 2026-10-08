@@ -6,6 +6,15 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-08
+
+### Changed
+
+- `PdbUtf8BytesToString` decodes through pascal-common-faa 1.4.0's `PcTryUtf8BytesToString`, the
+  same code moved there because pascal-api-infra-faa had a copy too. Its behavior, exception
+  (`ESqlSourceException`) and message are unchanged. The minimum pascal-common-faa is now 1.4.0
+  (`PascalDb.Interfaces`, `pascal_db_faa.lpk`).
+
 ## [0.12.0] - 2026-10-06
 
 ### Changed

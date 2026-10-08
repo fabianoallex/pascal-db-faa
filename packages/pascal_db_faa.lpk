@@ -15,7 +15,7 @@
     </CompilerOptions>
     <Description Value="Database access layer for Delphi and Lazarus/FPC (dual-compiler): driver-agnostic contracts (IDBFactory/IQuery/IParams), connection pool, migrations, tagged SQL templates, optional/nullable types and a complete mock for tests. Connection adapters are separate packages."/>
     <License Value="MIT"/>
-    <Version Minor="12"/>
+    <Version Minor="12" Release="1"/>
     <Files>
       <Item>
         <Filename Value="..\src\pascaldb.inc"/>
@@ -77,7 +77,7 @@
     <RequiredPkgs>
       <Item>
         <PackageName Value="pascal_common_faa"/>
-        <MinVersion Major="1" Minor="3" Valid="True"/>
+        <MinVersion Major="1" Minor="4" Valid="True"/>
       </Item>
       <Item>
         <PackageName Value="FCL"/>

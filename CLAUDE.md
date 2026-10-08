@@ -155,10 +155,11 @@ them. Moved in the pilot migration (pascal-common-faa's plan, phase F6, 2026-10-
   format; consumers test it with that unit in their `uses`). A release bumps it together with the
   `.lpk` files, the README and the CHANGELOG.
 - **Minimum version** checked in `PascalDb.Interfaces` (every user compiles it):
-  `PASCALCOMMON_VERSION < 10300` stops the build with "pascal-db-faa needs pascal-common-faa 1.3.0
+  `PASCALCOMMON_VERSION < 10400` stops the build with "pascal-db-faa needs pascal-common-faa 1.4.0
   or later" (measured by raising the bound: lazbuild "Fatal: (2022) User defined: ...", Delphi 12
-  "F1054 ..."). 1.3.0 is the first with `PascalCommon.SafeLog` (only additions within 1.x);
-  `pascal_db_faa.lpk` has `MinVersion Major="1" Minor="3"`. Raise both when the library starts using something newer.
+  "F1054 ..."). 1.3.0 brought `PascalCommon.SafeLog`, 1.4.0 `PascalCommon.Utf8` (behind
+  `PdbUtf8BytesToString` since 0.12.1; only additions within 1.x); `pascal_db_faa.lpk` has
+  `MinVersion Major="1" Minor="4"`. Raise both when the library starts using something newer.
 - **Checkout without `--recursive`**: pascal-common-faa's own `external/pascal-jsonmapper-faa` is
   for its own tests. CI uses `submodules: true` (not recursive).
 - Something the library needs changed there goes to pascal-common-faa first (strict semver,
