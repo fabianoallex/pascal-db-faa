@@ -16,7 +16,14 @@
     through BuildDatabaseException, so a dropped connection is classified the
     same way on every driver. Subclasses only make the native calls.
   - TScopeTransaction — IScopeTransaction: the outermost scope owns the real
-    transaction; nested scopes use savepoints from the SQL dialect.
+    transaction; nested scopes use savepoints from the SQL dialect. While
+    TPcTracing.Enabled (PascalCommon.Tracing), the outermost scope's
+    transaction is a span, from StartTransaction to Commit or Rollback (or
+    to the scope's release, "abandoned"). A detached span: it never becomes
+    the thread's current span, so the transaction may end on any thread; the
+    scope hangs it on the ITransaction (ITransactionSpan, which
+    TTransactionBase implements) and the pooled statements inside name it
+    as their parent (see the tracing note in PascalDb.Pool).
   - TSqlScript — ISqlScript: splits a script on a terminator and runs each
     statement through ITransaction.ExecSql.
   - TParamsBase — IParams: the whole IOptXxx/INullXxx/IOptNullXxx semantics
@@ -45,6 +52,7 @@ uses
   SysUtils,
   PascalDb.Interfaces,
   PascalCommon.Optionals,
+  PascalCommon.Tracing,
   PascalDb.SqlSources,
   PascalDb.SqlLoader,
   PascalDb.Pool;
@@ -108,10 +116,11 @@ type
 
   { TTransactionBase }
 
-  TTransactionBase = class(TInterfacedObject, ITransaction)
+  TTransactionBase = class(TInterfacedObject, ITransaction, ITransactionSpan)
   private
     FConn: IDBConnection;
     FInTransaction: Boolean;
+    FSpan: IPcSpan;
   protected
     procedure DoStartTransaction; virtual; abstract;
     procedure DoCommit; virtual; abstract;
@@ -140,19 +149,40 @@ type
     function GetConnection: IDBConnection;
     function GetNativeTransaction: TObject; virtual; abstract;
     function ExecSql(const ASql: string): Int64;
+    // ITransactionSpan (PascalDb.Pool): set and cleared by TScopeTransaction.
+    function GetSpan: IPcSpan;
+    procedure SetSpan(const ASpan: IPcSpan);
   end;
 
-  { TScopeTransaction }
+  { ITracedScopeTransaction
+    How TDBFactory.CreateScopeTransaction gives the scope an adapter built
+    (IDBComponentProvider.BuildScopeTransaction) the db.system.name of its
+    span, which only the factory's config knows. A scope without it gets a
+    span without the attribute. }
 
-  TScopeTransaction = class(TInterfacedObject, IScopeTransaction)
+  ITracedScopeTransaction = interface
+    ['{46C6B3E8-E7E2-4A7F-9E9D-1ECDC977F3B4}']
+    procedure SetDbSystem(const ADbSystem: string);
+  end;
+
+  { TScopeTransaction
+    The transaction span (see the unit comment) is detached: the scope may
+    commit, roll back or be released on any thread. }
+
+  TScopeTransaction = class(TInterfacedObject, IScopeTransaction, ITracedScopeTransaction)
   private
     FOriginalTransaction: ITransaction;
     FSavepointName: string;
     FIsMain: Boolean;
     FStarted: Boolean;
     FContextTransaction: IContextTransaction;
+    FDbSystem: string;
+    FSpan: IPcSpan;
+    procedure FinishSpan(const AOutcome: string; AError: Exception);
   public
     constructor Create(const AOriginalTransaction: ITransaction; const AContextTransaction: IContextTransaction);
+    destructor Destroy; override;
+    procedure SetDbSystem(const ADbSystem: string);
     procedure StartTransaction;
     procedure Commit;
     procedure Rollback;
@@ -787,6 +817,16 @@ begin
   Result := FInTransaction;
 end;
 
+function TTransactionBase.GetSpan: IPcSpan;
+begin
+  Result := FSpan;
+end;
+
+procedure TTransactionBase.SetSpan(const ASpan: IPcSpan);
+begin
+  FSpan := ASpan;
+end;
+
 function TTransactionBase.GetConnection: IDBConnection;
 begin
   Result := FConn;
@@ -803,9 +843,56 @@ begin
   FIsMain := not AOriginalTransaction.InTransaction;
 end;
 
-procedure TScopeTransaction.StartTransaction;
+destructor TScopeTransaction.Destroy;
 begin
-  FOriginalTransaction.StartTransaction;
+  // Released without Commit or Rollback: the pool rolls the transaction back.
+  FinishSpan('abandoned', nil);
+  inherited Destroy;
+end;
+
+procedure TScopeTransaction.SetDbSystem(const ADbSystem: string);
+begin
+  FDbSystem := ADbSystem;
+end;
+
+procedure TScopeTransaction.FinishSpan(const AOutcome: string; AError: Exception);
+var
+  LTxSpan: ITransactionSpan;
+begin
+  if FSpan = nil then
+    Exit;
+  if Supports(FOriginalTransaction, ITransactionSpan, LTxSpan) and (LTxSpan.GetSpan = FSpan) then
+    LTxSpan.SetSpan(nil);
+  if AOutcome <> '' then
+    FSpan.SetAttribute('pascaldb.transaction.outcome', AOutcome);
+  PdbFinishSpan(FSpan, AError);
+  FSpan := nil;
+end;
+
+procedure TScopeTransaction.StartTransaction;
+var
+  LTxSpan: ITransactionSpan;
+begin
+  if FIsMain and (FSpan = nil) and TPcTracing.Enabled then
+  begin
+    // A child of the thread's current span (the request's), never current
+    // itself: see the unit comment.
+    FSpan := TPcTracing.StartDetachedSpan('transaction', skInternal);
+    if FDbSystem <> '' then
+      FSpan.SetAttribute('db.system.name', FDbSystem);
+    if Supports(FOriginalTransaction, ITransactionSpan, LTxSpan) then
+      LTxSpan.SetSpan(FSpan);
+  end;
+
+  try
+    FOriginalTransaction.StartTransaction;
+  except
+    on E: Exception do
+    begin
+      FinishSpan('', E);
+      raise;
+    end;
+  end;
 
   if Assigned(FContextTransaction) then
     FContextTransaction.Apply(FOriginalTransaction);
@@ -826,7 +913,18 @@ begin
     Exit;
 
   if FIsMain then
-    FOriginalTransaction.Commit
+  begin
+    try
+      FOriginalTransaction.Commit;
+    except
+      on E: Exception do
+      begin
+        FinishSpan('commit', E);
+        raise;
+      end;
+    end;
+    FinishSpan('commit', nil);
+  end
   else if FOriginalTransaction.GetConnection.GetSQLDialect.SupportsRelease then
   begin
     FOriginalTransaction.ExecSql(
@@ -841,7 +939,18 @@ begin
     Exit;
 
   if FIsMain then
-    FOriginalTransaction.Rollback
+  begin
+    try
+      FOriginalTransaction.Rollback;
+    except
+      on E: Exception do
+      begin
+        FinishSpan('rollback', E);
+        raise;
+      end;
+    end;
+    FinishSpan('rollback', nil);
+  end
   else
   begin
     FOriginalTransaction.ExecSql(
@@ -1387,7 +1496,8 @@ begin
 
   // The provider is set before the pool: the pool's initial ramp-up already
   // calls CreateConnection.
-  FPool := TConnectionPool.Create(Self, LPoolConfig, AOnPoolEvent, AOnStatement);
+  FPool := TConnectionPool.Create(Self, LPoolConfig, AOnPoolEvent, AOnStatement,
+    PdbDbSystemName(FConfig.SQLDialect));
   FSqlLoader := TSQLLoader.Create(FConfig.SQLDirectory, FConfig.SqlSource);
 end;
 
@@ -1429,12 +1539,16 @@ begin
 end;
 
 function TDBFactory.CreateScopeTransaction(ATransaction: ITransaction): IScopeTransaction;
+var
+  LTraced: ITracedScopeTransaction;
 begin
   if Assigned(FContextTransactionProvider) then
     Result := FComponentProvider.BuildScopeTransaction(ATransaction,
       FContextTransactionProvider.GetContextTransaction)
   else
     Result := FComponentProvider.BuildScopeTransaction(ATransaction, nil);
+  if Supports(Result, ITracedScopeTransaction, LTraced) then
+    LTraced.SetDbSystem(PdbDbSystemName(FConfig.SQLDialect));
 end;
 
 function TDBFactory.CreateQuery(AConn: IDBConnection; ATransaction: ITransaction): IQuery;

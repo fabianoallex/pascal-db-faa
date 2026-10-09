@@ -5,7 +5,9 @@
   the database offline, liveness check, idle sweep (fake clock and real
   thread), discard of a connection broken during use (including an Access
   Violation while reading a field), events, statement events (AOnStatement),
-  snapshot and concurrency.
+  snapshot, concurrency, and the tracing spans (statements, pool wait)
+  through a fake exporter (TFakeSpanExporter, also used by
+  PascalDb.AdapterBaseTests).
 
   The monotonic clock and Sleep are replaced through PascalCommon.SystemContext
   (TFakeTicker, TFakeSleep); events are recorded by TPoolEventRecorder — a method, not a
@@ -30,6 +32,7 @@ uses
   PascalCommon.Optionals,
   PascalCommon.Threading,
   PascalDb.Batch,
+  PascalCommon.Tracing,
   Variants;
 
 type
@@ -74,6 +77,9 @@ type
     FInfos: TList<TStatementInfo>;
   public
     RaiseInCallback: Boolean;
+    // A span was current while the callback ran (the statement's own, when
+    // tracing is on).
+    SawCurrentSpan: Boolean;
     constructor Create;
     destructor Destroy; override;
     procedure OnStatement(const AInfo: TStatementInfo);
@@ -83,6 +89,31 @@ type
   TFakeSleep = class(TInterfacedObject, ISleep)
   public
     procedure Sleep(milliseconds: Cardinal);
+  end;
+
+  { TReleasingSleep
+    Releases Held on the first Sleep: an acquire waiting for a full pool
+    gets that connection on its next try. }
+
+  TReleasingSleep = class(TInterfacedObject, ISleep)
+  public
+    Held: IDBConnection;
+    procedure Sleep(milliseconds: Cardinal);
+  end;
+
+  { TFakeSpanExporter
+    Keeps every exported span (PascalCommon.Tracing), for the tracing tests
+    here and in PascalDb.AdapterBaseTests. Started with AAutoFlush = False:
+    the test calls TPcTracing.FlushNow. }
+
+  TFakeSpanExporter = class(TInterfacedObject, IPcSpanExporter)
+  public
+    Spans: TPcSpanDataArray;
+    function ExportSpans(const ASpans: TPcSpanDataArray; out AError: string): Boolean;
+    /// The exported span named AName; fails the test when there is none.
+    function Find(const AName: string): TPcSpanData;
+    /// An attribute as text (an integer in decimal); '' when absent.
+    class function Attribute(const ASpan: TPcSpanData; const AKey: string): string; static;
   end;
 
   { TFakeTicker
@@ -135,8 +166,9 @@ type
 
   { TFakeTransaction }
 
-  TFakeTransaction = class(TInterfacedObject, ITransaction, ITestableTransaction)
+  TFakeTransaction = class(TInterfacedObject, ITransaction, ITestableTransaction, ITransactionSpan)
   private
+    FSpan: IPcSpan;
     FCommands: TStringList;
     FCommitCount: Integer;
     FRollbackCount: Integer;
@@ -156,6 +188,9 @@ type
     function GetCommands: TStringList;
     function GetCommitCount: Integer;
     function GetRollbackCount: Integer;
+    // ITransactionSpan, as TTransactionBase
+    function GetSpan: IPcSpan;
+    procedure SetSpan(const ASpan: IPcSpan);
   end;
 
   { TFakeScopeTransaction }
@@ -361,6 +396,15 @@ type
     [Test] procedure Test_Pool_StatementEvent_FailingCallback_DoesNotChangeTheOutcome;
     [Test] procedure Test_Pool_NativeBatch_ForwardedWithStatementEvent;
     [Test] procedure Test_Pool_NativeBatch_ExternalException_DiscardsConnection;
+    [Test] procedure Test_Pool_Tracing_Off_NoSpan;
+    [Test] procedure Test_Pool_Tracing_StatementSpans_ChildrenOfTheCurrentSpan;
+    [Test] procedure Test_Pool_Tracing_InTransaction_ChildOfTheTransactionSpan;
+    [Test] procedure Test_Pool_Tracing_FailedStatement_ErrorStatus;
+    [Test] procedure Test_Pool_Tracing_NativeBatch_OneSpan;
+    [Test] procedure Test_Pool_Tracing_NoWait_NoPoolSpan;
+    [Test] procedure Test_Pool_Tracing_PoolWait_UntilAConnectionIsFree;
+    [Test] procedure Test_Pool_Tracing_PoolWait_Timeout_ErrorStatus;
+    [Test] procedure Test_Pool_SqlOperationName_And_DbSystemName;
   private
     procedure MaxConnectionsExceeded_Method;
   end;
@@ -403,8 +447,58 @@ end;
 procedure TStatementRecorder.OnStatement(const AInfo: TStatementInfo);
 begin
   FInfos.Add(AInfo);
+  if TPcTracing.Current <> nil then
+    SawCurrentSpan := True;
   if RaiseInCallback then
     raise Exception.Create('logger failed');
+end;
+
+{ TReleasingSleep }
+
+procedure TReleasingSleep.Sleep(milliseconds: Cardinal);
+begin
+  Held := nil;
+end;
+
+{ TFakeSpanExporter }
+
+function TFakeSpanExporter.ExportSpans(const ASpans: TPcSpanDataArray; out AError: string): Boolean;
+var
+  I, LBase: Integer;
+begin
+  LBase := Length(Spans);
+  SetLength(Spans, LBase + Length(ASpans));
+  for I := 0 to High(ASpans) do
+    Spans[LBase + I] := ASpans[I];
+  AError := '';
+  Result := True;
+end;
+
+function TFakeSpanExporter.Find(const AName: string): TPcSpanData;
+var
+  I: Integer;
+begin
+  for I := 0 to High(Spans) do
+    if Spans[I].Name = AName then
+      Exit(Spans[I]);
+  TAssert.Fail('No span named "' + AName + '" was exported');
+  Result := Spans[0]; // not reached; keeps the compilers from warning
+end;
+
+class function TFakeSpanExporter.Attribute(const ASpan: TPcSpanData; const AKey: string): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to High(ASpan.Attributes) do
+    if ASpan.Attributes[I].Key = AKey then
+    begin
+      if ASpan.Attributes[I].ValueType = satInt then
+        Result := IntToStr(ASpan.Attributes[I].IntValue)
+      else
+        Result := ASpan.Attributes[I].StringValue;
+      Exit;
+    end;
 end;
 
 { TFakeSleep }
@@ -662,6 +756,16 @@ end;
 function TFakeTransaction.GetConnection: IDBConnection;
 begin
   Result := FConnection;
+end;
+
+function TFakeTransaction.GetSpan: IPcSpan;
+begin
+  Result := FSpan;
+end;
+
+procedure TFakeTransaction.SetSpan(const ASpan: IPcSpan);
+begin
+  FSpan := ASpan;
 end;
 
 function TFakeTransaction.GetNativeTransaction: TObject;
@@ -2831,6 +2935,397 @@ begin
   finally
     LOriginal.Free;
   end;
+end;
+
+procedure TPoolTests.Test_Pool_Tracing_Off_NoSpan;
+var
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LRecorder: TStatementRecorder;
+begin
+  // Tracing not started: a statement creates no span at all (the statement
+  // callback runs while the span would be current).
+  TAssert.AssertFalse('Tracing must be off for this test', TPcTracing.Enabled);
+  LMockFactory := TDBFactoryMock.Create;
+  LFactory := LMockFactory;
+  LRecorder := TStatementRecorder.Create;
+  try
+    LPool := TConnectionPool.Create(LFactory, nil, nil, LRecorder.OnStatement, 'postgresql');
+    LMockFactory.SetNextQueryOpenResult(TFakeQueryResult.Create);
+    LScope := LPool.AcquireQuery(LQuery);
+    LQuery.Sql := 'SELECT 1';
+    LQuery.Open;
+    LQuery := nil;
+    LScope := nil;
+    TAssert.AssertEquals(1, LRecorder.Infos.Count);
+    TAssert.AssertFalse('No span while tracing is off', LRecorder.SawCurrentSpan);
+  finally
+    LPool := nil;
+    LRecorder.Free;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Tracing_StatementSpans_ChildrenOfTheCurrentSpan;
+var
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+  LRequest: IPcSpan;
+  LRecorder: TStatementRecorder;
+  LSelect, LUpdate: TPcSpanData;
+begin
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  LRecorder := TStatementRecorder.Create;
+  TPcTracing.Start(TPcTracingOptions.Default('pool-tests', ''), LExporter, False);
+  try
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPool := TConnectionPool.Create(LFactory, nil, nil, LRecorder.OnStatement, 'postgresql');
+    LRequest := TPcTracing.StartSpan('request', skServer);
+    LMockFactory.SetNextQueryOpenResult(TFakeQueryResult.Create);
+    LScope := LPool.AcquireQuery(LQuery);
+    LQuery.Sql := '  select 1';
+    LQuery.Open;
+    LQuery.Sql := 'UPDATE T SET A = 1';
+    LQuery.ExecSql;
+    TAssert.AssertTrue('The statement span is current during the statement', LRecorder.SawCurrentSpan);
+    TAssert.AssertTrue('After the statements, the request span is current again',
+      TPcTracing.Current = LRequest);
+    LQuery := nil;
+    LScope := nil;
+    LRequest.Finish;
+    LRequest := nil;
+    TPcTracing.FlushNow;
+
+    TAssert.AssertEquals('Two statements and the request', 3, Length(LFake.Spans));
+    LSelect := LFake.Find('SELECT');
+    LUpdate := LFake.Find('UPDATE');
+    TAssert.AssertEquals(Ord(skClient), Ord(LSelect.Kind));
+    TAssert.AssertEquals('Same trace as the request', LFake.Find('request').TraceId, LSelect.TraceId);
+    TAssert.AssertEquals('Child of the request', LFake.Find('request').SpanId, LSelect.ParentSpanId);
+    TAssert.AssertEquals('Child of the request', LFake.Find('request').SpanId, LUpdate.ParentSpanId);
+    TAssert.AssertEquals('postgresql', TFakeSpanExporter.Attribute(LSelect, 'db.system.name'));
+    TAssert.AssertEquals('SELECT', TFakeSpanExporter.Attribute(LSelect, 'db.operation.name'));
+    TAssert.AssertEquals('  select 1', TFakeSpanExporter.Attribute(LSelect, 'db.query.text'));
+    TAssert.AssertEquals('Rows fetched', '0', TFakeSpanExporter.Attribute(LSelect, 'db.response.returned_rows'));
+    TAssert.AssertEquals('Rows affected', '3', TFakeSpanExporter.Attribute(LUpdate, 'pascaldb.rows_affected'));
+    TAssert.AssertEquals(Ord(ssUnset), Ord(LUpdate.Status));
+    TAssert.AssertTrue('Nothing left current', TPcTracing.Current = nil);
+  finally
+    LQuery := nil;
+    LScope := nil;
+    LRequest := nil;
+    LPool := nil;
+    TPcTracing.Shutdown;
+    LRecorder.Free;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Tracing_InTransaction_ChildOfTheTransactionSpan;
+var
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+  LRequest, LTransaction: IPcSpan;
+  LSelect: TPcSpanData;
+begin
+  // What TScopeTransaction does (PascalDb.Adapter.Base): a detached span on
+  // the query's transaction. The statement's span is its child, not the
+  // request's, and the request stays the current span.
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  TPcTracing.Start(TPcTracingOptions.Default('pool-tests', ''), LExporter, False);
+  try
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPool := TConnectionPool.Create(LFactory, nil, nil, nil, 'postgresql');
+    LRequest := TPcTracing.StartSpan('request', skServer);
+    LTransaction := TPcTracing.StartDetachedSpan('transaction');
+    LMockFactory.SetNextQueryOpenResult(TFakeQueryResult.Create);
+    LScope := LPool.AcquireQuery(LQuery);
+    (LScope.OriginalTransaction as ITransactionSpan).SetSpan(LTransaction);
+    LQuery.Sql := 'SELECT 1';
+    LQuery.Open;
+    TAssert.AssertTrue('The request is still the current span', TPcTracing.Current = LRequest);
+    LQuery := nil;
+    LScope := nil;
+    LTransaction.Finish;
+    LTransaction := nil;
+    LRequest.Finish;
+    LRequest := nil;
+    TPcTracing.FlushNow;
+
+    TAssert.AssertEquals(3, Length(LFake.Spans));
+    LSelect := LFake.Find('SELECT');
+    TAssert.AssertEquals('Child of the transaction', LFake.Find('transaction').SpanId, LSelect.ParentSpanId);
+    TAssert.AssertEquals('The transaction is a child of the request',
+      LFake.Find('request').SpanId, LFake.Find('transaction').ParentSpanId);
+    TAssert.AssertEquals(LFake.Find('request').TraceId, LSelect.TraceId);
+    TAssert.AssertTrue('Nothing left current', TPcTracing.Current = nil);
+  finally
+    LQuery := nil;
+    LScope := nil;
+    LTransaction := nil;
+    LRequest := nil;
+    LPool := nil;
+    TPcTracing.Shutdown;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Tracing_FailedStatement_ErrorStatus;
+var
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+  LSpan: TPcSpanData;
+  LRaised: string;
+begin
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  TPcTracing.Start(TPcTracingOptions.Default('pool-tests', ''), LExporter, False);
+  try
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPool := TConnectionPool.Create(LFactory, nil, nil, nil, 'firebirdsql');
+    LMockFactory.RaiseOnNextQueryOpen(EConvertError, 'bad value');
+    LScope := LPool.AcquireQuery(LQuery);
+    LQuery.Sql := 'SELECT X FROM T';
+    LRaised := '';
+    try
+      LQuery.Open;
+    except
+      on E: Exception do
+        LRaised := E.ClassName;
+    end;
+    LQuery := nil;
+    LScope := nil;
+    TPcTracing.FlushNow;
+
+    TAssert.AssertEquals('The caller still gets the exception', 'EConvertError', LRaised);
+    TAssert.AssertEquals(1, Length(LFake.Spans));
+    LSpan := LFake.Find('SELECT');
+    TAssert.AssertEquals(Ord(ssError), Ord(LSpan.Status));
+    TAssert.AssertEquals('bad value', LSpan.StatusMessage);
+    TAssert.AssertEquals('EConvertError', TFakeSpanExporter.Attribute(LSpan, 'error.type'));
+    TAssert.AssertEquals('No row count for a failed Open', '',
+      TFakeSpanExporter.Attribute(LSpan, 'db.response.returned_rows'));
+    TAssert.AssertTrue('Nothing left current', TPcTracing.Current = nil);
+  finally
+    LQuery := nil;
+    LScope := nil;
+    LPool := nil;
+    TPcTracing.Shutdown;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Tracing_NativeBatch_OneSpan;
+var
+  LMockFactory: TDBFactoryMock;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LBatch: IBatch;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+  LSpan: TPcSpanData;
+  I: Integer;
+begin
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  TPcTracing.Start(TPcTracingOptions.Default('pool-tests', ''), LExporter, False);
+  try
+    LMockFactory := TDBFactoryMock.Create;
+    LFactory := LMockFactory;
+    LPool := TConnectionPool.Create(LFactory, nil, nil, nil, 'sqlite');
+    LMockFactory.NextQueryNativeBatch;
+    LScope := LPool.AcquireQuery(LQuery);
+    LBatch := TBatch.New(LQuery, 'INSERT INTO T (A) VALUES (:A)');
+    for I := 1 to 3 do
+    begin
+      LBatch.Params.Integers['A'] := I;
+      LBatch.AddRow;
+    end;
+    LBatch.Execute;
+    LBatch := nil;
+    LQuery := nil;
+    LScope := nil;
+    TPcTracing.FlushNow;
+
+    TAssert.AssertEquals('One span for the array operation', 1, Length(LFake.Spans));
+    LSpan := LFake.Find('BATCH INSERT');
+    TAssert.AssertEquals('3', TFakeSpanExporter.Attribute(LSpan, 'db.operation.batch.size'));
+    TAssert.AssertEquals('sqlite', TFakeSpanExporter.Attribute(LSpan, 'db.system.name'));
+  finally
+    LBatch := nil;
+    LQuery := nil;
+    LScope := nil;
+    LPool := nil;
+    TPcTracing.Shutdown;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Tracing_NoWait_NoPoolSpan;
+var
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LConn: IDBConnection;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+begin
+  // The happy path, a connection ready (or created) at once: no span.
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  TPcTracing.Start(TPcTracingOptions.Default('pool-tests', ''), LExporter, False);
+  try
+    LFactory := TDBFactoryMock.Create;
+    LPool := TConnectionPool.Create(LFactory);
+    LConn := LPool.AcquireConnection;
+    LConn := nil;
+    TPcTracing.FlushNow;
+    TAssert.AssertEquals('No span without a wait', 0, Length(LFake.Spans));
+  finally
+    LConn := nil;
+    LPool := nil;
+    TPcTracing.Shutdown;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Tracing_PoolWait_UntilAConnectionIsFree;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LHeld, LConn: IDBConnection;
+  LSleep: TReleasingSleep;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+  LSpan: TPcSpanData;
+begin
+  // Pool of one, held: the acquire waits once (the fake Sleep releases the
+  // held connection) and then gets it.
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  LSleep := TReleasingSleep.Create;
+  TSleep.SetSleep(LSleep);
+  TPcTracing.Start(TPcTracingOptions.Default('pool-tests', ''), LExporter, False);
+  try
+    LConfig := TConnectionPoolConfig.Create;
+    LConfig.IniConnections := 1;
+    LConfig.MaxConnections := 1;
+    LConfig.WaitMaxAttemps := 5;
+    LFactory := TDBFactoryMock.Create;
+    LPool := TConnectionPool.Create(LFactory, LConfig, nil, nil, 'mysql');
+    // Through a local: FPC may keep the temporary of "Held :=
+    // AcquireConnection" alive until this routine ends, and then the Sleep
+    // releasing Held wouldn't free the connection.
+    LHeld := LPool.AcquireConnection;
+    LSleep.Held := LHeld;
+    LHeld := nil;
+    LConn := LPool.AcquireConnection;
+    TAssert.AssertTrue('The second acquire got the released connection', LConn <> nil);
+    TAssert.AssertTrue('Nothing left current', TPcTracing.Current = nil);
+    LConn := nil;
+    TPcTracing.FlushNow;
+
+    TAssert.AssertEquals(1, Length(LFake.Spans));
+    LSpan := LFake.Find('pool wait');
+    TAssert.AssertEquals(Ord(skInternal), Ord(LSpan.Kind));
+    TAssert.AssertEquals(Ord(ssUnset), Ord(LSpan.Status));
+    TAssert.AssertEquals('1', TFakeSpanExporter.Attribute(LSpan, 'pascaldb.pool.wait_attempts'));
+    TAssert.AssertEquals('1', TFakeSpanExporter.Attribute(LSpan, 'pascaldb.pool.max_connections'));
+    TAssert.AssertEquals('mysql', TFakeSpanExporter.Attribute(LSpan, 'db.system.name'));
+  finally
+    LConn := nil;
+    LSleep.Held := nil;
+    LPool := nil;
+    TPcTracing.Shutdown;
+    TSleep.Reset;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_Tracing_PoolWait_Timeout_ErrorStatus;
+var
+  LConfig: IConnectionPoolConfig;
+  LFactory: IDBFactory;
+  LPool: IDBConnectionPool;
+  LHeld, LConn: IDBConnection;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+  LSpan: TPcSpanData;
+  LRaised: Boolean;
+begin
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  TSleep.SetSleep(TFakeSleep.Create);
+  TPcTracing.Start(TPcTracingOptions.Default('pool-tests', ''), LExporter, False);
+  try
+    LConfig := TConnectionPoolConfig.Create;
+    LConfig.IniConnections := 1;
+    LConfig.MaxConnections := 1;
+    LConfig.WaitMaxAttemps := 3;
+    LFactory := TDBFactoryMock.Create;
+    LPool := TConnectionPool.Create(LFactory, LConfig);
+    LHeld := LPool.AcquireConnection;
+    LRaised := False;
+    try
+      LConn := LPool.AcquireConnection;
+    except
+      on E: EPoolTimeoutException do
+        LRaised := True;
+    end;
+    TAssert.AssertTrue('The acquire must time out', LRaised);
+    TAssert.AssertTrue('Nothing left current', TPcTracing.Current = nil);
+    TPcTracing.FlushNow;
+
+    TAssert.AssertEquals(1, Length(LFake.Spans));
+    LSpan := LFake.Find('pool wait');
+    TAssert.AssertEquals(Ord(ssError), Ord(LSpan.Status));
+    TAssert.AssertEquals('EPoolTimeoutException', TFakeSpanExporter.Attribute(LSpan, 'error.type'));
+    TAssert.AssertEquals('3', TFakeSpanExporter.Attribute(LSpan, 'pascaldb.pool.wait_attempts'));
+    TAssert.AssertEquals('No db.system.name when the pool has none', '',
+      TFakeSpanExporter.Attribute(LSpan, 'db.system.name'));
+  finally
+    LConn := nil;
+    LHeld := nil;
+    LPool := nil;
+    TPcTracing.Shutdown;
+    TSleep.Reset;
+  end;
+end;
+
+procedure TPoolTests.Test_Pool_SqlOperationName_And_DbSystemName;
+begin
+  TAssert.AssertEquals('SELECT', PdbSqlOperationName('select * from t'));
+  TAssert.AssertEquals('WITH', PdbSqlOperationName(sLineBreak + #9'  (With x AS (SELECT 1) SELECT * FROM x)'));
+  TAssert.AssertEquals('INSERT', PdbSqlOperationName('INSERT INTO T VALUES (1)'));
+  TAssert.AssertEquals('A comment first: no name', '', PdbSqlOperationName('-- c' + sLineBreak + 'SELECT 1'));
+  TAssert.AssertEquals('', PdbSqlOperationName(''));
+  TAssert.AssertEquals('postgresql', PdbDbSystemName('PostgreSQL'));
+  TAssert.AssertEquals('firebirdsql', PdbDbSystemName('Firebird'));
+  TAssert.AssertEquals('sqlite', PdbDbSystemName('SQLite'));
+  TAssert.AssertEquals('mysql', PdbDbSystemName('MySQL'));
+  TAssert.AssertEquals('mariadb', PdbDbSystemName('MariaDB'));
+  TAssert.AssertEquals('microsoft.sql_server', PdbDbSystemName('SQLServer'));
+  TAssert.AssertEquals('microsoft.sql_server', PdbDbSystemName('mssql'));
+  TAssert.AssertEquals('Another dialect: its name, lower-cased', 'oracle', PdbDbSystemName('Oracle'));
+  TAssert.AssertEquals('', PdbDbSystemName(''));
 end;
 
 initialization

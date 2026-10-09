@@ -11,8 +11,9 @@
   TDBParams over a standalone TParams (typed NULLs and nil optionals
   included), TDatabaseConfig's pool defaults and TDBFactory's refusal of a
   pool with no connections or an unknown SQL dialect, dialect lookup by name
-  (case, unknown and empty names, duplicates), and the savepoint SQL TScopeTransaction issues
-  for nested scopes. The same blocks
+  (case, unknown and empty names, duplicates), the savepoint SQL TScopeTransaction issues
+  for nested scopes and its transaction span (with TFakeSpanExporter from
+  PascalDb.PoolTests). The same blocks
   are exercised against a real database by the integration contract tests.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
@@ -30,7 +31,10 @@ uses
   PascalCommon.Optionals,
   PascalDb.SqlDialect,
   PascalDb.Adapter.Base,
-  PascalDb.Adapter.DataSet;
+  PascalDb.Adapter.DataSet,
+  PascalCommon.Tracing,
+  PascalDb.Pool,
+  PascalDb.PoolTests;
 
 type
   { TRecordingConnection
@@ -78,6 +82,18 @@ type
     function BuildSqlScript(AConn: IDBConnection; ATransaction: ITransaction): ISqlScript;
   end;
 
+  { TCommitThread
+    Commits a scope and releases it, on its own thread (a TThread subclass:
+    no anonymous threads on FPC 3.2.2). }
+  TCommitThread = class(TThread)
+  private
+    FScope: IScopeTransaction;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const AScope: IScopeTransaction);
+  end;
+
   TAdapterBaseTests = class(TTestCase)
   private
     FParams: TParams;
@@ -110,6 +126,9 @@ type
     procedure Scope_Main_CommitsTheTransaction;
     procedure Scope_Nested_UsesSavepoints;
     procedure Scope_Nested_NoRelease_CommitRunsNothing;
+    procedure Scope_Tracing_TransactionSpan_ParentOfTheStatements;
+    procedure Scope_Tracing_RollbackAndAbandoned_NestedHasNoSpan;
+    procedure Scope_Tracing_CommitOnAnotherThread;
     procedure PluginDir_NextToLibrary_AnySlash;
     procedure PluginDir_NoFolder_IsEmpty;
   end;
@@ -517,6 +536,169 @@ begin
   TAssert.AssertTrue('The nested scope must create a savepoint: ' + LTransaction.Log[1],
     Pos('SAVE TRANSACTION sp_', LTransaction.Log[1]) = 1);
   TAssert.AssertEquals('COMMIT', LTransaction.Log[2]);
+end;
+
+procedure TAdapterBaseTests.Scope_Tracing_TransactionSpan_ParentOfTheStatements;
+var
+  LTransaction: TRecordingTransaction;
+  LIntf: ITransaction;
+  LScope: IScopeTransaction;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+  LStatement: IPcSpan;
+  LSpan: TPcSpanData;
+begin
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  TPcTracing.Start(TPcTracingOptions.Default('adapter-tests', ''), LExporter, False);
+  try
+    LTransaction := TRecordingTransaction.Create(
+      TRecordingConnection.Create(TSQLDialectFactory.GetDialect('Firebird')));
+    LIntf := LTransaction;
+    LScope := TScopeTransaction.Create(LIntf, nil);
+    // What TDBFactory.CreateScopeTransaction does with its config's dialect.
+    (LScope as ITracedScopeTransaction).SetDbSystem('firebirdsql');
+    LScope.StartTransaction;
+    TAssert.AssertTrue('The transaction span is detached, never current', TPcTracing.Current = nil);
+    TAssert.AssertTrue('The transaction carries its span',
+      (LIntf as ITransactionSpan).GetSpan <> nil);
+    // What a pooled statement inside the transaction does (PascalDb.Pool).
+    LStatement := TPcTracing.StartChildSpan((LIntf as ITransactionSpan).GetSpan, 'UPDATE', skClient);
+    LStatement.Finish;
+    LStatement := nil;
+    LScope.Commit;
+    TAssert.AssertTrue('The commit takes the span off the transaction',
+      (LIntf as ITransactionSpan).GetSpan = nil);
+    TAssert.AssertTrue('Nothing left current after the commit', TPcTracing.Current = nil);
+    LScope := nil;
+    TPcTracing.FlushNow;
+
+    TAssert.AssertEquals(2, Length(LFake.Spans));
+    LSpan := LFake.Find('transaction');
+    TAssert.AssertEquals(Ord(skInternal), Ord(LSpan.Kind));
+    TAssert.AssertEquals('commit', TFakeSpanExporter.Attribute(LSpan, 'pascaldb.transaction.outcome'));
+    TAssert.AssertEquals('firebirdsql', TFakeSpanExporter.Attribute(LSpan, 'db.system.name'));
+    TAssert.AssertEquals(Ord(ssUnset), Ord(LSpan.Status));
+    TAssert.AssertEquals('The statement is a child of the transaction',
+      LSpan.SpanId, LFake.Find('UPDATE').ParentSpanId);
+  finally
+    LStatement := nil;
+    LScope := nil;
+    TPcTracing.Shutdown;
+  end;
+end;
+
+procedure TAdapterBaseTests.Scope_Tracing_RollbackAndAbandoned_NestedHasNoSpan;
+var
+  LTransaction: TRecordingTransaction;
+  LIntf: ITransaction;
+  LOuter, LInner: IScopeTransaction;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+begin
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  TPcTracing.Start(TPcTracingOptions.Default('adapter-tests', ''), LExporter, False);
+  try
+    LTransaction := TRecordingTransaction.Create(
+      TRecordingConnection.Create(TSQLDialectFactory.GetDialect('Firebird')));
+    LIntf := LTransaction;
+    // Rolled back, with a nested scope (a savepoint) inside: one span.
+    LOuter := TScopeTransaction.Create(LIntf, nil);
+    LOuter.StartTransaction;
+    LInner := TScopeTransaction.Create(LIntf, nil);
+    LInner.StartTransaction;
+    LInner.Commit;
+    LInner := nil;
+    LOuter.Rollback;
+    LOuter := nil;
+    TPcTracing.FlushNow;
+    TAssert.AssertEquals('Only the outermost scope has a span', 1, Length(LFake.Spans));
+    TAssert.AssertEquals('rollback',
+      TFakeSpanExporter.Attribute(LFake.Spans[0], 'pascaldb.transaction.outcome'));
+
+    // Released without Commit or Rollback.
+    LOuter := TScopeTransaction.Create(LIntf, nil);
+    LOuter.StartTransaction;
+    LOuter := nil;
+    TAssert.AssertTrue('Nothing left current', TPcTracing.Current = nil);
+    TPcTracing.FlushNow;
+    TAssert.AssertEquals(2, Length(LFake.Spans));
+    TAssert.AssertEquals('abandoned',
+      TFakeSpanExporter.Attribute(LFake.Spans[1], 'pascaldb.transaction.outcome'));
+    TAssert.AssertEquals('No db.system.name unless the factory sets it', '',
+      TFakeSpanExporter.Attribute(LFake.Spans[1], 'db.system.name'));
+  finally
+    LInner := nil;
+    LOuter := nil;
+    TPcTracing.Shutdown;
+  end;
+end;
+
+{ TCommitThread }
+
+constructor TCommitThread.Create(const AScope: IScopeTransaction);
+begin
+  FScope := AScope;
+  inherited Create(False);
+end;
+
+procedure TCommitThread.Execute;
+begin
+  FScope.Commit;
+  FScope := nil;
+end;
+
+procedure TAdapterBaseTests.Scope_Tracing_CommitOnAnotherThread;
+var
+  LTransaction: TRecordingTransaction;
+  LIntf: ITransaction;
+  LScope: IScopeTransaction;
+  LFake: TFakeSpanExporter;
+  LExporter: IPcSpanExporter;
+  LRequest, LAfter: IPcSpan;
+  LThread: TCommitThread;
+begin
+  // Started here, committed and released on another thread: the span (and
+  // the scope holding it) is freed there. This thread must come out with its
+  // own current span intact, and start new spans from it.
+  LFake := TFakeSpanExporter.Create;
+  LExporter := LFake;
+  TPcTracing.Start(TPcTracingOptions.Default('adapter-tests', ''), LExporter, False);
+  try
+    LRequest := TPcTracing.StartSpan('request', skServer);
+    LTransaction := TRecordingTransaction.Create(
+      TRecordingConnection.Create(TSQLDialectFactory.GetDialect('Firebird')));
+    LIntf := LTransaction;
+    LScope := TScopeTransaction.Create(LIntf, nil);
+    LScope.StartTransaction;
+    LThread := TCommitThread.Create(LScope);
+    LScope := nil;
+    try
+      LThread.WaitFor;
+    finally
+      LThread.Free;
+    end;
+    TAssert.AssertTrue('The request is still the current span', TPcTracing.Current = LRequest);
+    LAfter := TPcTracing.StartSpan('after');
+    LAfter.Finish;
+    LAfter := nil;
+    LRequest.Finish;
+    LRequest := nil;
+    TAssert.AssertTrue('Nothing left current', TPcTracing.Current = nil);
+    TPcTracing.FlushNow;
+
+    TAssert.AssertEquals(3, Length(LFake.Spans));
+    TAssert.AssertEquals('commit',
+      TFakeSpanExporter.Attribute(LFake.Find('transaction'), 'pascaldb.transaction.outcome'));
+    TAssert.AssertEquals(LFake.Find('request').SpanId, LFake.Find('transaction').ParentSpanId);
+    TAssert.AssertEquals(LFake.Find('request').SpanId, LFake.Find('after').ParentSpanId);
+  finally
+    LAfter := nil;
+    LScope := nil;
+    LRequest := nil;
+    TPcTracing.Shutdown;
+  end;
 end;
 
 // A folder next to the test executable, removed by the caller.

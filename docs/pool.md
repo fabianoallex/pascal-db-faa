@@ -157,6 +157,34 @@ For production, the database's own tools see every client and the query plans: P
 `MON$STATEMENTS`. This handler is the portable, in-program view; SQLite has no server-side
 equivalent.
 
+## Spans (tracing)
+
+When the application starts pascal-common-faa's tracer (`TPcTracing.Start`, in
+`PascalCommon.Tracing`, with an exporter such as pascal-api-infra-faa's OTLP one), the library
+opens spans on its own. Nothing to configure here: they join the trace of whatever span is
+current on the thread (an HTTP request's server span, typically).
+
+| Span | Kind | When | Attributes |
+|---|---|---|---|
+| the statement's first word (`SELECT`, `UPDATE`...; `BATCH INSERT` for an array operation) | client | every `Open`, `ExecSql` and native batch of a pooled query | `db.system.name`, `db.operation.name`, `db.query.text`; `db.response.returned_rows` (`Open`), `pascaldb.rows_affected` (`ExecSql`, when the driver counts), `db.operation.batch.size` |
+| `transaction` | internal | from the outermost scope's `StartTransaction` to its `Commit` or `Rollback`, on any thread; the statements inside are its children | `db.system.name`, `pascaldb.transaction.outcome` (`commit`, `rollback`, or `abandoned`: the scope was released without either) |
+| `pool wait` | internal | an acquire that had to wait for a connection, from the first wait until it got one or gave up | `pascaldb.pool.wait_attempts`, `pascaldb.pool.max_connections`, `db.system.name` |
+
+- A failure sets the error status with the message the caller gets, and `error.type` with its
+  class (`EPoolTimeoutException` for a pool wait that timed out).
+- `db.system.name` follows OpenTelemetry's names: `postgresql`, `firebirdsql`, `sqlite`, `mysql`,
+  `mariadb`, `microsoft.sql_server` (from `IDatabaseConfig.SQLDialect`, `PdbDbSystemName`).
+- **Off, it costs nothing:** while `TPcTracing.Enabled` is false (not started, or shut down) no
+  span is created, not even the ids.
+- **No parameter values**, as in the statement events; `db.query.text` is the SQL with its
+  placeholders, after the tags were processed (a `ReplaceLiteral` value is in it).
+- **The transaction span is detached** (pascal-common-faa's `StartDetachedSpan`): it never
+  becomes the thread's current span, so the transaction may commit, roll back or be released on
+  another thread. The statements inside name it as their parent (`StartChildSpan`); other spans the
+  application opens meanwhile stay children of the request, not of the transaction.
+- Only pooled queries and scopes from `TDBFactory`, as for the statement events. Statements run
+  through `ITransaction.ExecSql` (savepoints, `ISqlScript`, migrations) have no span of their own.
+
 ## Threads
 
 The pool and the factory are meant to be shared by every thread. A connection, a query and a

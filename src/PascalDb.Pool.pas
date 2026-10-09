@@ -39,6 +39,19 @@
   capacity growth, never for the happy path; and GetSnapshot for periodic
   reads of state + accumulated counters.
 
+  Tracing (PascalCommon.Tracing): while TPcTracing.Enabled, every statement
+  of a pooled query gets a client span (Open, ExecSql, a native batch), named
+  after the statement's first word, with db.system.name, db.query.text and,
+  on a failure, error.type and the error status; and an acquire that has to
+  wait gets a "pool wait" span, from the first wait until it has a connection
+  or gives up. Disabled, nothing is created, not even the ids: a statement
+  doesn't pay for tracing it doesn't use. Each span starts and ends inside the
+  call, on the caller's thread. A statement inside a transaction is a child
+  of the transaction's span (ITransactionSpan; TScopeTransaction in
+  PascalDb.Adapter.Base), which is detached and may end on any thread;
+  otherwise, and the pool wait always, a child of the thread's current span
+  (an HTTP request's). No parameter values, as in TStatementInfo.
+
   Dual-compiler: the sweep thread is a TThread subclass (not
   CreateAnonymousThread), and TPoolEventProc follows PASCALDB_FUNCREFS
   (pascaldb.inc): closure or method in Delphi, method in FPC 3.2.2. Time and
@@ -55,7 +68,8 @@ uses
   SyncObjs,
   PascalDb.Interfaces,
   PascalCommon.SystemContext,
-  PascalCommon.Optionals;
+  PascalCommon.Optionals,
+  PascalCommon.Tracing;
 
 type
 
@@ -229,6 +243,20 @@ type
   TStatementEventProc = {$IFDEF PASCALDB_FUNCREFS}reference to procedure(const AInfo: TStatementInfo)
     {$ELSE}procedure(const AInfo: TStatementInfo) of object{$ENDIF};
 
+  { ITransactionSpan
+    The span of the transaction a query runs in, for the query's span to name
+    as its parent (see the tracing note in the unit comment). The outermost
+    TScopeTransaction (PascalDb.Adapter.Base) sets it on its ITransaction when
+    the transaction starts and clears it when it ends; TTransactionBase
+    implements it. A transaction without it: the statement spans are children
+    of the thread's current span. }
+
+  ITransactionSpan = interface
+    ['{05107FD4-F1D0-411A-B00B-C9450B72AC44}']
+    function GetSpan: IPcSpan;
+    procedure SetSpan(const ASpan: IPcSpan);
+  end;
+
   { TConnectionPool }
 
   TConnectionPool = class(TInterfacedObject, IDBConnectionPool, IDBConnectionPoolInternalActions)
@@ -249,6 +277,7 @@ type
     FIdleSweepWake: TEvent;
     FOnEvent: TPoolEventProc;
     FOnStatement: TStatementEventProc;
+    FDbSystem: string;
     FTotalCreated: Int64;
     FTotalDiscarded: Int64;
     FTotalTimeouts: Int64;
@@ -278,8 +307,11 @@ type
     // console fallback here, unlike TDBMigrationEngine).
     // AOnStatement is optional too: when set, every Open/ExecSql of a query
     // from AcquireQuery reports a TStatementInfo when it ends.
+    // ADbSystem: the OpenTelemetry db.system.name of its spans (see
+    // PdbDbSystemName); '' leaves the attribute out.
     constructor Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig = nil;
-      AOnEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil);
+      AOnEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil;
+      const ADbSystem: string = '');
     destructor Destroy; override;
     function AcquireConnection: IDBConnection;
     function AcquireQuery(out AQuery: IQuery; ATransaction: ITransaction = nil): IScopeTransaction;
@@ -310,10 +342,63 @@ type
     procedure KeepaliveIdleConnections(AKeepaliveSeconds: Integer); overload;
   end;
 
+/// The OpenTelemetry db.system.name of a dialect name as
+/// IDatabaseConfig.SQLDialect has it: 'postgresql', 'firebirdsql', 'sqlite',
+/// 'mysql', 'mariadb', 'microsoft.sql_server' (SQLServer and MSSQL); any
+/// other name lower-cased, '' for ''.
+function PdbDbSystemName(const ADialectName: string): string;
+
+/// The first word of ASql, upper-cased ('SELECT', 'INSERT', 'WITH'), after
+/// spaces and opening parentheses; '' when ASql starts with anything else (a
+/// comment). A statement span's name.
+function PdbSqlOperationName(const ASql: string): string;
+
+/// Ends ASpan (nil: nothing), with error.type and the error status first when
+/// AError is given.
+procedure PdbFinishSpan(const ASpan: IPcSpan; AError: Exception);
+
 implementation
 
 uses
   PascalCommon.Threading;
+
+function PdbDbSystemName(const ADialectName: string): string;
+var
+  LName: string;
+begin
+  LName := LowerCase(Trim(ADialectName));
+  if LName = 'firebird' then
+    Result := 'firebirdsql'
+  else if (LName = 'sqlserver') or (LName = 'mssql') then
+    Result := 'microsoft.sql_server'
+  else
+    Result := LName;
+end;
+
+function PdbSqlOperationName(const ASql: string): string;
+var
+  I, LStart: Integer;
+begin
+  I := 1;
+  while (I <= Length(ASql)) and CharInSet(ASql[I], [' ', #9, #10, #13, '(']) do
+    Inc(I);
+  LStart := I;
+  while (I <= Length(ASql)) and CharInSet(ASql[I], ['A'..'Z', 'a'..'z']) do
+    Inc(I);
+  Result := UpperCase(Copy(ASql, LStart, I - LStart));
+end;
+
+procedure PdbFinishSpan(const ASpan: IPcSpan; AError: Exception);
+begin
+  if ASpan = nil then
+    Exit;
+  if Assigned(AError) then
+  begin
+    ASpan.SetAttribute('error.type', AError.ClassName);
+    ASpan.SetStatus(ssError, AError.Message);
+  end;
+  ASpan.Finish;
+end;
 
 type
   { Idle-connection sweep thread.
@@ -389,11 +474,14 @@ type
     FPool: IDBConnectionPoolInternalActions;
     FInternalQuery: IQuery;
     FOnStatement: TStatementEventProc;
+    FDbSystem: string;
     procedure NotifyStatement(AKind: TStatementKind; AStartUs: Int64; ARows: Int64;
       AError: Exception);
+    // nil when tracing is off (see the unit comment).
+    function StartStatementSpan(AKind: TStatementKind): IPcSpan;
   public
     constructor Create(APool: IDBConnectionPoolInternalActions; ARealQuery: IQuery;
-      AOnStatement: TStatementEventProc = nil);
+      AOnStatement: TStatementEventProc; const ADbSystem: string);
     destructor Destroy; override;
     procedure Close;
     function ExecSql: Int64;
@@ -455,11 +543,46 @@ type
 { TQueryWrapper }
 
 constructor TQueryWrapper.Create(APool: IDBConnectionPoolInternalActions; ARealQuery: IQuery;
-  AOnStatement: TStatementEventProc);
+  AOnStatement: TStatementEventProc; const ADbSystem: string);
 begin
   FPool := APool;
   FInternalQuery := ARealQuery;
   FOnStatement := AOnStatement;
+  FDbSystem := ADbSystem;
+end;
+
+function TQueryWrapper.StartStatementSpan(AKind: TStatementKind): IPcSpan;
+var
+  LSql, LOperation, LName: string;
+  LTxSpan: ITransactionSpan;
+  LParent: IPcSpan;
+begin
+  Result := nil;
+  if not TPcTracing.Enabled then
+    Exit;
+  LSql := TrimRight(FInternalQuery.GetSql);
+  LOperation := PdbSqlOperationName(LSql);
+  // OpenTelemetry's database spans: named after the operation when known,
+  // else the database system.
+  if LOperation <> '' then
+    LName := LOperation
+  else if FDbSystem <> '' then
+    LName := FDbSystem
+  else
+    LName := 'db';
+  if AKind = skExecBatch then
+    LName := 'BATCH ' + LName;
+  // Inside a transaction, a child of its span (a detached one: see
+  // ITransactionSpan); otherwise of the thread's current span.
+  LParent := nil;
+  if Supports(FInternalQuery.GetTransaction, ITransactionSpan, LTxSpan) then
+    LParent := LTxSpan.GetSpan;
+  Result := TPcTracing.StartChildSpan(LParent, LName, skClient);
+  if FDbSystem <> '' then
+    Result.SetAttribute('db.system.name', FDbSystem);
+  if LOperation <> '' then
+    Result.SetAttribute('db.operation.name', LOperation);
+  Result.SetAttribute('db.query.text', LSql);
 end;
 
 procedure TQueryWrapper.NotifyStatement(AKind: TStatementKind; AStartUs: Int64; ARows: Int64;
@@ -503,12 +626,14 @@ end;
 
 function TQueryWrapper.ExecSql: Int64;
 var
-  LNewE: Exception;
+  LNewE, LFailure: Exception;
   LStartUs: Int64;
+  LSpan: IPcSpan;
 begin
   LStartUs := 0;
   if Assigned(FOnStatement) then
     LStartUs := PcTickUs;
+  LSpan := StartStatementSpan(skExecSql);
   try
     Result := FInternalQuery.ExecSql;
   except
@@ -520,11 +645,13 @@ begin
       // It is only safe to raise a NEW exception (LNewE) or a bare "raise;",
       // lexically inside this very except block.
       LNewE := BuildDatabaseException(FInternalQuery.GetConnection, E);
+      if Assigned(LNewE) then
+        LFailure := LNewE
+      else
+        LFailure := E;
       if Assigned(FOnStatement) then
-        if Assigned(LNewE) then
-          NotifyStatement(skExecSql, LStartUs, -1, LNewE)
-        else
-          NotifyStatement(skExecSql, LStartUs, -1, E);
+        NotifyStatement(skExecSql, LStartUs, -1, LFailure);
+      PdbFinishSpan(LSpan, LFailure);
       if Assigned(LNewE) then
         raise LNewE;
       raise;
@@ -532,6 +659,13 @@ begin
   end;
   if Assigned(FOnStatement) then
     NotifyStatement(skExecSql, LStartUs, Result, nil);
+  if Assigned(LSpan) then
+  begin
+    // No semantic-convention attribute for it yet: this library's own name.
+    if Result >= 0 then
+      LSpan.SetIntAttribute('pascaldb.rows_affected', Result);
+    PdbFinishSpan(LSpan, nil);
+  end;
 end;
 
 function TQueryWrapper.GetConnection: IDBConnection;
@@ -557,13 +691,15 @@ end;
 function TQueryWrapper.Open: IQueryResult;
 var
   LRawResult: IQueryResult;
-  LNewE: Exception;
+  LNewE, LFailure: Exception;
   LStartUs: Int64;
   LRows: Int64;
+  LSpan: IPcSpan;
 begin
   LStartUs := 0;
   if Assigned(FOnStatement) then
     LStartUs := PcTickUs;
+  LSpan := StartStatementSpan(skOpen);
   try
     LRawResult := FInternalQuery.Open;
   except
@@ -575,17 +711,19 @@ begin
       // constraint violations and other normal data errors re-raise E as is.
       // Never "raise E;" here (see the comment in TQueryWrapper.ExecSql).
       LNewE := BuildDatabaseException(FInternalQuery.GetConnection, E);
+      if Assigned(LNewE) then
+        LFailure := LNewE
+      else
+        LFailure := E;
       if Assigned(FOnStatement) then
-        if Assigned(LNewE) then
-          NotifyStatement(skOpen, LStartUs, -1, LNewE)
-        else
-          NotifyStatement(skOpen, LStartUs, -1, E);
+        NotifyStatement(skOpen, LStartUs, -1, LFailure);
+      PdbFinishSpan(LSpan, LFailure);
       if Assigned(LNewE) then
         raise LNewE;
       raise;
     end;
   end;
-  if Assigned(FOnStatement) then
+  if Assigned(FOnStatement) or Assigned(LSpan) then
   begin
     // Every adapter fetches the whole result on Open: RecordCount is exact.
     LRows := -1;
@@ -595,7 +733,14 @@ begin
     except
       // reading it failed: the statement itself worked, report no count
     end;
-    NotifyStatement(skOpen, LStartUs, LRows, nil);
+    if Assigned(FOnStatement) then
+      NotifyStatement(skOpen, LStartUs, LRows, nil);
+    if Assigned(LSpan) then
+    begin
+      if LRows >= 0 then
+        LSpan.SetIntAttribute('db.response.returned_rows', LRows);
+      PdbFinishSpan(LSpan, nil);
+    end;
   end;
   // The raw result doesn't go through any pool wrapper — without this, an AV
   // while reading fields (e.g. the server went down mid-fetch, after Open had
@@ -619,14 +764,18 @@ end;
 procedure TQueryWrapper.ExecBatch(const ARows: IBatchRows);
 var
   LNative: INativeBatchQuery;
-  LNewE: Exception;
+  LNewE, LFailure: Exception;
   LStartUs: Int64;
+  LSpan: IPcSpan;
 begin
   if not Supports(FInternalQuery, INativeBatchQuery, LNative) then
     raise ENotSupportedException.Create('The adapter''s query has no native batch (INativeBatchQuery)');
   LStartUs := 0;
   if Assigned(FOnStatement) then
     LStartUs := PcTickUs;
+  LSpan := StartStatementSpan(skExecBatch);
+  if Assigned(LSpan) then
+    LSpan.SetIntAttribute('db.operation.batch.size', ARows.RowCount);
   try
     LNative.ExecBatch(ARows);
   except
@@ -634,11 +783,13 @@ begin
     begin
       // Same as ExecSql (see there): never "raise E;".
       LNewE := BuildDatabaseException(FInternalQuery.GetConnection, E);
+      if Assigned(LNewE) then
+        LFailure := LNewE
+      else
+        LFailure := E;
       if Assigned(FOnStatement) then
-        if Assigned(LNewE) then
-          NotifyStatement(skExecBatch, LStartUs, ARows.RowCount, LNewE)
-        else
-          NotifyStatement(skExecBatch, LStartUs, ARows.RowCount, E);
+        NotifyStatement(skExecBatch, LStartUs, ARows.RowCount, LFailure);
+      PdbFinishSpan(LSpan, LFailure);
       if Assigned(LNewE) then
         raise LNewE;
       raise;
@@ -646,6 +797,7 @@ begin
   end;
   if Assigned(FOnStatement) then
     NotifyStatement(skExecBatch, LStartUs, ARows.RowCount, nil);
+  PdbFinishSpan(LSpan, nil);
 end;
 
 { TQueryResultWrapper }
@@ -1136,7 +1288,7 @@ end;
 { TConnectionPool }
 
 constructor TConnectionPool.Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig;
-  AOnEvent: TPoolEventProc; AOnStatement: TStatementEventProc);
+  AOnEvent: TPoolEventProc; AOnStatement: TStatementEventProc; const ADbSystem: string);
 
   // Weak reference to break the TConnectionPool <-> IDBFactory reference cycle
   procedure SetWeak(aInterfaceField: PInterface; const aValue: IInterface);
@@ -1147,6 +1299,7 @@ constructor TConnectionPool.Create(AFactory: IDBFactory; AConfig: IConnectionPoo
 begin
   FOnEvent := AOnEvent;
   FOnStatement := AOnStatement;
+  FDbSystem := ADbSystem;
 
   if Assigned(AConfig) then
   begin
@@ -1479,6 +1632,7 @@ var
   ShouldUseFromPool: Boolean;
   RealConnection: IDBConnection;
   LThrottleEvent: TPoolEvent;
+  LWaitSpan: IPcSpan;
 
   procedure NotifyThrottledIfWaited;
   begin
@@ -1487,6 +1641,27 @@ var
     LThrottleEvent := BaseEvent(pekAcquireThrottled);
     LThrottleEvent.WaitAttempts := WaitAttempts;
     Notify(LThrottleEvent);
+  end;
+
+  // The "pool wait" span (see the unit comment): opened before the first
+  // wait, only while tracing is enabled.
+  procedure StartWaitSpan;
+  begin
+    if (LWaitSpan <> nil) or not TPcTracing.Enabled then
+      Exit;
+    LWaitSpan := TPcTracing.StartSpan('pool wait', skInternal);
+    if FDbSystem <> '' then
+      LWaitSpan.SetAttribute('db.system.name', FDbSystem);
+    LWaitSpan.SetIntAttribute('pascaldb.pool.max_connections', FMaxConnections);
+  end;
+
+  procedure FinishWaitSpan(AError: Exception);
+  begin
+    if LWaitSpan = nil then
+      Exit;
+    LWaitSpan.SetIntAttribute('pascaldb.pool.wait_attempts', WaitAttempts);
+    PdbFinishSpan(LWaitSpan, AError);
+    LWaitSpan := nil;
   end;
 
   procedure CheckPool;
@@ -1586,49 +1761,63 @@ var
 
 begin
   WaitAttempts := 0;
-  while True do
-  begin
-    ShouldCreateNew  := False;
-    ShouldUseFromPool := False;
-
-    CheckPool;
-
-    if ShouldCreateNew then
+  LWaitSpan := nil;
+  try
+    while True do
     begin
-      if TryGetNewConnection(RealConnection) then
+      ShouldCreateNew  := False;
+      ShouldUseFromPool := False;
+
+      CheckPool;
+
+      if ShouldCreateNew then
       begin
+        if TryGetNewConnection(RealConnection) then
+        begin
+          NotifyThrottledIfWaited;
+          FinishWaitSpan(nil);
+          Result := TConnectionWrapper.Create(Self, RealConnection);
+          Exit;
+        end;
+        Result := nil;
+      end;
+
+      if ShouldUseFromPool then
+      begin
+        if not TryGetConnectionFromPool(RealConnection) then
+        begin
+          Result := nil;
+          Continue;
+        end;
         NotifyThrottledIfWaited;
+        FinishWaitSpan(nil);
         Result := TConnectionWrapper.Create(Self, RealConnection);
         Exit;
       end;
-      Result := nil;
-    end;
 
-    if ShouldUseFromPool then
-    begin
-      if not TryGetConnectionFromPool(RealConnection) then
+      if WaitAttempts >= FWaitMaxAttemps then
       begin
-        Result := nil;
-        Continue;
+        PcAtomicInc64(FTotalTimeouts);
+        LThrottleEvent := BaseEvent(pekAcquireTimeout);
+        LThrottleEvent.WaitAttempts := WaitAttempts;
+        Notify(LThrottleEvent);
+        raise EPoolTimeoutException.Create(
+          FActiveConnections, FMaxConnections, FPool.Count, WaitAttempts
+        );
       end;
-      NotifyThrottledIfWaited;
-      Result := TConnectionWrapper.Create(Self, RealConnection);
-      Exit;
-    end;
 
-    if WaitAttempts >= FWaitMaxAttemps then
+      StartWaitSpan;
+      TSleep.Sleep(FWaitMilliseconds);
+      Inc(WaitAttempts);
+    end;
+  except
+    // The timeout above, or a failed connect after waiting: the span ends
+    // with it. A bare "raise" only (see BuildDatabaseException).
+    on E: Exception do
     begin
-      PcAtomicInc64(FTotalTimeouts);
-      LThrottleEvent := BaseEvent(pekAcquireTimeout);
-      LThrottleEvent.WaitAttempts := WaitAttempts;
-      Notify(LThrottleEvent);
-      raise EPoolTimeoutException.Create(
-        FActiveConnections, FMaxConnections, FPool.Count, WaitAttempts
-      );
+      FinishWaitSpan(E);
+      raise;
     end;
-
-    TSleep.Sleep(FWaitMilliseconds);
-    Inc(WaitAttempts);
   end;
 end;
 
@@ -1650,7 +1839,7 @@ begin
   end;
 
   RealQuery := FFactory.CreateQuery(LConn, LTransaction);
-  AQuery := TQueryWrapper.Create(Self, RealQuery, FOnStatement);
+  AQuery := TQueryWrapper.Create(Self, RealQuery, FOnStatement, FDbSystem);
   Result := FFactory.CreateScopeTransaction(LTransaction);
 end;
 

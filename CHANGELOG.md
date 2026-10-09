@@ -6,6 +6,29 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-09
+
+### Added
+
+- Spans through pascal-common-faa 1.8.0's `PascalCommon.Tracing` (phase D of pascal-api-infra-faa's
+  observability design), created only while `TPcTracing.Enabled`: one client span per statement of
+  a pooled query (`Open`, `ExecSql`, native batch), a `transaction` span from the outermost
+  scope's `StartTransaction` to its `Commit`/`Rollback` (or its release, `abandoned`), and a
+  `pool wait` span for an acquire that has to wait. OpenTelemetry's database attributes
+  (`db.system.name`, `db.query.text`, ...), no parameter values. See "Spans (tracing)" in
+  `docs/pool.md`.
+- `TConnectionPool.Create` takes an optional `ADbSystem` (the spans' `db.system.name`; `TDBFactory`
+  passes it from `IDatabaseConfig.SQLDialect`); `PdbDbSystemName`, `PdbSqlOperationName` and
+  `PdbFinishSpan` in `PascalDb.Pool`; `ITransactionSpan` in `PascalDb.Pool` (the transaction's
+  span, for the statements inside; `TTransactionBase` implements it) and `ITracedScopeTransaction`
+  in `PascalDb.Adapter.Base` (`TScopeTransaction` implements it).
+
+### Changed
+
+- Requires pascal-common-faa **1.8.0** or later (`PascalDb.Interfaces`, `pascal_db_faa.lpk`):
+  the transaction span is a detached one (`StartDetachedSpan`), so a transaction may still end on
+  any thread, and the statements inside are its children through `StartChildSpan`.
+
 ## [0.12.1] - 2026-10-08
 
 ### Changed
@@ -385,6 +408,8 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.13.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.12.1...v0.13.0
+[0.12.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.10.0...v0.10.1
