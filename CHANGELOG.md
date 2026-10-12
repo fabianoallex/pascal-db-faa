@@ -6,6 +6,29 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-12
+
+### Added
+
+- Connection pool metrics on pascal-common-faa's `PcMetrics` (`PascalCommon.Metrics`), recorded by
+  the pool itself, so an application's `/metrics` shows them with nothing to configure:
+  OpenTelemetry's `db.client.connection.count` (`state` = `idle`/`used`), `.max`, `.idle.min`,
+  `.pending_requests`, `.timeouts`, `.wait_time`, `.create_time` and `.use_time`, and
+  `pascaldb.client.connection.created` and `pascaldb.client.connection.closed` (by
+  `pascaldb.close.reason`). Every series has `db.client.connection.pool.name`. Updated where the
+  value changes, as deltas: a destroyed pool gives its series back, two pools with the same name
+  add up. Measured cost: a few hundred nanoseconds per acquire + release on one thread, none
+  visible under contention. See "Metrics" in `docs/pool.md`.
+- `IDatabaseConfig.PoolName` (`TDatabaseConfig`; '' by default: the `db.system.name`), passed by
+  `TDBFactory` to the pool; `TConnectionPool.Create` takes an optional `APoolName` after
+  `ADbSystem`, and `TConnectionPool.PoolName` reads it back; `TPoolCloseReason` in `PascalDb.Pool`.
+
+### Changed
+
+- `IDatabaseConfig` has two new methods (`GetPoolName`, `SetPoolName`): a class implementing it
+  outside this library must add them.
+- The minimum pascal-common-faa stays 1.8.0 (`PascalCommon.Metrics` came in 1.6.0).
+
 ## [0.13.0] - 2026-10-09
 
 ### Added
@@ -408,6 +431,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.14.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.11.0...v0.12.0

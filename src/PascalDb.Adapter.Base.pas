@@ -83,6 +83,7 @@ type
     FPoolIdleCheckIntervalMs: Integer;
     FPoolValidateIdleSeconds: Integer;
     FPoolKeepaliveSeconds: Integer;
+    FPoolName: string;
     FLockTimeoutMs: Integer;
   public
     constructor Create;
@@ -97,6 +98,8 @@ type
     function GetPoolKeepaliveSeconds: Integer;
     function GetLockTimeoutMs: Integer;
     function GetSQLDialect: string;
+    function GetPoolName: string;
+    procedure SetPoolName(const AValue: string);
     procedure SetPoolIniConnections(AValue: Integer);
     procedure SetPoolMaxConnections(AValue: Integer);
     procedure SetPoolWaitMaxAttemps(AValue: Integer);
@@ -498,6 +501,16 @@ end;
 function TDatabaseConfig.GetPoolKeepaliveSeconds: Integer;
 begin
   Result := FPoolKeepaliveSeconds;
+end;
+
+function TDatabaseConfig.GetPoolName: string;
+begin
+  Result := FPoolName;
+end;
+
+procedure TDatabaseConfig.SetPoolName(const AValue: string);
+begin
+  FPoolName := AValue;
 end;
 
 function TDatabaseConfig.GetLockTimeoutMs: Integer;
@@ -1497,7 +1510,7 @@ begin
   // The provider is set before the pool: the pool's initial ramp-up already
   // calls CreateConnection.
   FPool := TConnectionPool.Create(Self, LPoolConfig, AOnPoolEvent, AOnStatement,
-    PdbDbSystemName(FConfig.SQLDialect));
+    PdbDbSystemName(FConfig.SQLDialect), FConfig.PoolName);
   FSqlLoader := TSQLLoader.Create(FConfig.SQLDirectory, FConfig.SqlSource);
 end;
 

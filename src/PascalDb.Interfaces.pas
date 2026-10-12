@@ -516,6 +516,8 @@ type
     function GetPoolKeepaliveSeconds: Integer;
     function GetLockTimeoutMs: Integer;
     function GetSQLDialect: string;
+    function GetPoolName: string;
+    procedure SetPoolName(const AValue: string);
     procedure SetPoolIniConnections(AValue: Integer);
     procedure SetPoolMaxConnections(AValue: Integer);
     procedure SetPoolWaitMaxAttemps(AValue: Integer);
@@ -554,6 +556,12 @@ type
     /// for this many seconds, and discards the ones that fail. Checked every
     /// PoolIdleCheckIntervalMs. 0 (default) = off; negative values are ignored.
     property PoolKeepaliveSeconds: Integer read GetPoolKeepaliveSeconds write SetPoolKeepaliveSeconds;
+    /// The pool's db.client.connection.pool.name in its metrics (see
+    /// "Metrics" in docs/pool.md); '' (default) = the db.system.name of
+    /// SQLDialect ('postgresql', 'firebirdsql', ...). Name each pool when a
+    /// process has more than one on the same database. Never the connection
+    /// string: it may hold a password.
+    property PoolName: string read GetPoolName write SetPoolName;
     /// The longest a statement waits for a lock held by another transaction
     /// (a row being updated, SQLite's write lock) before failing with
     /// ELockConflictException. 0 (default) = each database's own behavior:

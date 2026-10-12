@@ -130,6 +130,7 @@
         <DCCReference Include="PascalDb.SqlLoaderTests.pas"/>
         <DCCReference Include="PascalDb.MockTests.pas"/>
         <DCCReference Include="PascalDb.PoolTests.pas"/>
+        <DCCReference Include="PascalDb.PoolMetricsTests.pas"/>
         <DCCReference Include="PascalDb.SqlSourcesTests.pas"/>
         <DCCReference Include="PascalDb.AdapterBaseTests.pas"/>
         <DCCReference Include="PascalDb.PagingTests.pas"/>

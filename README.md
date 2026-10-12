@@ -8,7 +8,8 @@ A database access layer for **Delphi and Lazarus/FPC from the same source code**
 - Driver-agnostic contracts: `IDBFactory`, `IDBConnection`, `ITransaction`,
   `IScopeTransaction`, `IQuery`, `IQueryResult`, `IParams`.
 - Connection pool with ramp-up, limit, bounded waiting, idle sweep, discard of broken
-  connections, and events/snapshot for metrics.
+  connections, events and snapshots, OpenTelemetry's connection pool metrics
+  (`db.client.connection.*`) and spans.
 - Versioned migrations.
 - SQL in tagged templates (`[TAG {] ... [} TAG]`, `${LITERAL}`), read from pluggable
   sources: embedded resources (default), a directory of `.sql` files, memory, or a
@@ -58,7 +59,7 @@ end;  // the connection goes back to the pool when LQuery and LScope are release
 ## Dependency: pascal-common-faa
 
 The optional types, the atomics and monotonic ticks, the clock/sleep context the pool uses and
-`SafeWriteln`, and the tracer the spans go through, come from
+`SafeWriteln`, and the tracer and metrics registry the spans and pool metrics go through, come from
 [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa) (1.8.0 or later), shared with the
 other `*-faa` libraries. The application provides one copy of it:
 
@@ -70,9 +71,9 @@ other `*-faa` libraries. The application provides one copy of it:
 This repository has it as a git submodule in `external/pascal-common-faa` for its own tests and
 samples only; don't build an application against that copy if it uses another `*-faa` library
 too. An older pascal-common-faa stops the build with "pascal-db-faa needs pascal-common-faa
-1.3.0 or later".
+1.8.0 or later".
 
-Current version: **0.13.0**. While it is 0.x the API may still change between minor
+Current version: **0.14.0**. While it is 0.x the API may still change between minor
 versions; every change is listed in the [changelog](CHANGELOG.md).
 
 ## Status

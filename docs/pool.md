@@ -185,6 +185,48 @@ current on the thread (an HTTP request's server span, typically).
 - Only pooled queries and scopes from `TDBFactory`, as for the statement events. Statements run
   through `ITransaction.ExecSql` (savepoints, `ISqlScript`, migrations) have no span of their own.
 
+## Metrics
+
+The pool records its metrics on pascal-common-faa's process-wide registry (`PcMetrics`, in
+`PascalCommon.Metrics`), so an application that serves it (pascal-api-infra-faa's `/metrics`, or
+`PcPrometheusText(PcMetrics)`) shows them with nothing to configure. The names are
+OpenTelemetry's database client connection metrics; the Prometheus names in the last column are
+what `PascalCommon.Metrics` writes.
+
+| Metric | Kind | Unit | What | Prometheus |
+|---|---|---|---|---|
+| `db.client.connection.count` | up-down counter | `{connection}` | open connections, by `db.client.connection.state`: `idle` (in the pool, or being pinged by the keepalive) and `used` (handed out) | `db_client_connection_count` |
+| `db.client.connection.max` | up-down counter | `{connection}` | `MaxConnections` | `db_client_connection_max` |
+| `db.client.connection.idle.min` | up-down counter | `{connection}` | `IniConnections` | `db_client_connection_idle_min` |
+| `db.client.connection.pending_requests` | up-down counter | `{request}` | acquires waiting for a connection now | `db_client_connection_pending_requests` |
+| `db.client.connection.timeouts` | counter | `{timeout}` | acquires that gave up (`EPoolTimeoutException`) | `db_client_connection_timeouts_total` |
+| `db.client.connection.wait_time` | histogram | `s` | a successful acquire, from the call until it has a connection (waiting, opening a new one, the ping) | `db_client_connection_wait_time_seconds` |
+| `db.client.connection.create_time` | histogram | `s` | opening a physical connection | `db_client_connection_create_time_seconds` |
+| `db.client.connection.use_time` | histogram | `s` | from the acquire to the release of a connection | `db_client_connection_use_time_seconds` |
+| `pascaldb.client.connection.created` | counter | `{connection}` | physical connections opened (ramp-up and growth) | `pascaldb_client_connection_created_total` |
+| `pascaldb.client.connection.closed` | counter | `{connection}` | open connections closed, by `pascaldb.close.reason`: `connect_failed` (failed to reconnect), `ping_failed` (on acquire or in the keepalive), `broken` (during use, or the rollback on release failed), `idle_timeout` | `pascaldb_client_connection_closed_total` |
+
+- **Every series has `db.client.connection.pool.name`**: `IDatabaseConfig.PoolName` through
+  `TDBFactory` (`APoolName` of `TConnectionPool.Create`), or, when empty, the `db.system.name`
+  (`postgresql`, `firebirdsql`...), or `default` for a pool with neither. Name the pools when a
+  process has more than one on the same database. Never put a connection string there (it may
+  hold a password).
+- **Updated where the value changes**, as deltas. The registry has no callback gauge and never
+  drops a series, so a pool gives back what it added when it is destroyed (its series read 0
+  again; counters keep their totals), and two pools with the same name add up.
+- The **initial ramp-up** (`IniConnections` opened in the constructor) counts in `created` and
+  `create_time`, not as an acquire: no `wait_time`, no `use_time`.
+- A **connection that failed to open** isn't in `closed` (it never was open); `TPoolSnapshot`'s
+  `TotalDiscarded` counts the ramp-up's failures, so the two can differ.
+- **Histogram buckets**: `PC_DURATION_BUCKETS` (5 ms to 10 s). Durations come from `PcTickUs`
+  (monotonic).
+- **Cost:** the series are looked up once, in the constructor; each update is a lock-free atomic
+  operation, done whether or not anything reads the metrics. Measured with the mock factory on
+  FPC 3.2.2 Win64 (`-O2`), 2,000,000 acquire + release: about 600 ns before, 850-950 ns with the
+  metrics on one thread; with 4 threads sharing a pool of 4, within the run-to-run noise
+  (about 1.1-1.3 µs either way). Against a round trip to the database (100 µs and up) that is
+  below 0.3%, so there is no switch to turn them off.
+
 ## Threads
 
 The pool and the factory are meant to be shared by every thread. A connection, a query and a

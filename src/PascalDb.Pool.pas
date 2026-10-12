@@ -52,6 +52,20 @@
   otherwise, and the pool wait always, a child of the thread's current span
   (an HTTP request's). No parameter values, as in TStatementInfo.
 
+  Metrics (PascalCommon.Metrics): the pool records OpenTelemetry's database
+  client connection metrics (db.client.connection.count by state, .max,
+  .idle.min, .pending_requests, .timeouts, .wait_time, .create_time,
+  .use_time) and two of its own (pascaldb.client.connection.created and
+  .closed, by reason) on the process-wide PcMetrics, every series labelled
+  with db.client.connection.pool.name. PcMetrics has no callback gauge, so
+  the values are updated where they change, and always as deltas: the
+  registry never drops a series, so a pool gives back what it added when it
+  is destroyed (its series read 0 again), and two pools with the same name
+  add up instead of overwriting each other. The series are looked up once,
+  in the constructor; an update is a lock-free atomic operation, done whether
+  or not anything reads the metrics. The initial ramp-up isn't counted as
+  use (no wait_time, use_time). See "Metrics" in docs/pool.md.
+
   Dual-compiler: the sweep thread is a TThread subclass (not
   CreateAnonymousThread), and TPoolEventProc follows PASCALDB_FUNCREFS
   (pascaldb.inc): closure or method in Delphi, method in FPC 3.2.2. Time and
@@ -69,7 +83,8 @@ uses
   PascalDb.Interfaces,
   PascalCommon.SystemContext,
   PascalCommon.Optionals,
-  PascalCommon.Tracing;
+  PascalCommon.Tracing,
+  PascalCommon.Metrics;
 
 type
 
@@ -199,6 +214,12 @@ type
                            // discarded on release, never goes back idle to the pool
   );
 
+  // The pascaldb.close.reason of pascaldb.client.connection.closed: an open
+  // connection that failed to reconnect, failed the ping (on acquire or in
+  // the keepalive), broke during use (or failed the rollback on release), or
+  // was idle for IdleTimeoutSeconds.
+  TPoolCloseReason = (pcrConnectFailed, pcrPingFailed, pcrBroken, pcrIdleTimeout);
+
   TPoolEvent = record
     Kind: TPoolEventKind;
     ActiveConnections: Integer;  // FActiveConnections at the time of the event
@@ -278,6 +299,22 @@ type
     FOnEvent: TPoolEventProc;
     FOnStatement: TStatementEventProc;
     FDbSystem: string;
+    FPoolName: string;
+    // The metrics' series (see the unit comment); nil when PcMetrics wasn't
+    // there when the pool was created.
+    FMetricIdle: TPcUpDownCounterSeries;
+    FMetricUsed: TPcUpDownCounterSeries;
+    FMetricMax: TPcUpDownCounterSeries;
+    FMetricIdleMin: TPcUpDownCounterSeries;
+    FMetricPending: TPcUpDownCounterSeries;
+    FMetricTimeouts: TPcCounterSeries;
+    FMetricCreated: TPcCounterSeries;
+    FMetricClosed: array[TPoolCloseReason] of TPcCounterSeries;
+    FMetricWaitTime: TPcHistogramSeries;
+    FMetricCreateTime: TPcHistogramSeries;
+    FMetricUseTime: TPcHistogramSeries;
+    // True during CreateInitialConnections: its acquires aren't use.
+    FRampingUp: Boolean;
     FTotalCreated: Int64;
     FTotalDiscarded: Int64;
     FTotalTimeouts: Int64;
@@ -297,6 +334,9 @@ type
     procedure StopIdleSweep;
     function BaseEvent(AKind: TPoolEventKind): TPoolEvent;
     procedure Notify(const AEvent: TPoolEvent);
+    procedure CreateMetrics;
+    procedure MetricIdleAdd(ADelta: Integer);
+    procedure MetricClosed(AReason: TPoolCloseReason; ACount: Integer = 1);
   protected
     procedure ReleaseConnection(AConn: IDBConnection);
     procedure DiscardConnection(AConn: IDBConnection);
@@ -309,9 +349,12 @@ type
     // from AcquireQuery reports a TStatementInfo when it ends.
     // ADbSystem: the OpenTelemetry db.system.name of its spans (see
     // PdbDbSystemName); '' leaves the attribute out.
+    // APoolName: db.client.connection.pool.name of its metrics; '' takes
+    // ADbSystem, or 'default' without one. Never a connection string (it may
+    // hold a password).
     constructor Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig = nil;
       AOnEvent: TPoolEventProc = nil; AOnStatement: TStatementEventProc = nil;
-      const ADbSystem: string = '');
+      const ADbSystem: string = ''; const APoolName: string = '');
     destructor Destroy; override;
     function AcquireConnection: IDBConnection;
     function AcquireQuery(out AQuery: IQuery; ATransaction: ITransaction = nil): IScopeTransaction;
@@ -340,6 +383,8 @@ type
     /// SweepIdleConnections.
     procedure KeepaliveIdleConnections; overload;
     procedure KeepaliveIdleConnections(AKeepaliveSeconds: Integer); overload;
+    /// The metrics' db.client.connection.pool.name (see Create).
+    property PoolName: string read FPoolName;
   end;
 
 /// The OpenTelemetry db.system.name of a dialect name as
@@ -445,8 +490,16 @@ type
     FPool: IDBConnectionPoolInternalActions;
     FInternalConn: IDBConnection;
     FDiscard: Boolean;
+    // The pool's db.client.connection.count{state=used} and .use_time; nil
+    // for an acquire of the initial ramp-up (not counted as use).
+    FMetricUsed: TPcUpDownCounterSeries;
+    FMetricUseTime: TPcHistogramSeries;
+    FAcquiredUs: Int64;
   public
-    constructor Create(APool: IDBConnectionPoolInternalActions; ARealConn: IDBConnection);
+    // AAcquiredUs: PcTickUs when the acquire got the connection.
+    constructor Create(APool: IDBConnectionPoolInternalActions; ARealConn: IDBConnection;
+      AMetricUsed: TPcUpDownCounterSeries = nil; AMetricUseTime: TPcHistogramSeries = nil;
+      AAcquiredUs: Int64 = 0);
     destructor Destroy; override;
     procedure Connect;
     procedure Disconnect(Force: Boolean = False);
@@ -1104,14 +1157,28 @@ end;
 { TConnectionWrapper }
 
 constructor TConnectionWrapper.Create(APool: IDBConnectionPoolInternalActions;
-  ARealConn: IDBConnection);
+  ARealConn: IDBConnection; AMetricUsed: TPcUpDownCounterSeries;
+  AMetricUseTime: TPcHistogramSeries; AAcquiredUs: Int64);
 begin
   FPool := APool;
   FInternalConn := ARealConn;
+  FMetricUsed := AMetricUsed;
+  FMetricUseTime := AMetricUseTime;
+  FAcquiredUs := AAcquiredUs;
+  if Assigned(FMetricUsed) then
+    FMetricUsed.Inc;
 end;
 
 destructor TConnectionWrapper.Destroy;
 begin
+  // Before the release: the connection is "used" until it is idle again.
+  // PcMetrics nil: past PascalCommon.Metrics's finalization, the series are
+  // gone.
+  if Assigned(FMetricUsed) and Assigned(PcMetrics) then
+  begin
+    FMetricUseTime.Observe((PcTickUs - FAcquiredUs) / 1000000);
+    FMetricUsed.Dec;
+  end;
   if Assigned(FPool) then
   begin
     if FDiscard then
@@ -1288,7 +1355,8 @@ end;
 { TConnectionPool }
 
 constructor TConnectionPool.Create(AFactory: IDBFactory; AConfig: IConnectionPoolConfig;
-  AOnEvent: TPoolEventProc; AOnStatement: TStatementEventProc; const ADbSystem: string);
+  AOnEvent: TPoolEventProc; AOnStatement: TStatementEventProc; const ADbSystem: string;
+  const APoolName: string);
 
   // Weak reference to break the TConnectionPool <-> IDBFactory reference cycle
   procedure SetWeak(aInterfaceField: PInterface; const aValue: IInterface);
@@ -1300,6 +1368,12 @@ begin
   FOnEvent := AOnEvent;
   FOnStatement := AOnStatement;
   FDbSystem := ADbSystem;
+  if APoolName <> '' then
+    FPoolName := APoolName
+  else if ADbSystem <> '' then
+    FPoolName := ADbSystem
+  else
+    FPoolName := 'default';
 
   if Assigned(AConfig) then
   begin
@@ -1334,7 +1408,14 @@ begin
   FPool     := TList<TConnectionItem>.Create;
   FLockPool := TCriticalSection.Create;
 
-  CreateInitialConnections;
+  CreateMetrics;
+
+  FRampingUp := True;
+  try
+    CreateInitialConnections;
+  finally
+    FRampingUp := False;
+  end;
 
   if (FIdleTimeoutSeconds > 0) or (FKeepaliveSeconds > 0) then
     StartIdleSweep;
@@ -1351,6 +1432,14 @@ begin
 
   FLockPool.Enter;
   try
+    // Give back what this pool added (see the unit comment). Nothing is in
+    // use: each wrapper holds a reference to the pool.
+    if Assigned(FMetricMax) and Assigned(PcMetrics) then
+    begin
+      FMetricIdle.Add(-FPool.Count);
+      FMetricMax.Add(-FMaxConnections);
+      FMetricIdleMin.Add(-FIniConnections);
+    end;
     FPool.Clear;
     FPool.Free;
   finally
@@ -1369,6 +1458,70 @@ begin
   Result.PoolSize := FPool.Count;
   Result.MaxConnections := FMaxConnections;
   Result.IniConnections := FIniConnections;
+end;
+
+procedure TConnectionPool.CreateMetrics;
+const
+  CLOSE_REASONS: array[TPoolCloseReason] of string = (
+    'connect_failed', 'ping_failed', 'broken', 'idle_timeout');
+var
+  LCount: TPcUpDownCounter;
+  LClosed: TPcCounter;
+  LReason: TPoolCloseReason;
+begin
+  if not Assigned(PcMetrics) then
+    Exit;
+  // Names, units and descriptions of OpenTelemetry's semantic conventions
+  // (database client connection metrics), except the pascaldb.* ones.
+  LCount := PcMetrics.UpDownCounter('db.client.connection.count', '{connection}',
+    'The number of connections that are currently in state described by the state attribute.',
+    ['db.client.connection.state', 'db.client.connection.pool.name']);
+  FMetricIdle := LCount.Labels(['idle', FPoolName]);
+  FMetricUsed := LCount.Labels(['used', FPoolName]);
+  FMetricMax := PcMetrics.UpDownCounter('db.client.connection.max', '{connection}',
+    'The maximum number of open connections allowed.',
+    ['db.client.connection.pool.name']).Labels([FPoolName]);
+  FMetricIdleMin := PcMetrics.UpDownCounter('db.client.connection.idle.min', '{connection}',
+    'The minimum number of idle open connections allowed.',
+    ['db.client.connection.pool.name']).Labels([FPoolName]);
+  FMetricPending := PcMetrics.UpDownCounter('db.client.connection.pending_requests', '{request}',
+    'The number of current pending requests for an open connection.',
+    ['db.client.connection.pool.name']).Labels([FPoolName]);
+  FMetricTimeouts := PcMetrics.Counter('db.client.connection.timeouts', '{timeout}',
+    'The number of connection timeouts that have occurred trying to obtain a connection from the pool.',
+    ['db.client.connection.pool.name']).Labels([FPoolName]);
+  FMetricWaitTime := PcMetrics.Histogram('db.client.connection.wait_time', 's',
+    'The time it took to obtain an open connection from the pool.',
+    ['db.client.connection.pool.name'], PC_DURATION_BUCKETS).Labels([FPoolName]);
+  FMetricCreateTime := PcMetrics.Histogram('db.client.connection.create_time', 's',
+    'The time it took to create a new connection.',
+    ['db.client.connection.pool.name'], PC_DURATION_BUCKETS).Labels([FPoolName]);
+  FMetricUseTime := PcMetrics.Histogram('db.client.connection.use_time', 's',
+    'The time between borrowing a connection and returning it to the pool.',
+    ['db.client.connection.pool.name'], PC_DURATION_BUCKETS).Labels([FPoolName]);
+  FMetricCreated := PcMetrics.Counter('pascaldb.client.connection.created', '{connection}',
+    'Physical connections the pool opened (initial ramp-up and growth under load).',
+    ['db.client.connection.pool.name']).Labels([FPoolName]);
+  LClosed := PcMetrics.Counter('pascaldb.client.connection.closed', '{connection}',
+    'Open connections the pool closed, by reason: connect_failed, ping_failed, broken, idle_timeout.',
+    ['pascaldb.close.reason', 'db.client.connection.pool.name']);
+  for LReason := Low(TPoolCloseReason) to High(TPoolCloseReason) do
+    FMetricClosed[LReason] := LClosed.Labels([CLOSE_REASONS[LReason], FPoolName]);
+
+  FMetricMax.Add(FMaxConnections);
+  FMetricIdleMin.Add(FIniConnections);
+end;
+
+procedure TConnectionPool.MetricIdleAdd(ADelta: Integer);
+begin
+  if Assigned(FMetricIdle) and Assigned(PcMetrics) then
+    FMetricIdle.Add(ADelta);
+end;
+
+procedure TConnectionPool.MetricClosed(AReason: TPoolCloseReason; ACount: Integer);
+begin
+  if Assigned(FMetricClosed[AReason]) and Assigned(PcMetrics) then
+    FMetricClosed[AReason].Add(ACount);
 end;
 
 procedure TConnectionPool.Notify(const AEvent: TPoolEvent);
@@ -1443,6 +1596,7 @@ begin
         LToClose.Add(LItem.Connection);
         Dec(FActiveConnections); // already under FLockPool; see DecrementActiveConnections
       end;
+      MetricIdleAdd(-LToClose.Count);
     finally
       FLockPool.Leave;
     end;
@@ -1463,6 +1617,7 @@ begin
     if LToClose.Count > 0 then
     begin
       PcAtomicAdd64(FTotalIdleSwept, LToClose.Count);
+      MetricClosed(pcrIdleTimeout, LToClose.Count);
       LEvent := BaseEvent(pekIdleSweepClosed);
       LEvent.ClosedCount := LToClose.Count;
       Notify(LEvent);
@@ -1540,6 +1695,9 @@ begin
           // ignore — the connection is being discarded anyway
         end;
         DecrementActiveConnections;
+        // Still idle while it was pinged (out of FPool, not in use).
+        MetricIdleAdd(-1);
+        MetricClosed(pcrPingFailed);
         PcAtomicInc64(FTotalDiscarded);
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrStaleCheckFailed;
@@ -1633,6 +1791,43 @@ var
   RealConnection: IDBConnection;
   LThrottleEvent: TPoolEvent;
   LWaitSpan: IPcSpan;
+  LStartUs: Int64;
+  LPending: Boolean;
+
+  // Before the first wait; undone when the acquire ends, either way.
+  procedure StartPending;
+  begin
+    if LPending or not Assigned(FMetricPending) then
+      Exit;
+    FMetricPending.Inc;
+    LPending := True;
+  end;
+
+  procedure FinishPending;
+  begin
+    if not LPending then
+      Exit;
+    LPending := False;
+    if Assigned(PcMetrics) then
+      FMetricPending.Dec;
+  end;
+
+  // The wrapper of an acquire that got RealConnection: wait_time, and the
+  // wrapper counts it as used (not during the ramp-up, see the unit comment).
+  function Acquired: IDBConnection;
+  var
+    LNowUs: Int64;
+  begin
+    FinishPending;
+    if FRampingUp or not Assigned(FMetricUsed) or not Assigned(PcMetrics) then
+      Result := TConnectionWrapper.Create(Self, RealConnection)
+    else
+    begin
+      LNowUs := PcTickUs;
+      FMetricWaitTime.Observe((LNowUs - LStartUs) / 1000000);
+      Result := TConnectionWrapper.Create(Self, RealConnection, FMetricUsed, FMetricUseTime, LNowUs);
+    end;
+  end;
 
   procedure NotifyThrottledIfWaited;
   begin
@@ -1674,6 +1869,7 @@ var
         ShouldUseFromPool := True;
         ConnectionItem := FPool[FPool.Count - 1];
         FPool.Delete(FPool.Count - 1);
+        MetricIdleAdd(-1);
       end
       else if FActiveConnections < FMaxConnections then
       begin
@@ -1686,8 +1882,11 @@ var
   end;
 
   function TryGetNewConnection(out AConnection: IDBConnection): Boolean;
+  var
+    LCreateUs: Int64;
   begin
     Result := True;
+    LCreateUs := PcTickUs;
     try
       AConnection := NewConnection;
     except
@@ -1704,6 +1903,11 @@ var
       end;
     end;
     PcAtomicInc64(FTotalCreated);
+    if Assigned(FMetricCreated) and Assigned(PcMetrics) then
+    begin
+      FMetricCreateTime.Observe((PcTickUs - LCreateUs) / 1000000);
+      FMetricCreated.Inc;
+    end;
     Notify(BaseEvent(pekConnectionCreated));
   end;
 
@@ -1725,6 +1929,7 @@ var
           finally
             DecrementActiveConnections;
           end;
+          MetricClosed(pcrConnectFailed);
           PcAtomicInc64(FTotalDiscarded);
           LEvent := BaseEvent(pekConnectionDiscarded);
           LEvent.DiscardReason := pdrConnectFailed;
@@ -1746,6 +1951,7 @@ var
         finally
           DecrementActiveConnections;
         end;
+        MetricClosed(pcrPingFailed);
         PcAtomicInc64(FTotalDiscarded);
         LEvent := BaseEvent(pekConnectionDiscarded);
         LEvent.DiscardReason := pdrStaleCheckFailed;
@@ -1762,6 +1968,8 @@ var
 begin
   WaitAttempts := 0;
   LWaitSpan := nil;
+  LPending := False;
+  LStartUs := PcTickUs;
   try
     while True do
     begin
@@ -1776,7 +1984,7 @@ begin
         begin
           NotifyThrottledIfWaited;
           FinishWaitSpan(nil);
-          Result := TConnectionWrapper.Create(Self, RealConnection);
+          Result := Acquired;
           Exit;
         end;
         Result := nil;
@@ -1791,13 +1999,15 @@ begin
         end;
         NotifyThrottledIfWaited;
         FinishWaitSpan(nil);
-        Result := TConnectionWrapper.Create(Self, RealConnection);
+        Result := Acquired;
         Exit;
       end;
 
       if WaitAttempts >= FWaitMaxAttemps then
       begin
         PcAtomicInc64(FTotalTimeouts);
+        if Assigned(FMetricTimeouts) and Assigned(PcMetrics) then
+          FMetricTimeouts.Inc;
         LThrottleEvent := BaseEvent(pekAcquireTimeout);
         LThrottleEvent.WaitAttempts := WaitAttempts;
         Notify(LThrottleEvent);
@@ -1807,6 +2017,7 @@ begin
       end;
 
       StartWaitSpan;
+      StartPending;
       TSleep.Sleep(FWaitMilliseconds);
       Inc(WaitAttempts);
     end;
@@ -1815,6 +2026,7 @@ begin
     // with it. A bare "raise" only (see BuildDatabaseException).
     on E: Exception do
     begin
+      FinishPending;
       FinishWaitSpan(E);
       raise;
     end;
@@ -1890,6 +2102,7 @@ begin
   FLockPool.Enter;
   try
     FPool.Add(TConnectionItem.New(LRealConn));
+    MetricIdleAdd(1);
   finally
     FLockPool.Leave;
   end;
@@ -1916,6 +2129,7 @@ begin
   end;
 
   DecrementActiveConnections;
+  MetricClosed(pcrBroken);
   PcAtomicInc64(FTotalDiscarded);
   LEvent := BaseEvent(pekConnectionDiscarded);
   LEvent.DiscardReason := pdrBrokenAfterUse;

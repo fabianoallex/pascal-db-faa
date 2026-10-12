@@ -33,6 +33,7 @@ uses
   PascalDb.SqlLoaderTests in 'PascalDb.SqlLoaderTests.pas',
   PascalDb.MockTests in 'PascalDb.MockTests.pas',
   PascalDb.PoolTests in 'PascalDb.PoolTests.pas',
+  PascalDb.PoolMetricsTests in 'PascalDb.PoolMetricsTests.pas',
   PascalDb.SqlSourcesTests in 'PascalDb.SqlSourcesTests.pas',
   PascalDb.AdapterBaseTests in 'PascalDb.AdapterBaseTests.pas',
   PascalDb.PagingTests in 'PascalDb.PagingTests.pas',

@@ -158,7 +158,8 @@ them. Moved in the pilot migration (pascal-common-faa's plan, phase F6, 2026-10-
   `PASCALCOMMON_VERSION < 10800` stops the build with "pascal-db-faa needs pascal-common-faa 1.8.0
   or later" (measured by raising the bound: lazbuild "Fatal: (2022) User defined: ...", Delphi 12
   "F1054 ..."). 1.3.0 brought `PascalCommon.SafeLog`, 1.4.0 `PascalCommon.Utf8` (behind
-  `PdbUtf8BytesToString` since 0.12.1), 1.7.0 `PascalCommon.Tracing` and 1.8.0 its detached spans (the
+  `PdbUtf8BytesToString` since 0.12.1), 1.6.0 `PascalCommon.Metrics` (the pool metrics since
+  0.14.0: "Metrics" in docs/pool.md), 1.7.0 `PascalCommon.Tracing` and 1.8.0 its detached spans (the
   spans: "Spans (tracing)" in docs/pool.md); only additions within 1.x; `pascal_db_faa.lpk` has
   `MinVersion Major="1" Minor="8"`. Raise both when the library starts using something newer.
 - **Checkout without `--recursive`**: pascal-common-faa's own `external/pascal-jsonmapper-faa` is
@@ -310,6 +311,12 @@ them the driver's quirks):
   need nothing for them. Timed with `PcTickUs`: `PcTickMs` (`GetTickCount64`) moves in 15-16 ms
   steps on Windows (measured). No parameter values on purpose (secrets in logs; `IParams` can't
   list them).
+- Pool metrics (`db.client.connection.*` on `PcMetrics`, "Metrics" in docs/pool.md) are recorded
+  by `TConnectionPool` and `TConnectionWrapper`, adapters need nothing. Always deltas on series
+  looked up once in the constructor: the registry is process-wide and never drops a series, so the
+  destructor gives back what the pool added. Tests (`PoolMetricsTests`) name each pool after the
+  test and compare differences of counters. Measured cost: a few hundred ns per acquire + release
+  (FPC Win64, one thread), nothing visible under contention.
 - Batches (`PascalDb.Batch`, `TBatch.New(Query, Sql, MaxRows)`): the rows are buffered with one
   type per parameter and sent `MaxRows` at a time, through `INativeBatchQuery` when the adapter's
   query says `SupportsNativeBatch` (FireDAC's Array DML), otherwise one `ExecSql` per row (SQLdb,
