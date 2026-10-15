@@ -53,6 +53,18 @@
   StrsTrim2Len reads it cut to n characters, StringFormat=Choose still
   fails, the map rule reads it whole (as a TWideMemoField). The size counts
   characters, not bytes (100 x 'ã' read fine without the rule).
+  Also FormatOptions.StrsTrim = False: with FireDAC's default (True), 'abc  '
+  written through a parameter or an Array DML batch was stored as 'abc'
+  (LENGTH 3), and a value stored with its spaces (a literal) was read back
+  as 'abc', on VARCHAR columns too, with or without the map rule. SQLdb and
+  Zeos keep them; SQLite never pads, so nothing else changes. Left at the
+  default for the other databases, measured with a bare TFDConnection
+  (Win32 and Win64; PostgreSQL Win64 only): Firebird 2.5, PostgreSQL, MySQL
+  and MariaDB never trim a VARCHAR on write or read; StrsTrim only strips a
+  CHAR(n)'s padding, and on Firebird a CHAR(10) in UTF8 read with
+  StrsTrim = False failed with "[DatS]-32 ... column [C] overflow. Value
+  length - [40], column maximum length - [10]" (40 bytes against 10
+  characters), or came back as 40 characters through the memo rule.
 
   MySQL/MariaDB (CharacterSet=utf8mb4: their utf8 has no 4-byte
   characters). The client loads its authentication plugins (among them
@@ -832,6 +844,8 @@ begin
       LRule := LConn.FormatOptions.MapRules.Add;
       LRule.SourceDataType := dtWideString;
       LRule.TargetDataType := dtWideMemo;
+      // Trailing spaces: see the unit header.
+      LConn.FormatOptions.StrsTrim := False;
     end;
     // Lock timeout: see the unit header.
     if AConfig.LockTimeoutMs > 0 then

@@ -28,9 +28,9 @@ const
   PASCALDB_VERSION_PATCH = 1;
 
   /// major * 10000 + minor * 100 + patch: 0.11.0 is 1100, 1.2.3 is 10203.
-  PASCALDB_VERSION = 1401;
+  PASCALDB_VERSION = 1402;
 
-  PASCALDB_VERSION_STRING = '0.14.1';
+  PASCALDB_VERSION_STRING = '0.14.2';
 
 implementation
 

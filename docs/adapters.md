@@ -146,6 +146,8 @@ program.
   adds; gotcha 50). To reject such a value, add a check to the column, `NAME VARCHAR(100) CHECK
   (length(NAME) <= 100)`: the `INSERT` then raises `EConstraintViolationException` with
   `Kind = cvCheck`. `STRICT` tables don't help: they accept only `TEXT`, which has no size.
+- Trailing spaces are kept on every adapter (FireDAC trims them by default; the adapter turns that
+  off on SQLite, gotcha 52).
 - `CREATE TABLE IF NOT EXISTS`, `RETURNING`, savepoints and transactional DDL all work.
 
 ## MySQL and MariaDB notes

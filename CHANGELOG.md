@@ -6,6 +6,15 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-15
+
+### Fixed
+
+- FireDAC + SQLite: trailing spaces were dropped, on write (a parameter or a batch stored `'abc  '`
+  as `'abc'`) and on read, `VARCHAR` columns included (FireDAC's `FormatOptions.StrsTrim`). The
+  adapter now turns it off on SQLite, so values are kept as written, as SQLdb and Zeos already did.
+  The other databases are unchanged: FireDAC never trimmed a `VARCHAR` there. See gotcha 52.
+
 ## [0.14.1] - 2026-10-15
 
 ### Fixed
@@ -448,6 +457,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.14.2]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.12.1...v0.13.0

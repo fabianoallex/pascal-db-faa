@@ -444,3 +444,17 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     through `GetData` into a buffer of `Size` characters (`Data.DB.pas`). Fix:
     `TDataSetQueryBase.FieldValue` reads a non-null `TWideStringField` through `AsString` on
     Delphi. Contract test `TextLongerThanDeclared_ReadsBackWhole`.
+52. **FireDAC + SQLite: trailing spaces are dropped on write and on read.** `'abc  '` written
+    through a parameter or an Array DML batch was stored as `'abc'` (`LENGTH` 3), and a value
+    stored with its spaces (written as a literal) was read back as `'abc'`, on a `VARCHAR` column
+    too; `'  '` became `''`. Cause: `FormatOptions.StrsTrim`, `True` by default, which on SQLite
+    applies to every string, with or without the map rule of gotcha 50. Measured with a bare
+    `TFDConnection` (Delphi 12 CE, Win32 and Win64; FireDAC's linked SQLite 3.42.0); SQLdb and Zeos kept the
+    spaces on every database (FPC 3.2.2 Win64). Fix: on SQLite the FireDAC adapter sets
+    `StrsTrim := False` (SQLite never pads, so nothing else changes). The other databases keep
+    FireDAC's default, measured the same way: Firebird 2.5, PostgreSQL 17 (Win64), MySQL 8.4 and
+    MariaDB 11.4 never trimmed a `VARCHAR` on write or read, and `StrsTrim` only stripped a
+    `CHAR(n)`'s padding. On Firebird it has to stay: a `CHAR(10)` in a UTF8 connection read with
+    `StrsTrim = False` failed with "[FireDAC][DatS]-32. Variable length column [C] overflow. Value
+    length - [40], column maximum length - [10]" (bytes against characters), and through a memo map
+    rule came back as 40 characters. Contract test `TrailingSpaces_AreKept`.

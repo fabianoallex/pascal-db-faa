@@ -78,6 +78,10 @@ function IntegrationSchemaVersion: Integer;
 /// Server; '' where the database can't (MySQL; MariaDB can since 10.5).
 function InsertReturningSql: string;
 
+/// SQL for the number of characters of the text column ACol, trailing spaces
+/// included (SQL Server's LEN ignores them: DATALENGTH of an NVARCHAR / 2).
+function CharLengthSql(const ACol: string): string;
+
 /// Whether the database stores a text longer than its column's VARCHAR(n)
 /// instead of rejecting it: SQLite (it doesn't enforce the size).
 function StoresTextLongerThanDeclared: Boolean;
@@ -217,6 +221,16 @@ begin
     engSqlServer: Result := 'INSERT INTO ITEMS (ID, NAME) OUTPUT INSERTED.ID, INSERTED.NAME VALUES (:ID, :NAME)';
   else
     Result := 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME) RETURNING ID, NAME';
+  end;
+end;
+
+function CharLengthSql(const ACol: string): string;
+begin
+  case Engine of
+    engFirebird, engMySQL, engMariaDB: Result := 'CHAR_LENGTH(' + ACol + ')';
+    engSqlServer: Result := '(DATALENGTH(' + ACol + ') / 2)';
+  else
+    Result := 'LENGTH(' + ACol + ')';
   end;
 end;
 

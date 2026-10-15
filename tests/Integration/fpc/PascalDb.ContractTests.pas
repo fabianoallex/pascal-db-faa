@@ -16,7 +16,8 @@
   optional columns through SQL tags, an INSERT returning its row through
   Open (RETURNING, or OUTPUT on SQL Server; not on MySQL), UTF-8 text,
   text longer than its VARCHAR(n) read back whole (SQLite only, the one
-  database that stores it),
+  database that stores it), trailing spaces kept through ExecSql and a
+  batch,
   commit/rollback, nested scopes with savepoints, constraint violations
   raised as EConstraintViolationException of the right kind (unique key
   through ExecSql, Open, a batch and ITransaction.ExecSql; foreign key on
@@ -83,6 +84,7 @@ type
     procedure InsertReturning_ViaOpen;
     procedure Utf8Text_RoundTrip;
     procedure TextLongerThanDeclared_ReadsBackWhole;
+    procedure TrailingSpaces_AreKept;
     procedure Commit_Persists;
     procedure Rollback_Discards;
     procedure NestedScope_RollbackToSavepoint_KeepsOuterWork;
@@ -571,6 +573,53 @@ begin
       LQuery.Params.Integers['ID'] := 3003;
       LQuery.Params.Strings['NAME'] := LLong + '!';
       TAssert.AssertEquals('RETURNING: the whole value', LLong + '!', LQuery.Open.Strings['NAME']);
+    end;
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+procedure TContractTests.TrailingSpaces_AreKept;
+const
+  VALUES_: array[0..3] of string = ('abc  ', '  ', 'xyz   ', 'b ');
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LBatch: IBatch;
+  LResult: IQueryResult;
+  I: Integer;
+begin
+  // A VARCHAR keeps trailing spaces on every database. FireDAC on SQLite
+  // dropped them when writing and when reading (FormatOptions.StrsTrim,
+  // gotcha 52). The length comes from the database, so a value cut on the
+  // way in fails here even when the reading cuts it too. The first two go
+  // through ExecSql, the others through a batch (FireDAC's Array DML).
+  InsertItem(4001, VALUES_[0]);
+  InsertItem(4002, VALUES_[1]);
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LBatch := TBatch.New(LQuery, 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME)');
+    for I := 2 to 3 do
+    begin
+      LBatch.Params.Integers['ID'] := 4001 + I;
+      LBatch.Params.Strings['NAME'] := VALUES_[I];
+      LBatch.AddRow;
+    end;
+    LBatch.Execute;
+    LBatch := nil;
+    LQuery.Sql := 'SELECT ID, NAME, ' + CharLengthSql('NAME') + ' AS LN FROM ITEMS WHERE ID BETWEEN 4001 AND 4004 ORDER BY ID';
+    LResult := LQuery.Open;
+    for I := 0 to 3 do
+    begin
+      TAssert.AssertFalse('Row ' + IntToStr(4001 + I) + ' must exist', LResult.Eof);
+      TAssert.AssertEquals('Stored length of row ' + IntToStr(4001 + I), Length(VALUES_[I]),
+        LResult.Integers['LN']);
+      TAssert.AssertEquals('Value read from row ' + IntToStr(4001 + I), VALUES_[I], LResult.Strings['NAME']);
+      TAssert.AssertEquals('FieldValue of row ' + IntToStr(4001 + I), VALUES_[I], string(LResult.FieldValue(1)));
+      LResult.Next;
     end;
     LScope.Commit;
   except
