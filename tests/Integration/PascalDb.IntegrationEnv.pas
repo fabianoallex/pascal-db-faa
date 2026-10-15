@@ -78,6 +78,10 @@ function IntegrationSchemaVersion: Integer;
 /// Server; '' where the database can't (MySQL; MariaDB can since 10.5).
 function InsertReturningSql: string;
 
+/// Whether the database stores a text longer than its column's VARCHAR(n)
+/// instead of rejecting it: SQLite (it doesn't enforce the size).
+function StoresTextLongerThanDeclared: Boolean;
+
 /// Whether the database can defer a foreign key check to the commit
 /// (ITEM_LINKS.ITEM_ID is DEFERRABLE INITIALLY DEFERRED there): PostgreSQL
 /// and SQLite.
@@ -214,6 +218,11 @@ begin
   else
     Result := 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME) RETURNING ID, NAME';
   end;
+end;
+
+function StoresTextLongerThanDeclared: Boolean;
+begin
+  Result := IsSQLite;
 end;
 
 function SupportsDeferredConstraints: Boolean;

@@ -398,7 +398,9 @@ connect. What the adapters add, all measured on FPC (SQLdb, Zeos) unless noted:
 - FireDAC (Delphi 12 CE): `FireDAC.Phys.SQLite` + `FireDAC.Phys.SQLiteWrapper.Stat` (the engine
   is linked in, no `VendorLib`), and, unless the settings say otherwise, `LockingMode=Normal`,
   `SharedCache=False`, `StringFormat=Unicode`, `BusyTimeout=5000` and
-  `UpdateOptions.LockWait = True` (gotcha 25).
+  `UpdateOptions.LockWait = True` (gotcha 25); always a `FormatOptions.MapRules` entry
+  `dtWideString` → `dtWideMemo`, because SQLite stores a text longer than its `VARCHAR(n)` and
+  FireDAC refused to read it back (`[FireDAC][DatS]-32 ... overflow`; gotcha 50).
 - foreign keys turned on (SQLdb and Zeos `foreign_keys=ON`, FireDAC `ForeignKeys=On`) unless the
   settings say otherwise: SQLite doesn't check them by default (gotcha 45).
 SQLite's types are loose: a `NUMERIC(15,2)` is stored as `REAL`, so money keeps a `Double`'s
@@ -492,7 +494,7 @@ serializing Firebird connects in the Zeos adapter.
 
 ## Gotchas
 
-The numbered gotchas (symptom → cause → fix, 1–49) live in [`docs/gotchas.md`](docs/gotchas.md).
+The numbered gotchas (symptom → cause → fix, 1–51) live in [`docs/gotchas.md`](docs/gotchas.md).
 Read it before touching the pool, an adapter, resources or anything that differs between
 Delphi and FPC, and add new ones there, keeping the numbering. References in this file
 ("gotcha 17") point to it.

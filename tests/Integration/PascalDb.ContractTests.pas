@@ -9,6 +9,8 @@
   library's own engine), a round trip of every parameter type, typed NULLs,
   optional columns through SQL tags, an INSERT returning its row through
   Open (RETURNING, or OUTPUT on SQL Server; not on MySQL), UTF-8 text,
+  text longer than its VARCHAR(n) read back whole (SQLite only, the one
+  database that stores it),
   commit/rollback, nested scopes with savepoints, constraint violations
   raised as EConstraintViolationException of the right kind (unique key
   through ExecSql, Open, a batch and ITransaction.ExecSql; foreign key on
@@ -43,6 +45,7 @@ uses
   PascalDb.DUnitXCompat,
   Classes,
   SysUtils,
+  StrUtils,
   PascalDb.Interfaces,
   PascalCommon.Optionals,
   PascalDb.Migrations,
@@ -76,6 +79,7 @@ type
     [Test] procedure OptionalColumn_ProvidedByTag_IsStored;
     [Test] procedure InsertReturning_ViaOpen;
     [Test] procedure Utf8Text_RoundTrip;
+    [Test] procedure TextLongerThanDeclared_ReadsBackWhole;
     [Test] procedure Commit_Persists;
     [Test] procedure Rollback_Discards;
     [Test] procedure NestedScope_RollbackToSavepoint_KeepsOuterWork;
@@ -521,6 +525,50 @@ begin
     LQuery.Sql := 'SELECT NAME FROM ITEMS WHERE ID = 6';
     TAssert.AssertEquals('Non-ASCII text must survive the database round trip',
       'São Paulo → ok', LQuery.Open.Strings['NAME']);
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+procedure TContractTests.TextLongerThanDeclared_ReadsBackWhole;
+var
+  LLong: string;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LResult: IQueryResult;
+  LNames: string;
+begin
+  // ITEMS.NAME is VARCHAR(100). Only SQLite stores a longer value (it
+  // doesn't enforce the size); FireDAC then refused to read the row,
+  // "[FireDAC][DatS]-32. Variable length column [NAME] overflow", until the
+  // adapter mapped SQLite strings to memo fields (gotcha 50), and Zeos on
+  // Delphi cut FieldValue to 100 characters (gotcha 51). No trailing space:
+  // FireDAC drops it when binding the parameter (another matter).
+  if not StoresTextLongerThanDeclared then
+    Exit;
+  LLong := DupeString('São Paulo→', 18); // 180 characters
+  InsertItem(3001, 'short');
+  InsertItem(3002, LLong);
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := 'SELECT ID, NAME FROM ITEMS WHERE ID IN (3001, 3002) ORDER BY ID';
+    LResult := LQuery.Open;
+    LNames := LResult.Strings['NAME'];
+    LResult.Next;
+    TAssert.AssertEquals('Strings: the whole value', LLong, LResult.Strings['NAME']);
+    TAssert.AssertEquals('NullableStrings: the whole value', LLong, LResult.NullableStrings['NAME'].Value);
+    TAssert.AssertEquals('FieldValue: the whole value', LLong, string(LResult.FieldValue(1)));
+    TAssert.AssertEquals('The short row reads normally', 'short', LNames);
+    if InsertReturningSql <> '' then
+    begin
+      LQuery.Sql := InsertReturningSql;
+      LQuery.Params.Integers['ID'] := 3003;
+      LQuery.Params.Strings['NAME'] := LLong + '!';
+      TAssert.AssertEquals('RETURNING: the whole value', LLong + '!', LQuery.Open.Strings['NAME']);
+    end;
     LScope.Commit;
   except
     LScope.Rollback;

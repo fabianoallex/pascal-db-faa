@@ -6,6 +6,23 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-15
+
+### Fixed
+
+- FireDAC + SQLite: a row whose text is longer than its column's `VARCHAR(n)` (SQLite stores it,
+  the size isn't enforced) made every query including it fail on `Open` with `EFDException`
+  "[FireDAC][DatS]-32. Variable length column [...] overflow"; an `INSERT ... RETURNING` of such a
+  value failed the same way. The adapter now maps SQLite strings to memo fields
+  (`FormatOptions.MapRules`, `dtWideString` → `dtWideMemo`), so the whole value is read, as SQLdb
+  and Zeos already did. `IQueryResult` reads them as before; code that reaches the `TFDQuery`
+  itself sees a `TWideMemoField` instead of a `TWideStringField`. See gotcha 50, which also
+  recommends `CHECK (length(...) <= n)` to reject such values (`EConstraintViolationException`,
+  `cvCheck`).
+- Zeos on Delphi: `IQueryResult.FieldValue` returned a string longer than its column's declared
+  size (SQLite) cut to that size, where `Strings` returned it whole. `FieldValue` now reads a
+  string field through `AsString` on Delphi (gotcha 51).
+
 ## [0.14.0] - 2026-10-12
 
 ### Added
@@ -431,6 +448,7 @@ the unit suite, the contract suite and the samples on Linux FPC for SQLdb and Ze
 5, PostgreSQL 17 and SQLite; the Delphi side is run in the IDE. The full matrix is in the
 README.
 
+[0.14.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/fabianoallex/pascal-db-faa/compare/v0.12.0...v0.12.1

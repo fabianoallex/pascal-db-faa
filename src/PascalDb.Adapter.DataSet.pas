@@ -536,7 +536,19 @@ begin
 end;
 
 function TDataSetQueryBase.FieldValue(AIndex: Integer): Variant;
+{$IFNDEF FPC}
+var
+  LField: TField;
+{$ENDIF}
 begin
+  {$IFNDEF FPC}
+  // Delphi's TWideStringField.GetAsVariant reads through GetData into a
+  // buffer of the field's Size, so a longer value came back cut to Size
+  // (Zeos on SQLite, gotcha 51); AsString is the driver's own reading.
+  LField := DataSet.Fields[AIndex];
+  if (LField is TWideStringField) and not LField.IsNull then
+    Exit(LField.AsString);
+  {$ENDIF}
   Result := DataSet.Fields[AIndex].AsVariant;
 end;
 

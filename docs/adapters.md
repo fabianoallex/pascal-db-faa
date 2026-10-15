@@ -141,6 +141,11 @@ program.
   timeout to share a file across a pool; the adapter sets them unless the settings do (gotcha 25).
 - Types are loose: a `NUMERIC(15,2)` is stored as a floating-point `REAL`, so money keeps a
   `Double`'s precision, not an exact decimal.
+- Sizes aren't enforced either: a `VARCHAR(100)` column stores a 150-character text. Every
+  adapter reads it back whole (FireDAC needs a map rule to strings as memo fields, which the adapter
+  adds; gotcha 50). To reject such a value, add a check to the column, `NAME VARCHAR(100) CHECK
+  (length(NAME) <= 100)`: the `INSERT` then raises `EConstraintViolationException` with
+  `Kind = cvCheck`. `STRICT` tables don't help: they accept only `TEXT`, which has no size.
 - `CREATE TABLE IF NOT EXISTS`, `RETURNING`, savepoints and transactional DDL all work.
 
 ## MySQL and MariaDB notes

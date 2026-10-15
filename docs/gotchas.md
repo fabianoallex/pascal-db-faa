@@ -417,3 +417,30 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     3.40). Found with a probe in the contract test (`Open` raised, `Close` and `Rollback` didn't,
     releasing the query did). Fix: on SQLite the Zeos adapter's `DoOpen` unprepares the query right
     after a failed `Open`, ignoring that second error.
+50. **FireDAC + SQLite: a text longer than its `VARCHAR(n)` can't be read back.** SQLite doesn't
+    enforce the size: a 150-character value goes into a `VARCHAR(100)` column through every adapter.
+    FireDAC sizes the column's field to the declared `n` and refuses the row on `Open`:
+    `EFDException` "[FireDAC][DatS]-32. Variable length column [NAME] overflow. Value length -
+    [150], column maximum length - [100]" (`FDCode` 32, not classified by the library), for every
+    query that includes the row (a list too), until the row is fixed; an `INSERT ... RETURNING` of
+    such a value fails the same way, after the insert ran. Measured with Delphi 12 CE, Win32 and
+    Win64, FireDAC's linked SQLite 3.42.0: the limit counts characters (100 × `ã` read fine, 101
+    × `a` failed); an expression or a `CAST` (even `CAST(NAME AS VARCHAR(100))`) read the whole
+    value; on a bare `TFDQuery`, `FormatOptions.StrsTrim2Len` read it cut to 100 characters and
+    `StringFormat=Choose` still failed. SQLdb and Zeos (FPC 3.2.2 Win64, SQLite 3.53.4) read all
+    150 characters. Fix: on SQLite the FireDAC adapter adds a `FormatOptions.MapRules` entry
+    `dtWideString` → `dtWideMemo` to every connection, so a `VARCHAR` column is read whole, as a
+    `TWideMemoField` (`IQueryResult` reads it as any string). Contract test
+    `TextLongerThanDeclared_ReadsBackWhole`. To keep such values out, declare a
+    `CHECK (length(NAME) <= 100)`: SQLite rejects the `INSERT` and the adapters raise
+    `EConstraintViolationException` with `Kind = cvCheck` (measured on the three). `STRICT` tables
+    don't help: they reject `VARCHAR(100)` as a type ("unknown datatype") and allow only `TEXT`,
+    which has no size.
+51. **Delphi: `TWideStringField.AsVariant` cuts a value to the field's `Size`.** Zeos on Delphi
+    read a 180-character text from a SQLite `VARCHAR(100)` whole through `AsString`, but
+    `IQueryResult.FieldValue` (`TField.AsVariant`) returned its first 100 characters (Delphi 12 CE,
+    Win32 and Win64; Zeos on FPC returned it whole). Zeos's `TZUnicodeStringField` overrides
+    `GetAsString` but not `GetAsVariant`, and Delphi's `TWideStringField.GetAsVariant` reads
+    through `GetData` into a buffer of `Size` characters (`Data.DB.pas`). Fix:
+    `TDataSetQueryBase.FieldValue` reads a non-null `TWideStringField` through `AsString` on
+    Delphi. Contract test `TextLongerThanDeclared_ReadsBackWhole`.

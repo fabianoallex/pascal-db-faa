@@ -43,6 +43,16 @@
     ForeignKeys=On      SQLite checks foreign keys only when the connection
                         asks for it (set explicitly, whatever FireDAC's
                         default is).
+  and, always, a FormatOptions.MapRules entry dtWideString -> dtWideMemo.
+  SQLite doesn't enforce a VARCHAR(n) size and stores a longer value, but
+  FireDAC sizes a VARCHAR(n) column's field to n characters and refused to
+  read the row: "[FireDAC][DatS]-32. Variable length column [NAME]
+  overflow. Value length - [150], column maximum length - [100]" (EFDException,
+  raised by Open, Win32 and Win64; the INSERT itself succeeded). SQLdb and
+  Zeos read the whole value. Measured with a bare TFDQuery on such a row:
+  StrsTrim2Len reads it cut to n characters, StringFormat=Choose still
+  fails, the map rule reads it whole (as a TWideMemoField). The size counts
+  characters, not bytes (100 x 'ã' read fine without the rule).
 
   MySQL/MariaDB (CharacterSet=utf8mb4: their utf8 has no 4-byte
   characters). The client loads its authentication plugins (among them
@@ -787,6 +797,7 @@ function TFDProvider.BuildConnection(AConfig: IDatabaseConfig): IDBConnection;
 var
   LConn: TFDConnection;
   LParams: TStrings;
+  LRule: TFDMapRule;
   I: Integer;
 begin
   LParams := AConfig.ConnectionParams;
@@ -816,6 +827,11 @@ begin
         else
           LConn.Params.Values['BusyTimeout'] := '5000';
       LConn.UpdateOptions.LockWait := True;
+      // VARCHAR(n) holding more than n characters: see the unit header.
+      LConn.FormatOptions.OwnMapRules := True;
+      LRule := LConn.FormatOptions.MapRules.Add;
+      LRule.SourceDataType := dtWideString;
+      LRule.TargetDataType := dtWideMemo;
     end;
     // Lock timeout: see the unit header.
     if AConfig.LockTimeoutMs > 0 then
