@@ -8,6 +8,13 @@ core, in adapters.
 For the general dual-compiler rules (project anatomy, `.inc`, mirrored tests, CI), use the
 `dual-compiler-delphi-lazarus` skill. This file records only what is specific to this repo.
 
+**The `dual-compiler-delphi-lazarus` skill is not in this repository.** It lives in
+[pascal-skills-faa](https://github.com/fabianoallex/pascal-skills-faa), a Claude Code plugin and marketplace. If the skill
+isn't loaded in this session, ask the user to install it (user scope, so it also reaches an
+application that uses this library as a submodule): `/plugin marketplace add fabianoallex/pascal-skills-faa`, then
+`/plugin install pascal-skills-faa@pascal-skills-faa`. The index of every
+`*-faa` library is its `dual-compiler-delphi-lazarus/references/faa-libraries.md`.
+
 ---
 
 ## Language
@@ -274,8 +281,9 @@ The FPCUnit runner does both.
   `ReportMemoryLeaksOnShutdown` on Delphi).
 - Floating point **always with an explicit delta** (`AssertEquals(E, A, 0)` for exact). See
   gotcha 5.
-- `python ../skills/dual-compiler-delphi-lazarus/scripts/verify_test_mirrors.py --root .
-  --ignore-glob /lib/` is a second check, independent of the generator.
+- `python <pascal-skills-faa>/dual-compiler-delphi-lazarus/scripts/verify_test_mirrors.py --root .
+  --ignore-glob /lib/` (a clone of pascal-skills-faa; `../skills` on the author's machine) is a
+  second check, independent of the generator.
 
 ---
 
