@@ -6,6 +6,23 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-16
+
+### Changed
+
+- **Breaking:** `TSQLResult.ProcessTag`, `ReplaceLiteral`, `ApplyOperator` and `ApplyFilter`
+  return a changed copy and no longer change the record they are called on. Chains and
+  `LSql := LSql.ProcessTag(...)` work as before; a call whose result is ignored
+  (`LSql.ProcessTag(...);`, which `docs/sql.md` used to describe) now does nothing and compiles
+  without a warning: assign the result. Nothing in this repository or its samples relied on it.
+
+### Fixed
+
+- `TSQLResult` called on a `const` parameter (`ASql.ReplaceLiteral(...)`, `ASql.ProcessTag(...)`,
+  or just reading `ASql.SQL` when the SQL has a `COMMENTS` block) leaked one string per call on
+  FPC Linux, changed the caller's variable on FPC and Delphi Win64, and raised "Invalid pointer
+  operation" on Delphi Win32. See gotcha 53.
+
 ## [0.14.2] - 2026-10-15
 
 ### Fixed

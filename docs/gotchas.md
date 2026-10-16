@@ -458,3 +458,19 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     `StrsTrim = False` failed with "[FireDAC][DatS]-32. Variable length column [C] overflow. Value
     length - [40], column maximum length - [10]" (bytes against characters), and through a memo map
     rule came back as 40 characters. Contract test `TrailingSpaces_AreKept`.
+53. **A record method that changes `Self`, called on a `const` parameter.** Until 0.14.x,
+    `TSQLResult.ProcessTag`/`ReplaceLiteral`/`ApplyOperator`/`ApplyFilter` changed `Self` and
+    returned it, and the `.SQL` getter dropped the `COMMENTS` block from `Self`. Called on a
+    `const ASql: TSQLResult` (found in pascal-api-infra-faa's `TTenantFilter.Prepare`), the
+    method writes to a record the callee doesn't own: the record (one string, pointer-sized) can
+    arrive as a copy whose string got no reference of its own, or as a pointer to the caller's
+    variable, depending on the platform. Measured with a heap-allocated SQL, 3 calls per
+    operation: FPC 3.2.2 Linux x86_64 and i386, 1 block leaked per call and the caller unchanged;
+    FPC 3.2.2 Win64 and Delphi 12 CE Win64, no leak but the caller's variable came back changed;
+    Delphi 12 CE Win32, the caller's variable changed (`ProcessTag`, `ApplyFilter`, `.SQL`: `Delete`
+    worked in place on a string whose count said 1), and `ReplaceLiteral` raised "Invalid pointer
+    operation" and leaked a `UnicodeString`. A SQL with nothing to replace showed nothing
+    (`StringReplace` returns the same string). Fix (0.15.0): every operation works on a local
+    copy and returns it, `Self` is never written. Tests `Test_ConstParam_*` and
+    `Test_Operations_ReturnACopy`. Elsewhere: in a record method that writes `Self`, take the
+    record as `constref` or copy it into a local before calling it.

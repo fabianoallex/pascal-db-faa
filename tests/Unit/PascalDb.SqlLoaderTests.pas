@@ -4,7 +4,10 @@
   ProcessTag keeping and removing blocks, repeated tags, optional spaces in
   both markers, pairing each opening with its own closing, the errors for
   malformed blocks, removal of COMMENTS and of leftover tags, ReplaceLiteral,
-  ApplyOperator and ApplyFilter. Resource loading is not covered.
+  ApplyOperator and ApplyFilter, and that every operation returns a changed
+  copy and leaves the record it was called on alone (a const parameter
+  included: changing Self there leaked on FPC Linux and changed the
+  caller's variable on Windows). Resource loading is not covered.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
   PascalDb.DUnitXCompat). The mirror in tests/Unit/fpc is generated from the
@@ -80,6 +83,17 @@ type
 
     { ApplyFilter: removes the block when HasValue=False }
     [Test] procedure Test_ApplyFilter_WithoutValue;
+
+    { Each operation called on a const parameter: the caller's variable is
+      left as it was, and nothing leaks }
+    [Test] procedure Test_ConstParam_ReplaceLiteral_LeavesCallerUnchanged;
+    [Test] procedure Test_ConstParam_ProcessTag_LeavesCallerUnchanged;
+    [Test] procedure Test_ConstParam_ApplyFilter_LeavesCallerUnchanged;
+    [Test] procedure Test_ConstParam_GetSQL_LeavesCallerUnchanged;
+
+    { A call whose result is ignored changes nothing; assigning the result
+      back to the same variable applies it }
+    [Test] procedure Test_Operations_ReturnACopy;
   end;
 
 implementation
@@ -292,6 +306,109 @@ begin
     .ApplyFilter('FILTER', '=', False)
     .SQL;
   TAssert.AssertEquals('ApplyFilter(False) must remove the FILTER block', 'SELECT * FROM CUSTOMERS WHERE 1=1', Trim(LResult));
+end;
+
+// The callers' SQL is built at run time, so it is a reference-counted string
+// on the heap (a literal has no reference count, and would hide a leak or a
+// reference count dropped one time too many).
+function HeapSql(const ASql: string): TSQLResult;
+var
+  S: string;
+begin
+  S := '';
+  S := S + ASql;
+  Result := TSQLResult.From(S);
+end;
+
+function ReplaceOnConst(const ASql: TSQLResult): string;
+begin
+  Result := ASql.ReplaceLiteral('TABLE', 'TB_CUSTOMERS').SQL;
+end;
+
+function ProcessTagOnConst(const ASql: TSQLResult): string;
+begin
+  Result := ASql.ProcessTag('FILTER', False).SQL;
+end;
+
+function ApplyFilterOnConst(const ASql: TSQLResult): string;
+begin
+  Result := ASql.ApplyFilter('FILTER', '=', True).SQL;
+end;
+
+function GetSqlOnConst(const ASql: TSQLResult): string;
+begin
+  Result := ASql.SQL;
+end;
+
+procedure TSQLLoaderTests.Test_ConstParam_ReplaceLiteral_LeavesCallerUnchanged;
+var
+  LSql: TSQLResult;
+  I: Integer;
+begin
+  LSql := HeapSql(SQL_LITERAL);
+  for I := 1 to 3 do
+    TAssert.AssertEquals('ReplaceLiteral on a const parameter must return the replaced SQL',
+      'SELECT * FROM TB_CUSTOMERS WHERE FIELD ${FIELD_OP} :FIELD', ReplaceOnConst(LSql));
+  TAssert.AssertEquals('ReplaceLiteral on a const parameter must not change the caller''s variable',
+    SQL_LITERAL, string(LSql));
+end;
+
+procedure TSQLLoaderTests.Test_ConstParam_ProcessTag_LeavesCallerUnchanged;
+var
+  LSql: TSQLResult;
+  I: Integer;
+begin
+  LSql := HeapSql(SQL_TAGS);
+  for I := 1 to 3 do
+    TAssert.AssertEquals('ProcessTag on a const parameter must return the processed SQL',
+      'SELECT * FROM CUSTOMERS WHERE 1=1', Trim(ProcessTagOnConst(LSql)));
+  TAssert.AssertEquals('ProcessTag on a const parameter must not change the caller''s variable',
+    SQL_TAGS, string(LSql));
+end;
+
+procedure TSQLLoaderTests.Test_ConstParam_ApplyFilter_LeavesCallerUnchanged;
+var
+  LSql: TSQLResult;
+  I: Integer;
+begin
+  LSql := HeapSql(SQL_TAGS);
+  for I := 1 to 3 do
+    TAssert.AssertEquals('ApplyFilter on a const parameter must return the processed SQL',
+      'SELECT * FROM CUSTOMERS WHERE 1=1 AND ACTIVE = ''S''', Trim(ApplyFilterOnConst(LSql)));
+  TAssert.AssertEquals('ApplyFilter on a const parameter must not change the caller''s variable',
+    SQL_TAGS, string(LSql));
+end;
+
+procedure TSQLLoaderTests.Test_ConstParam_GetSQL_LeavesCallerUnchanged;
+var
+  LSql: TSQLResult;
+  I: Integer;
+begin
+  // .SQL drops the COMMENTS block through ProcessTag
+  LSql := HeapSql(SQL_COMMENTS);
+  for I := 1 to 3 do
+    TAssert.AssertEquals('.SQL on a const parameter must drop the COMMENTS block',
+      'SELECT * FROM CUSTOMERS', Trim(GetSqlOnConst(LSql)));
+  TAssert.AssertEquals('.SQL on a const parameter must not change the caller''s variable',
+    SQL_COMMENTS, string(LSql));
+end;
+
+procedure TSQLLoaderTests.Test_Operations_ReturnACopy;
+var
+  LSql: TSQLResult;
+begin
+  LSql := HeapSql(SQL_TAGS + ' ${X}');
+  LSql.ProcessTag('FILTER', False);
+  LSql.ReplaceLiteral('X', 'Y');
+  LSql.ApplyFilter('FILTER', '=', True);
+  LSql.ApplyOperator('X', '=');
+  TAssert.AssertEquals('An operation whose result is ignored must not change the variable',
+    SQL_TAGS + ' ${X}', string(LSql));
+
+  LSql := LSql.ProcessTag('FILTER', False);
+  LSql := LSql.ReplaceLiteral('X', 'Y');
+  TAssert.AssertEquals('Assigning the result back must apply the operations',
+    'SELECT * FROM CUSTOMERS WHERE 1=1  Y', LSql.SQL);
 end;
 
 initialization

@@ -146,8 +146,10 @@ Three rules that aren't obvious from the syntax:
   `AND NAME = :NAME` whose parameter nobody binds.
 - **`${...}` is pasted in as text.** Fill it from code (an operator, a column name chosen from
   a fixed list), never from user input. Values always go through parameters.
-- `TSQLResult` is a record whose operations change it and return it, so they chain. Applied
-  to a variable (`LSql.ProcessTag(...)`), they change that variable.
+- `TSQLResult` is a record whose operations return a changed copy, so they chain; the record
+  they are called on stays as it was. `LSql.ProcessTag(...)` on its own does nothing: write
+  `LSql := LSql.ProcessTag(...)`. Until 0.14.x they changed the record itself, which broke on a
+  `const` parameter (see gotcha 53).
 
 ## Prefix searches and `LIKE ... ESCAPE`
 

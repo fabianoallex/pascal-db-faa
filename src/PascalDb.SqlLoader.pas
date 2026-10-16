@@ -27,6 +27,16 @@
   and delete the SQL between them, or loop forever when that closing came
   first.
 
+  The operations never change the record they are called on: each returns
+  a changed copy, so they chain (LSql := Loader['X'].ProcessTag(...)
+  .ReplaceLiteral(...)) and a call whose result is ignored does nothing.
+  They used to change Self and return it. Called on a const parameter, that
+  wrote through a value the caller still owned without a reference of its
+  own (measured with LSql.ReplaceLiteral(...) on a const TSQLResult: on FPC
+  Linux one string leaked per call; on FPC and Delphi Win64 the caller's
+  variable came back changed; on Delphi Win32 "Invalid pointer operation"
+  and a leak). Reading .SQL did it too, since it drops the COMMENTS block.
+
   The text is returned exactly as stored (original line endings, no trailing
   line break added); a leading UTF-8 BOM is dropped.
 
@@ -183,56 +193,63 @@ end;
 
 function TSQLResult.ProcessTag(const ATag: string; Keep: Boolean): TSQLResult;
 var
+  LSql: string;
   LFrom, LOpenStart, LOpenEnd, LCloseStart, LCloseEnd, LNextStart, LNextEnd: Integer;
 begin
   if ATag = '' then
     raise ESQLLoaderException.Create('ProcessTag: the tag name is required');
 
+  // Works on a copy: Self is never changed (see the unit comment).
+  LSql := FSQL;
   // Everything before LFrom has been processed and holds no marker of ATag.
   LFrom := 1;
   while True do
   begin
-    if not FindMarker(FSQL, ATag, True, LFrom, LOpenStart, LOpenEnd) then
+    if not FindMarker(LSql, ATag, True, LFrom, LOpenStart, LOpenEnd) then
     begin
-      if FindMarker(FSQL, ATag, False, LFrom, LCloseStart, LCloseEnd) then
+      if FindMarker(LSql, ATag, False, LFrom, LCloseStart, LCloseEnd) then
         raise ESQLLoaderException.CreateFmt(
           'SQL tag %s: closing marker with no opening marker before it', [ATag]);
       Break;
     end;
 
-    if FindMarker(FSQL, ATag, False, LFrom, LCloseStart, LCloseEnd) and
+    if FindMarker(LSql, ATag, False, LFrom, LCloseStart, LCloseEnd) and
        (LCloseStart < LOpenStart) then
       raise ESQLLoaderException.CreateFmt(
         'SQL tag %s: closing marker with no opening marker before it', [ATag]);
 
-    if not FindMarker(FSQL, ATag, False, LOpenEnd + 1, LCloseStart, LCloseEnd) then
+    if not FindMarker(LSql, ATag, False, LOpenEnd + 1, LCloseStart, LCloseEnd) then
       raise ESQLLoaderException.CreateFmt(
         'SQL tag %s: opening marker with no closing marker after it', [ATag]);
 
-    if FindMarker(FSQL, ATag, True, LOpenEnd + 1, LNextStart, LNextEnd) and
+    if FindMarker(LSql, ATag, True, LOpenEnd + 1, LNextStart, LNextEnd) and
        (LNextStart < LCloseStart) then
       raise ESQLLoaderException.CreateFmt(
         'SQL tag %s: a block of this tag is nested in another one', [ATag]);
 
     if Keep then
     begin
-      Delete(FSQL, LCloseStart, LCloseEnd - LCloseStart + 1);
-      Delete(FSQL, LOpenStart, LOpenEnd - LOpenStart + 1);
+      Delete(LSql, LCloseStart, LCloseEnd - LCloseStart + 1);
+      Delete(LSql, LOpenStart, LOpenEnd - LOpenStart + 1);
       LFrom := LCloseStart - (LOpenEnd - LOpenStart + 1);
     end
     else
     begin
-      Delete(FSQL, LOpenStart, LCloseEnd - LOpenStart + 1);
+      Delete(LSql, LOpenStart, LCloseEnd - LOpenStart + 1);
       LFrom := LOpenStart;
     end;
   end;
   Result := Self;
+  Result.FSQL := LSql;
 end;
 
 function TSQLResult.ReplaceLiteral(const ATag, AValue: string): TSQLResult;
+var
+  LSql: string;
 begin
-  FSQL := StringReplace(FSQL, '${' + ATag + '}', AValue, [rfReplaceAll]);
+  LSql := StringReplace(FSQL, '${' + ATag + '}', AValue, [rfReplaceAll]);
   Result := Self;
+  Result.FSQL := LSql;
 end;
 
 function TSQLResult.ApplyOperator(const ATag: string; const AOperator: string): TSQLResult;
@@ -244,7 +261,7 @@ function TSQLResult.ApplyFilter(const Tag: string; const OperatorSQL: string; Ha
 begin
   Result := ProcessTag(Tag, HasValue);
   if HasValue then
-    Result := ReplaceLiteral(Tag + '_OP', OperatorSQL);
+    Result := Result.ReplaceLiteral(Tag + '_OP', OperatorSQL);
 end;
 
 class operator TSQLResult.Explicit(a: TSQLResult): string;
@@ -256,9 +273,7 @@ function TSQLResult.GetSQL: string;
 var
   LStart, LEnd: Integer;
 begin
-  ProcessTag('COMMENTS', False);
-
-  Result := FSQL;
+  Result := ProcessTag('COMMENTS', False).FSQL;
 
   // Leftover markers of tags nobody processed: drop the markers, keep the content
   LStart := 1;
