@@ -99,6 +99,8 @@ type
     procedure Test_ConstParam_ApplyFilter_LeavesCallerUnchanged;
     procedure Test_ConstParam_GetSQL_LeavesCallerUnchanged;
     procedure Test_Operations_ReturnACopy;
+    procedure Test_LikeEscape_EscapesWildcardsAndItself;
+    procedure Test_LikeContains_And_Prefix;
   end;
 
 implementation
@@ -414,6 +416,24 @@ begin
   LSql := LSql.ReplaceLiteral('X', 'Y');
   TAssert.AssertEquals('Assigning the result back must apply the operations',
     'SELECT * FROM CUSTOMERS WHERE 1=1  Y', LSql.SQL);
+end;
+
+procedure TSQLLoaderTests.Test_LikeEscape_EscapesWildcardsAndItself;
+begin
+  TAssert.AssertEquals('!', PDB_LIKE_ESCAPE);
+  TAssert.AssertEquals('50!% off', PdbLikeEscape('50% off'));
+  TAssert.AssertEquals('a!_b', PdbLikeEscape('a_b'));
+  TAssert.AssertEquals('wow!!', PdbLikeEscape('wow!'));
+  TAssert.AssertEquals('a backslash is plain', 'c:\x', PdbLikeEscape('c:\x'));
+  TAssert.AssertEquals('são paulo', PdbLikeEscape('são paulo'));
+  TAssert.AssertEquals('', PdbLikeEscape(''));
+end;
+
+procedure TSQLLoaderTests.Test_LikeContains_And_Prefix;
+begin
+  TAssert.AssertEquals('%50!%%', PdbLikeContains('50%'));
+  TAssert.AssertEquals('%%', PdbLikeContains(''));
+  TAssert.AssertEquals('a!_%', PdbLikePrefix('a_'));
 end;
 
 initialization

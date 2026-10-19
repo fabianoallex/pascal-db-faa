@@ -153,19 +153,24 @@ Three rules that aren't obvious from the syntax:
 
 ## Prefix searches and `LIKE ... ESCAPE`
 
-A prefix typed by a user can contain `%` or `_`, which `LIKE` treats as wildcards. Escape them
-in code and name the escape character in the SQL, **choosing one that isn't a backslash**:
+A prefix typed by a user can contain `%` or `_`, which `LIKE` treats as wildcards. Since 0.16.0
+`PascalDb.SqlLoader` builds the pattern: `PdbLikePrefix`, `PdbLikeContains` and, for a pattern of
+your own, `PdbLikeEscape`. They escape with `PDB_LIKE_ESCAPE` (`!`), which the SQL names:
 
 ```sql
 [PREFIX {] AND DESCRIPTION LIKE :PREFIX ESCAPE '!' [} PREFIX]
+[SEARCH {] AND NAME_KEY LIKE :SEARCH ESCAPE '!' [} SEARCH]
 ```
 
 ```pascal
-// '100%' -> '100!%%': the typed % is literal, the final one is the wildcard
-LPattern := StringReplace(StringReplace(StringReplace(AText,
-  '!', '!!', [rfReplaceAll]), '%', '!%', [rfReplaceAll]), '_', '!_', [rfReplaceAll]) + '%';
+LQuery.Params.Strings['PREFIX'] := PdbLikePrefix(AText);   // '100%' -> '100!%%'
+LQuery.Params.Strings['SEARCH'] := PdbLikeContains(AText); // 'a_b'  -> '%a!_b%'
 ```
 
+The contract suite runs this on every engine and adapter, with parameters after the `ESCAPE`
+clause (`LikePattern_MatchesLiterally_ParamAfterEscape`).
+
+**Not a backslash.**
 With `ESCAPE '\'`, SQLdb's SQLite and PostgreSQL connectors read `\'` as an escaped quote while
 looking for parameters, and every parameter after it disappears without an error, until
 binding fails with `Parameter "..." not found` (gotcha 26 in [`gotchas.md`](gotchas.md)).

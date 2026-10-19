@@ -40,6 +40,17 @@
   The text is returned exactly as stored (original line endings, no trailing
   line break added); a leading UTF-8 BOM is dropped.
 
+  PdbLikeContains/PdbLikePrefix/PdbLikeEscape (0.16.0) turn what a user typed
+  into a LIKE pattern that matches it literally ("50%" finds "50%", not
+  "500"), escaped with PDB_LIKE_ESCAPE, "!", for the SQL's
+  ESCAPE '!'. Not a backslash: SQLdb's SQLite3 and PostgreSQL connectors
+  read \' as an escaped quote while finding parameters, and every parameter
+  after it disappears (gotcha 26). docs/sql.md showed the escaping as a
+  StringReplace chain to copy; pascal-agenda-faa, the first application on
+  the library, wrote its own with ESCAPE '\' and answered 500 ("Parameter
+  "ACTIVE" not found") on a search combined with a filter: a function
+  carries the right character with it.
+
   This comment uses parenthesis-asterisk instead of braces because it quotes
   the tag syntax, which contains "}" and would close a brace comment. *)
 
@@ -113,6 +124,20 @@ type
     property Source: ISqlSource read FSource;
     property Sql[const AResourceName: string]: TSQLResult read GetSql; default;
   end;
+
+const
+  /// The escape character of PdbLike*: write ESCAPE '!' after the LIKE.
+  PDB_LIKE_ESCAPE = '!';
+
+/// AText with LIKE's wildcards (%, _) and the escape character itself
+/// escaped by PDB_LIKE_ESCAPE, for a pattern built by hand.
+function PdbLikeEscape(const AText: string): string;
+
+/// '%<AText>%', AText matched literally: "... LIKE :P ESCAPE '!'".
+function PdbLikeContains(const AText: string): string;
+
+/// '<AText>%', AText matched literally: "... LIKE :P ESCAPE '!'".
+function PdbLikePrefix(const AText: string): string;
 
 implementation
 
@@ -352,6 +377,33 @@ end;
 function TSQLLoader.GetSql(const AResourceName: string): TSQLResult;
 begin
   Result := TSQLResult.From(LoadText(AResourceName));
+end;
+
+{ LIKE patterns }
+
+// %, _ and ! are ASCII: indexing the string is the same on both compilers
+// (a UTF-8 byte of a non-ASCII character is never one of them).
+function PdbLikeEscape(const AText: string): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 1 to Length(AText) do
+  begin
+    if (AText[I] = '%') or (AText[I] = '_') or (AText[I] = PDB_LIKE_ESCAPE) then
+      Result := Result + PDB_LIKE_ESCAPE;
+    Result := Result + AText[I];
+  end;
+end;
+
+function PdbLikeContains(const AText: string): string;
+begin
+  Result := '%' + PdbLikeEscape(AText) + '%';
+end;
+
+function PdbLikePrefix(const AText: string): string;
+begin
+  Result := PdbLikeEscape(AText) + '%';
 end;
 
 end.

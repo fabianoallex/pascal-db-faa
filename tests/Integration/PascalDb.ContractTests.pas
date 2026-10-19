@@ -53,6 +53,7 @@ uses
   PascalCommon.Threading,
   PascalDb.Pool,
   PascalDb.Paging,
+  PascalDb.SqlLoader,
   PascalDb.Batch,
   PascalDb.IntegrationEnv;
 
@@ -99,6 +100,7 @@ type
     [Test] procedure SqlScript_RunsEveryStatement;
     [Test] procedure RecordCount_CountsEveryRow;
     [Test] procedure Paging_PagesCoverAllRowsInOrder;
+    [Test] procedure LikePattern_MatchesLiterally_ParamAfterEscape;
     [Test] procedure SameSqlReassigned_ParamsStillBind;
     [Test] procedure SameSqlReassigned_PreviousValuesDontLeak;
     [Test] procedure SameQuery_AcrossTransactions;
@@ -988,6 +990,56 @@ end;
 // The dialect's paging clause after ORDER BY and a bound parameter: 7 rows in
 // pages of 3 give 3 + 3 + 1, a page past the end is empty, and the pages put
 // together are the whole ordered result, with no row missing or repeated.
+// PdbLikeContains/PdbLikePrefix with ESCAPE '!' on every engine and adapter,
+// and parameters after the ESCAPE clause: with a backslash there SQLdb's
+// SQLite3 and PostgreSQL connectors lose them (gotcha 26; pascal-agenda-faa
+// answered 500 that way).
+procedure TContractTests.LikePattern_MatchesLiterally_ParamAfterEscape;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+
+  function Count(const APattern: string): Integer;
+  begin
+    LQuery.Sql := 'SELECT COUNT(*) AS TOTAL FROM ITEMS WHERE NAME LIKE :PATTERN ESCAPE ''' +
+      PDB_LIKE_ESCAPE + ''' AND ID >= :MIN_ID AND ID <= :MAX_ID';
+    LQuery.Params.Strings['PATTERN'] := APattern;
+    LQuery.Params.Integers['MIN_ID'] := 300;
+    LQuery.Params.Integers['MAX_ID'] := 399;
+    Result := LQuery.Open.Integers['TOTAL'];
+  end;
+
+  procedure Add(AId: Integer; const AName: string);
+  begin
+    LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (:ID, :NAME)';
+    LQuery.Params.Integers['ID'] := AId;
+    LQuery.Params.Strings['NAME'] := AName;
+    LQuery.ExecSql;
+  end;
+
+begin
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    Add(300, 'like 50% off');
+    Add(301, 'like 500 units');
+    Add(302, 'like a_b');
+    Add(303, 'like axb');
+    Add(304, 'like wow!');
+    Add(900, 'like 50% again'); // outside the ID range: the params after ESCAPE count
+    TAssert.AssertEquals('"50%" is literal', 1, Count(PdbLikeContains('50%')));
+    TAssert.AssertEquals('"a_b" is literal', 1, Count(PdbLikeContains('a_b')));
+    TAssert.AssertEquals('"!" is literal', 1, Count(PdbLikeContains('wow!')));
+    TAssert.AssertEquals('prefix', 5, Count(PdbLikePrefix('like ')));
+    TAssert.AssertEquals('prefix with a typed wildcard', 0, Count(PdbLikePrefix('like %')));
+    TAssert.AssertEquals('a plain wildcard still works', 2, Count('like 50%'));
+    LScope.Rollback;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
 // SQL Server refuses OFFSET/FETCH without ORDER BY; Firebird takes ROWS.
 procedure TContractTests.Paging_PagesCoverAllRowsInOrder;
 const

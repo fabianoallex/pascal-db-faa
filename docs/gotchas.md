@@ -182,6 +182,11 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     list only (no server needed): SQLite3 and PostgreSQL 1 of 3, Firebird 3 of 3. Found by an
     agent writing a consumer program (a prefix search with escaped wildcards). Fix: use an
     escape character other than a backslash (`docs/sql.md`). Not measured: FireDAC and Zeos.
+    Since 0.16.0 `PdbLikeContains`/`PdbLikePrefix` build the pattern with `!`: pascal-agenda-faa,
+    the first application on the library, had written its own with `ESCAPE '\'` and answered 500
+    on a search combined with another filter (`Parameter "ACTIVE" not found`, FPC Windows). The
+    contract test `LikePattern_MatchesLiterally_ParamAfterEscape` fails the same way with a
+    backslash (checked once on SQLite: `Parameter "MIN_ID" not found`).
 27. **On Linux, SQLdb's default client library names don't match what the runtime packages
     install, for SQLite and Firebird.** Measured on Debian bookworm with only the runtime
     packages (`libsqlite3-0`, `libpq5`, `libfbclient2`), FPC 3.2.2: SQLite3 looks for

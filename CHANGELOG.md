@@ -6,6 +6,19 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-19
+
+### Added
+
+- `PdbLikeContains`, `PdbLikePrefix` and `PdbLikeEscape` (`PascalDb.SqlLoader`): a LIKE pattern
+  that matches what a user typed literally (`'50%'` finds "50%", not "500"), escaped with
+  `PDB_LIKE_ESCAPE` (`!`) for `... LIKE :P ESCAPE '!'`. `docs/sql.md` showed the escaping as a
+  `StringReplace` chain to copy; pascal-agenda-faa, the first application on the library, wrote
+  its own with `ESCAPE '\'`, which SQLdb's SQLite3 and PostgreSQL connectors misread (gotcha 26),
+  and answered 500 on a search combined with another filter. A new contract test runs the
+  helpers with parameters after the `ESCAPE` clause; green on SQLite, PostgreSQL and Firebird
+  (SQLdb, Linux).
+
 ## [0.15.0] - 2026-10-16
 
 ### Changed
