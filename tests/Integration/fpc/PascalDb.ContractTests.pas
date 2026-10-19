@@ -3,7 +3,7 @@
 {$mode delphi}{$H+}
 
 { GENERATED FILE — produced by tools/gen_fpc_mirror.py from
-  tests/Unit/PascalDb.ContractTests.pas (DUnitX). Do not edit by hand: edit the DUnitX
+  tests/Integration/PascalDb.ContractTests.pas (DUnitX). Do not edit by hand: edit the DUnitX
   master and run the script again. }
 
 { Contract tests for an adapter, against a real Firebird, PostgreSQL, SQLite,

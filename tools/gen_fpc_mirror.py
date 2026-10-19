@@ -1,16 +1,28 @@
-"""Generates the FPCUnit mirror (tests/Unit/fpc/X.pas) from the DUnitX test
-(tests/Unit/X.pas).
+"""Generates the FPCUnit mirrors (tests/<Suite>/fpc/X.pas) from the DUnitX
+masters (tests/<Suite>/X.pas). The canonical copy of the *-faa family's test
+kit (the dual-compiler-delphi-lazarus skill, scripts/gen_fpc_mirror.py):
+copy it UNCHANGED into a project's tools/ folder; scripts/check_test_kit.py
+tells a copy that drifted. Until 2026-10-19 eight repositories carried their
+own copy, identical but for three names, which this one finds by itself:
+
+  - the project root: the folder above tools/ when the script sits in tools/,
+    else the current folder (or --root DIR);
+  - the suites: tests/Unit and tests/Integration, whichever exist (or one or
+    more --suite DIR, relative to the root);
+  - the compat unit: any "<Prefix>.DUnitXCompat" right after
+    DUnitX.TestFramework in the master's uses clause (the skill's
+    assets/DUnitXCompat.pas.template).
 
 Why generate instead of maintaining both by hand: the test bodies are
 written in FPCUnit's assertion dialect (TAssert.AssertEquals/AssertTrue...)
-on both sides — on Delphi through PascalDb.DUnitXCompat. That leaves the
-fixture declarations and the registration as the only real difference
-between the two suites. This script swaps just that; the body comes out
-byte-for-byte identical, and "forgot to port the new test to the other side"
-stops being possible.
+on both sides, on Delphi through the compat unit. That leaves the fixture
+declarations and the registration as the only real difference between the
+two suites. This script swaps just that; the body comes out byte-for-byte
+identical, and "forgot to port the new test to the other side" stops being
+possible.
 
-The master is ALWAYS the DUnitX file. Never edit tests/Unit/fpc/*.pas by
-hand: edit the DUnitX file and run this again.
+The master is ALWAYS the DUnitX file. Never edit tests/*/fpc/*.pas by hand:
+edit the DUnitX file and run this again.
 
 Transformations, only inside classes marked with [TestFixture]:
   [TestFixture] TX = class        -> TX = class(TTestCase)
@@ -20,28 +32,27 @@ Transformations, only inside classes marked with [TestFixture]:
   other public members            -> stay public (in FPCUnit, EVERY
                                      published method becomes a test)
 Outside the fixtures:
-  uses DUnitX.TestFramework, PascalDb.DUnitXCompat -> fpcunit, testregistry
-  TDUnitX.RegisterTestFixture(TX)                  -> RegisterTest(TX)
+  uses DUnitX.TestFramework, X.DUnitXCompat -> fpcunit, testregistry
+  TDUnitX.RegisterTestFixture(TX)            -> RegisterTest(TX)
+A DUnitX API left in a body (Assert.AreEqual, TDUnitX...) is an error.
 
-Usage: python tools/gen_fpc_mirror.py          (every tests/{Unit,Integration}/*Tests.pas)
-       python tools/gen_fpc_mirror.py --check  (fails if any mirror is out of
-                                                date; writes nothing)
+Usage: python tools/gen_fpc_mirror.py            (every suite's *Tests.pas)
+       python tools/gen_fpc_mirror.py --check    (fails if any mirror is out
+                                                  of date; writes nothing)
+       [--root DIR] [--suite DIR ...]
 """
 import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-# Each suite folder holds DUnitX masters; its fpc/ sub-folder gets the mirrors.
-SUITE_DIRS = [ROOT / 'tests' / 'Unit', ROOT / 'tests' / 'Integration']
-
 GENERATED_NOTE = (
     '{ GENERATED FILE — produced by tools/gen_fpc_mirror.py from\n'
-    '  tests/Unit/{name}.pas (DUnitX). Do not edit by hand: edit the DUnitX\n'
+    '  {rel} (DUnitX). Do not edit by hand: edit the DUnitX\n'
     '  master and run the script again. }\n\n'
 )
 
 SECTION_RE = re.compile(r'^\s*(private|protected|public|published|strict private|strict protected)\s*$')
+USES_RE = re.compile(r'\bDUnitX\.TestFramework,\s*\n\s*[\w.]+\.DUnitXCompat,')
 
 
 class MirrorError(Exception):
@@ -96,14 +107,14 @@ def convert_fixture(lines):
     sections[current].extend(trivia)
     out = []
     for name in ('private', 'protected', 'public', 'published'):
-        body = [l for l in sections[name]]
+        body = list(sections[name])
         if any(l.strip() for l in body):
             out.append(f'  {name}')
             out.extend(body)
     return out
 
 
-def convert(text, name):
+def convert(text, name, rel):
     lines = text.split('\n')
     out = []
     i = 0
@@ -129,20 +140,20 @@ def convert(text, name):
         i += 1
     text = '\n'.join(out)
 
-    # uses: swap the framework
-    text, n = re.subn(r'\bDUnitX\.TestFramework,\s*\n\s*PascalDb\.DUnitXCompat,', 'fpcunit, testregistry,', text, count=1)
+    # uses: swap the framework and the compat unit, whatever its prefix
+    text, n = USES_RE.subn('fpcunit, testregistry,', text, count=1)
     if n != 1:
-        raise MirrorError(f'{name}: uses clause lacks "DUnitX.TestFramework, PascalDb.DUnitXCompat," in sequence')
+        raise MirrorError(f'{name}: uses clause lacks "DUnitX.TestFramework, <Prefix>.DUnitXCompat," in sequence')
     text = re.sub(r'TDUnitX\.RegisterTestFixture\((\w+)\);', r'RegisterTest(\1);', text)
-    # Any DUnitX API left over (Assert.AreEqual, TDUnitX...) doesn't exist in
-    # FPCUnit: the master must use only the TAssert.* dialect.
+    # Any DUnitX API left over doesn't exist in FPCUnit: the master must use
+    # only the TAssert.* dialect.
     leftover = re.search(r'\b(TDUnitX|Assert\.[A-Z]\w*)\b', text)
     if leftover:
         raise MirrorError(f'{name}: DUnitX API in the body ({leftover.group(0)}); use TAssert.*')
 
     # Right after "unit X;": the FPC mode and the generated-file note. The
     # master's header follows, untouched.
-    note = GENERATED_NOTE.replace('{name}', name)
+    note = GENERATED_NOTE.replace('{rel}', rel)
     text, n = re.subn(r'^(unit [\w.]+;\n\n)',
                       lambda m: m.group(1) + '{$mode delphi}{$H+}\n\n' + note,
                       text, count=1, flags=re.M)
@@ -151,14 +162,36 @@ def convert(text, name):
     return text
 
 
+def parse_args(argv):
+    here = Path(__file__).resolve().parent
+    root = here.parent if here.name == 'tools' else Path.cwd()
+    suites, check = [], False
+    i = 0
+    while i < len(argv):
+        if argv[i] == '--check':
+            check = True
+        elif argv[i] == '--root' and i + 1 < len(argv):
+            root = Path(argv[i + 1]).resolve()
+            i += 1
+        elif argv[i] == '--suite' and i + 1 < len(argv):
+            suites.append(argv[i + 1])
+            i += 1
+        else:
+            raise SystemExit(f'unknown argument: {argv[i]}')
+        i += 1
+    dirs = [root / s for s in suites] if suites else [root / 'tests' / 'Unit', root / 'tests' / 'Integration']
+    return root, [d for d in dirs if d.is_dir()], check
+
+
 def main():
-    check = '--check' in sys.argv
+    root, suite_dirs, check = parse_args(sys.argv[1:])
     stale = []
-    for src in sorted(p for d in SUITE_DIRS if d.is_dir() for p in d.glob('*Tests.pas')):
+    for src in sorted(p for d in suite_dirs for p in d.glob('*Tests.pas')):
         dst_dir = src.parent / 'fpc'
         dst_dir.mkdir(parents=True, exist_ok=True)
         text = src.read_text(encoding='utf-8-sig')
-        mirror = convert(text, src.stem)
+        rel = src.relative_to(root).as_posix()
+        mirror = convert(text, src.stem, rel)
         dst = dst_dir / src.name
         current = dst.read_text(encoding='utf-8-sig') if dst.exists() else None
         if current != mirror:
