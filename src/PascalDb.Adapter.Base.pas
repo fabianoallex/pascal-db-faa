@@ -306,6 +306,15 @@ type
     procedure SetOptInteger(const AName: string; AValue: IOptInteger);
     procedure SetOptInt64(const AName: string; AValue: IOptInt64);
     procedure SetOptCurrency(const AName: string; AValue: IOptCurrency);
+    // Flags: a Boolean as the Integer 1/0 (IParams)
+    function GetFlag(const AName: string): Boolean;
+    function GetOptFlag(const AName: string): IOptBoolean;
+    function GetNullFlag(const AName: string): INullBoolean;
+    function GetOptNullFlag(const AName: string): IOptNullBoolean;
+    procedure SetFlag(const AName: string; AValue: Boolean);
+    procedure SetOptFlag(const AName: string; AValue: IOptBoolean);
+    procedure SetNullFlag(const AName: string; AValue: INullBoolean);
+    procedure SetOptNullFlag(const AName: string; AValue: IOptNullBoolean);
   end;
 
   { TDBFactory }
@@ -1434,6 +1443,64 @@ begin
   if not Assigned(AValue) or not AValue.HasValue then
     Exit;
   WriteBoolean(AName, AValue.Value);
+end;
+
+function TParamsBase.GetFlag(const AName: string): Boolean;
+begin
+  Result := ReadInteger(AName) <> 0;
+end;
+
+function TParamsBase.GetOptFlag(const AName: string): IOptBoolean;
+begin
+  if (not ParamExists(AName)) or ParamIsNull(AName) then
+    Exit(TOptNullBoolean.Undefined);
+  Result := TOptNullBoolean.From(ReadInteger(AName) <> 0) as IOptBoolean;
+end;
+
+function TParamsBase.GetNullFlag(const AName: string): INullBoolean;
+begin
+  if (not ParamExists(AName)) or ParamIsNull(AName) then
+    Exit(TOptNullBoolean.Null);
+  Result := TOptNullBoolean.From(ReadInteger(AName) <> 0) as INullBoolean;
+end;
+
+function TParamsBase.GetOptNullFlag(const AName: string): IOptNullBoolean;
+begin
+  if not ParamExists(AName) then
+    Exit(TOptNullBoolean.Undefined);
+  if ParamIsNull(AName) then
+    Exit(TOptNullBoolean.Null);
+  Result := TOptNullBoolean.From(ReadInteger(AName) <> 0);
+end;
+
+procedure TParamsBase.SetFlag(const AName: string; AValue: Boolean);
+begin
+  WriteInteger(AName, Ord(AValue));
+end;
+
+procedure TParamsBase.SetOptFlag(const AName: string; AValue: IOptBoolean);
+begin
+  if not Assigned(AValue) or not AValue.HasValue then
+    Exit;
+  WriteInteger(AName, Ord(AValue.Value));
+end;
+
+procedure TParamsBase.SetNullFlag(const AName: string; AValue: INullBoolean);
+begin
+  if not Assigned(AValue) or AValue.IsNull then
+    WriteNull(AName, pptInteger)
+  else
+    WriteInteger(AName, Ord(AValue.Value));
+end;
+
+procedure TParamsBase.SetOptNullFlag(const AName: string; AValue: IOptNullBoolean);
+begin
+  if not Assigned(AValue) or not AValue.HasValue then
+    Exit;
+  if AValue.IsNull then
+    WriteNull(AName, pptInteger)
+  else
+    WriteInteger(AName, Ord(AValue.Value));
 end;
 
 procedure TParamsBase.SetOptDateTime(const AName: string; AValue: IOptDateTime);

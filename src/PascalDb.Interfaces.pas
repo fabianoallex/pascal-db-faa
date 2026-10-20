@@ -324,6 +324,19 @@ type
     procedure SetOptDouble(const AName: string; AValue: IOptDouble);
     procedure SetOptCurrency(const AName: string; AValue: IOptCurrency);
 
+    // Flags: a Boolean stored in an integer column (SMALLINT/INTEGER), sent
+    // as the Integer 1 or 0 (a NULL typed as an integer). Booleans only fit
+    // the database's Boolean type: PostgreSQL refuses a Boolean parameter
+    // for an integer column (docs/optionals.md, "Flags"; gotcha 54).
+    function GetFlag(const AName: string): Boolean;
+    function GetOptFlag(const AName: string): IOptBoolean;
+    function GetNullFlag(const AName: string): INullBoolean;
+    function GetOptNullFlag(const AName: string): IOptNullBoolean;
+    procedure SetFlag(const AName: string; AValue: Boolean);
+    procedure SetOptFlag(const AName: string; AValue: IOptBoolean);
+    procedure SetNullFlag(const AName: string; AValue: INullBoolean);
+    procedure SetOptNullFlag(const AName: string; AValue: IOptNullBoolean);
+
     property OptNullStrings[const AName: string]: IOptNullString read GetOptNullString write SetOptNullString;
     property OptNullIntegers[const AName: string]: IOptNullInteger read GetOptNullInteger write SetOptNullInteger;
     property OptNullInt64[const AName: string]: IOptNullInt64 read GetOptNullInt64 write SetOptNullInt64;
@@ -355,6 +368,11 @@ type
     property Booleans[const AName: string]: Boolean read GetBoolean write SetBoolean;
     property Doubles[const AName: string]: Double read GetDouble write SetDouble;
     property Currencies[const AName: string]: Currency read GetCurrency write SetCurrency;
+
+    property Flags[const AName: string]: Boolean read GetFlag write SetFlag;
+    property OptFlags[const AName: string]: IOptBoolean read GetOptFlag write SetOptFlag;
+    property NullFlags[const AName: string]: INullBoolean read GetNullFlag write SetNullFlag;
+    property OptNullFlags[const AName: string]: IOptNullBoolean read GetOptNullFlag write SetOptNullFlag;
   end;
 
   IQuery = interface

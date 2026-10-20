@@ -17,6 +17,14 @@
   - TMemorySqlSource — SQL registered in code; meant for tests.
   - TCompositeSqlSource — asks several sources in order; the first hit wins
     (e.g. a directory for local overrides, then the embedded resources).
+  - TFallbackSqlSource — wraps any source: <Directory>/<Name> first, then
+    <a common directory>/<Name>. The common directory holds the SQL every
+    database runs, and each database's directory only what is its own (a key
+    there overrides the common one for that database). Asked for the common
+    directory itself, it looks once; directory names compare without case.
+    The not-found message names both places. Built in pascal-agenda-faa
+    (2026-10-20), whose SQLite and PostgreSQL SQL is identical but for a few
+    statements.
 
   Files and resources are read as bytes and decoded as UTF-8 by
   PdbUtf8BytesToString (on pascal-common-faa's PcTryUtf8BytesToString since
@@ -101,6 +109,22 @@ type
     constructor Create(const ASources: array of ISqlSource);
     function TryGetSql(const ADirectory, AName: string; out ASql: string): Boolean;
     function Describe(const ADirectory, AName: string): string;
+  end;
+
+  { TFallbackSqlSource }
+
+  TFallbackSqlSource = class(TInterfacedObject, ISqlSource)
+  private
+    FInner: ISqlSource;
+    FFallbackDirectory: string;
+    function IsFallback(const ADirectory: string): Boolean;
+  public
+    /// AInner answers both lookups; AFallbackDirectory is the common one
+    /// (e.g. 'COMMON'). Raises EArgumentException on nil or ''.
+    constructor Create(const AInner: ISqlSource; const AFallbackDirectory: string);
+    function TryGetSql(const ADirectory, AName: string; out ASql: string): Boolean;
+    function Describe(const ADirectory, AName: string): string;
+    property FallbackDirectory: string read FFallbackDirectory;
   end;
 
 /// Decodes UTF-8 bytes (a leading BOM is skipped) into a string. On FPC it
@@ -335,6 +359,38 @@ begin
       Result := Result + '; ';
     Result := Result + LSource.Describe(ADirectory, AName);
   end;
+end;
+
+{ TFallbackSqlSource }
+
+constructor TFallbackSqlSource.Create(const AInner: ISqlSource; const AFallbackDirectory: string);
+begin
+  inherited Create;
+  if AInner = nil then
+    raise EArgumentException.Create('TFallbackSqlSource: AInner is nil');
+  if AFallbackDirectory = '' then
+    raise EArgumentException.Create('TFallbackSqlSource: AFallbackDirectory is empty');
+  FInner := AInner;
+  FFallbackDirectory := AFallbackDirectory;
+end;
+
+function TFallbackSqlSource.IsFallback(const ADirectory: string): Boolean;
+begin
+  Result := SameText(ADirectory, FFallbackDirectory);
+end;
+
+function TFallbackSqlSource.TryGetSql(const ADirectory, AName: string; out ASql: string): Boolean;
+begin
+  Result := FInner.TryGetSql(ADirectory, AName, ASql);
+  if not Result and not IsFallback(ADirectory) then
+    Result := FInner.TryGetSql(FFallbackDirectory, AName, ASql);
+end;
+
+function TFallbackSqlSource.Describe(const ADirectory, AName: string): string;
+begin
+  Result := FInner.Describe(ADirectory, AName);
+  if not IsFallback(ADirectory) then
+    Result := Result + ', then ' + FInner.Describe(FFallbackDirectory, AName);
 end;
 
 end.

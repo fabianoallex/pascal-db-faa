@@ -146,5 +146,6 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   grep -E "^Number of" /t/run.log
   grep "unfreed" /t/heap.txt
   grep -A4 "Message:" /t/run.log | head -60 || true
+  grep "^BOOLEANS " /t/run.log || true
   grep -qE "^Number of errors: +0$" /t/run.log && grep -qE "^Number of failures: +0$" /t/run.log \
     && grep -qE "^0 unfreed memory blocks" /t/heap.txt'

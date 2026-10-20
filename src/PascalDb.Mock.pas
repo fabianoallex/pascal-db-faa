@@ -217,6 +217,15 @@ type
     procedure SetOptNullInt64(const AName: string; AValue: IOptNullInt64);
     procedure SetOptNullDouble(const AName: string; AValue: IOptNullDouble);
     procedure SetOptNullCurrency(const AName: string; AValue: IOptNullCurrency);
+    // IParams — flags: stored as the Integer 1/0, as the adapters send them
+    function GetFlag(const AName: string): Boolean;
+    function GetOptFlag(const AName: string): IOptBoolean;
+    function GetNullFlag(const AName: string): INullBoolean;
+    function GetOptNullFlag(const AName: string): IOptNullBoolean;
+    procedure SetFlag(const AName: string; AValue: Boolean);
+    procedure SetOptFlag(const AName: string; AValue: IOptBoolean);
+    procedure SetNullFlag(const AName: string; AValue: INullBoolean);
+    procedure SetOptNullFlag(const AName: string; AValue: IOptNullBoolean);
   end;
 
   // IQuery that dispatches Open/ExecSql to TMockDBFactory
@@ -1046,6 +1055,58 @@ procedure TMockParams.SetOptNullBoolean(const AName: string; AValue: IOptNullBoo
 begin
   if not Assigned(AValue) or not AValue.HasValue then Exit;
   if AValue.IsNull then PutV(AName, Null) else PutV(AName, AValue.Value);
+end;
+
+function TMockParams.GetFlag(const AName: string): Boolean;
+begin
+  Result := Integer(GetV(AName)) <> 0;
+end;
+
+function TMockParams.GetOptFlag(const AName: string): IOptBoolean;
+var V: Variant;
+begin
+  V := GetV(AName);
+  if VarIsEmpty(V) or VarIsNull(V) then Result := TOptNullBoolean.Undefined
+  else Result := TOptNullBoolean.From(Integer(V) <> 0) as IOptBoolean;
+end;
+
+function TMockParams.GetNullFlag(const AName: string): INullBoolean;
+var V: Variant;
+begin
+  V := GetV(AName);
+  if VarIsEmpty(V) or VarIsNull(V) then Result := TOptNullBoolean.Null
+  else Result := TOptNullBoolean.From(Integer(V) <> 0) as INullBoolean;
+end;
+
+function TMockParams.GetOptNullFlag(const AName: string): IOptNullBoolean;
+var V: Variant;
+begin
+  V := GetV(AName);
+  if VarIsEmpty(V) then Result := TOptNullBoolean.Undefined
+  else if VarIsNull(V) then Result := TOptNullBoolean.Null
+  else Result := TOptNullBoolean.From(Integer(V) <> 0);
+end;
+
+procedure TMockParams.SetFlag(const AName: string; AValue: Boolean);
+begin
+  PutV(AName, Ord(AValue));
+end;
+
+procedure TMockParams.SetOptFlag(const AName: string; AValue: IOptBoolean);
+begin
+  if Assigned(AValue) and AValue.HasValue then PutV(AName, Ord(AValue.Value));
+end;
+
+procedure TMockParams.SetNullFlag(const AName: string; AValue: INullBoolean);
+begin
+  if not Assigned(AValue) or AValue.IsNull then PutV(AName, Null)
+  else PutV(AName, Ord(AValue.Value));
+end;
+
+procedure TMockParams.SetOptNullFlag(const AName: string; AValue: IOptNullBoolean);
+begin
+  if not Assigned(AValue) or not AValue.HasValue then Exit;
+  if AValue.IsNull then PutV(AName, Null) else PutV(AName, Ord(AValue.Value));
 end;
 
 procedure TMockParams.SetOptNullDouble(const AName: string; AValue: IOptNullDouble);

@@ -119,6 +119,7 @@ processing. `TSQLLoader.Create(Dir)` without a source uses `TResourceSqlSource`.
 | `TDirectorySqlSource` | `<Root>/<Dir>/<Name>.sql` (also a lower-case `<dir>` folder); relative root = executable's folder | development, local overrides |
 | `TMemorySqlSource` | SQL registered in code | tests |
 | `TCompositeSqlSource` | several sources, first hit wins | e.g. directory, then resources |
+| `TFallbackSqlSource` | wraps a source: `<Dir>/<Name>`, then `<common>/<Name>` | SQL the same on every database written once (sample 03, pascal-agenda-faa); outside a composite, so a database's own script in any source wins |
 
 **Building the `.res`: `python tools/build_sql_res.py sql/ sql/app.res`**, then
 `{$R 'sql\app.res'}` in the program (both compilers). It walks `sql/<DIR>/*.sql`, uses the
@@ -311,6 +312,15 @@ them the driver's quirks):
   override (checked after `IsLockConflictError`; also on `Commit`, for deferred constraints). The
   codes of each database are in `PascalDb.Adapter.Base` (`PdbFirebirdConstraintKind`, ...),
   shared by the three adapters; all measured with the contract suite (`Constraint_*` tests).
+- **Booleans and flags** (gotcha 54, contract test `Params_Booleans_And_Flags`): PostgreSQL
+  refuses a Boolean parameter for an integer column and an Integer one for a `BOOLEAN` column,
+  on every adapter, so no adapter converts between them: `IParams.Flags`/`OptFlags`/`NullFlags`/
+  `OptNullFlags` send a Boolean as the Integer 1/0 (in `TParamsBase` and the mock), `Booleans`
+  are for the database's Boolean type. Where a driver wrote a Boolean wrong into an integer
+  column, the adapter fixes it: SQLdb on Firebird sends 1/0 (it stored -1), Zeos sets
+  `BindOrdinalBoolValues` (SQLite) and `MySQL_FieldType_Bit_1_IsBoolean` (MySQL/MariaDB) unless
+  the settings do (it sent `'Y'`/`'N'`). The test prints one `BOOLEANS` line per case
+  (`tools/test_integration_docker.sh` keeps them in its output).
 - `IQuery.ExecSql` / `ITransaction.ExecSql` return the rows affected: `TDataSetQueryBase.RowsAffected`
   and `TTransactionBase.DoExecSqlRows` overrides (-1 by default). An `UPDATE` counts matched rows
   on every database, MySQL/MariaDB included (gotcha 46).
@@ -505,7 +515,7 @@ serializing Firebird connects in the Zeos adapter.
 
 ## Gotchas
 
-The numbered gotchas (symptom → cause → fix, 1–52) live in [`docs/gotchas.md`](docs/gotchas.md).
+The numbered gotchas (symptom → cause → fix, 1–54) live in [`docs/gotchas.md`](docs/gotchas.md).
 Read it before touching the pool, an adapter, resources or anything that differs between
 Delphi and FPC, and add new ones there, keeping the numbering. References in this file
 ("gotcha 17") point to it.

@@ -76,9 +76,10 @@ On PostgreSQL, from the second run on, the client library prints
 
 ## Sample 03: SQL files
 
-The `.sql` files under `03-migrations/sql/PG`, `sql/FB`, `sql/SQLITE`, `sql/MYSQL` (MySQL and
-MariaDB) and `sql/MSSQL` are linked into the program
-through `sql/MigrationsSql.res`. After editing one, rebuild the `.res` (the test script
+The `.sql` files under `03-migrations/sql/COMMON` (what every database runs) and `sql/FB`,
+`sql/MYSQL` (MySQL and MariaDB) and `sql/MSSQL` (only what differs there;
+`TFallbackSqlSource`, [`docs/sql.md`](../docs/sql.md), "A common folder") are linked into the
+program through `sql/MigrationsSql.res`. After editing one, rebuild the `.res` (the test script
 checks it's up to date):
 
 ```

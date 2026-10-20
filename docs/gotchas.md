@@ -479,3 +479,30 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     copy and returns it, `Self` is never written. Tests `Test_ConstParam_*` and
     `Test_Operations_ReturnACopy`. Elsewhere: in a record method that writes `Self`, take the
     record as `constref` or copy it into a local before calling it.
+54. **A Boolean parameter and an integer column.** Measured with the contract suite
+    (`Params_Booleans_And_Flags`) on every adapter and database, 2026-10-20, from
+    pascal-agenda-faa (every PATCH of an `active` flag answered 500 on PostgreSQL 17):
+    - **PostgreSQL refuses the mix both ways**, on SQLdb, Zeos and FireDAC: a Boolean parameter
+      for a `SMALLINT`/`INTEGER` column ("column "f_integer" is of type integer but expression is
+      of type boolean"; a typed NULL Boolean too; in a `WHERE`, "operator does not exist: integer
+      = boolean"), and an Integer one for a `BOOLEAN` column. So no adapter can convert one into
+      the other: the type has to come from the caller. SQLite took the same statements, which is
+      why a suite that runs only SQLite never saw it.
+    - **SQLdb on Firebird stored `True` as -1** in a `SMALLINT`/`INTEGER` column, and `WHERE flag =
+      :V` with `True` found nothing (Firebird 2.5 on Windows, 5 on Linux): its connector writes
+      such a parameter with `AsSmallint`/`AsInteger`, and a Boolean Variant converts to -1.
+    - **Zeos 8.0.0 bound a Boolean as the text `'Y'`/`'N'`** on SQLite (stored as is in an
+      `INTEGER` column, read back as 0) and on MySQL/MariaDB (refused by every integer column,
+      `BOOLEAN` included: "Incorrect integer value: 'Y'"), unless the connection sets
+      `BindOrdinalBoolValues` (SQLite) or `MySQL_FieldType_Bit_1_IsBoolean` (MySQL; Zeos sets it
+      by itself only for client libraries it takes for new enough, and Debian's libmariadb3 3.3
+      isn't).
+    - FireDAC (Delphi 12 CE, Win32 and Win64), SQLdb on SQLite/MySQL/MariaDB/SQL Server and Zeos
+      on Firebird/SQL Server wrote 1/0.
+
+    Fix (0.17.0): the SQLdb adapter sends a Boolean as the Integer 1/0 on Firebird (the connector
+    still turns it into `TRUE`/`FALSE` for a Firebird 3+ `BOOLEAN` column), and the Zeos adapter
+    sets both properties unless the settings do. `IParams.Flags`/`OptFlags`/`NullFlags`/
+    `OptNullFlags` take a Boolean and send the Integer 1/0 (a NULL typed as an integer): use them
+    for a flag stored in an integer column, and `Booleans` only for the database's Boolean type
+    ([`optionals.md`](optionals.md), "Flags").

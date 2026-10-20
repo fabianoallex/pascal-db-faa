@@ -6,6 +6,34 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-20
+
+### Added
+
+- `IParams.Flags`, `OptFlags`, `NullFlags` and `OptNullFlags`: a Boolean for a flag stored in a
+  `SMALLINT`/`INTEGER` column, sent as the Integer 1/0 (a NULL typed as an integer). PostgreSQL
+  refuses a Boolean parameter for an integer column, and an Integer one for a `BOOLEAN` column,
+  on every adapter, so the caller picks: `Flags` for an integer column, `Booleans` for the
+  database's Boolean type (`docs/optionals.md`, "Flags"; gotcha 54). Found by pascal-agenda-faa
+  (every PATCH of a flag answered 500 on PostgreSQL 17). **Breaking** only for a class that
+  implements `IParams` itself; adapters built on `TParamsBase` get them.
+- `TFallbackSqlSource` (`PascalDb.SqlSources`): wraps any source and asks for
+  `<SQLDirectory>/<KEY>`, then for `<common folder>/<KEY>`, so SQL that is the same on every
+  database is written once (`docs/sql.md`, "A common folder"). Built in pascal-agenda-faa.
+  Sample 03-migrations uses it: 14 `.sql` files instead of 30.
+- Contract test `Params_Booleans_And_Flags`: every write path of a Boolean and of a flag
+  (plain, optional, typed NULL, batch, a filter) into `SMALLINT`, `INTEGER` and the database's
+  Boolean type, on every adapter and database; it prints one `BOOLEANS` line per case.
+
+### Fixed
+
+- SQLdb on Firebird stored a Boolean parameter as -1 in a `SMALLINT`/`INTEGER` column, and
+  `WHERE flag = :V` with `True` found nothing (Firebird 2.5 and 5). It is now sent as 1/0.
+- Zeos bound a Boolean as the text `'Y'`/`'N'` on SQLite (stored as is in an integer column,
+  read back as 0) and on MySQL/MariaDB (refused, `BOOLEAN` columns included). SQLite connections
+  now get `BindOrdinalBoolValues=true` and MySQL/MariaDB ones
+  `MySQL_FieldType_Bit_1_IsBoolean=true`, unless the settings set them.
+
 ## [0.16.0] - 2026-10-19
 
 ### Added

@@ -130,6 +130,13 @@
     Parameters are replaced in the SQL text on the client (the connector has
     no server-side prepared statements), escaping backslashes as the server
     expects.
+  - Firebird: a Boolean parameter is sent as the Integer 1 or 0. SQLdb's
+    Firebird connector writes a SMALLINT/INTEGER parameter with
+    AsSmallint/AsInteger, and a Boolean in a Variant converts to -1: True was
+    stored as -1 and "WHERE flag = :TRUE" found nothing (measured, Firebird
+    2.5 and 5, gotcha 54). The connector turns the integer into the
+    column's type after the prepare, so a Firebird 3+ BOOLEAN column still
+    gets True and False.
   - SQL Server goes through ODBC (ConnectorType=ODBC) with Microsoft's ODBC
     Driver 18, not through the db-lib connector (TMSSQLConnection, FreeTDS):
     that one keeps its error text in unit-level variables, and two
@@ -899,9 +906,24 @@ begin
   Result := True;
 end;
 
+type
+  // Firebird: Booleans as the Integer 1/0 (unit header).
+  TSQLdbFirebirdParams = class(TDBParams)
+  protected
+    procedure WriteBoolean(const AName: string; AValue: Boolean); override;
+  end;
+
+procedure TSQLdbFirebirdParams.WriteBoolean(const AName: string; AValue: Boolean);
+begin
+  WriteInteger(AName, Ord(AValue));
+end;
+
 function TSQLdbQueryAdapter.CreateParams: IParams;
 begin
-  Result := TDBParams.Create(FQuery.Params);
+  if SameText((FQuery.DataBase as TPdbSQLConnector).ConnectorType, 'Firebird') then
+    Result := TSQLdbFirebirdParams.Create(FQuery.Params)
+  else
+    Result := TDBParams.Create(FQuery.Params);
 end;
 
 function TSQLdbQueryAdapter.RowsAffected: Int64;

@@ -3,11 +3,13 @@ program Migrations;
 { Sample 03: versioned migrations, with SQL kept in .sql files and embedded
   in the executable.
 
-  SQL: sql/PG, sql/FB, sql/SQLITE, sql/MYSQL (MySQL and MariaDB) and
-  sql/MSSQL hold one .sql file per script; the name of the file is the key
-  the program asks for (MIG.0001, PRODUCT.LIST, ...), and the factory's SQL
-  directory (PG, FB, SQLITE, MYSQL or MSSQL, from Samples.Env) picks the
-  folder.
+  SQL: one .sql file per script; the name of the file is the key the
+  program asks for (MIG.0001, PRODUCT.LIST, ...). sql/COMMON holds what every
+  database runs, and sql/FB, sql/MYSQL (MySQL and MariaDB) and sql/MSSQL only
+  the scripts that differ there (PostgreSQL and SQLite run the common ones):
+  TFallbackSqlSource asks for <the factory's SQL directory>/<KEY> (PG, FB,
+  SQLITE, MYSQL or MSSQL, from Samples.Env), then COMMON/<KEY>. 14 files
+  instead of 30, one per database for each of the 6 keys.
   tools/build_sql_res.py turns the tree into sql/MigrationsSql.res, which the
   $R directive below links into the program on both compilers; TResourceSqlSource
   reads it back. Rebuild the .res after editing a .sql file:
@@ -97,8 +99,8 @@ begin
   LDir := GetEnvironmentVariable('PASCALDB_SAMPLE_SQL_DIR');
   if LDir = '' then
   begin
-    Writeln('SQL: embedded resources');
-    Result := TResourceSqlSource.Create;
+    Writeln('SQL: embedded resources, the database''s folder then COMMON');
+    Result := TFallbackSqlSource.Create(TResourceSqlSource.Create, 'COMMON');
   end
   else
   begin
@@ -106,8 +108,11 @@ begin
     // folder (a service's working directory is System32); a path typed in a
     // shell is meant relative to the current one.
     LDir := ExpandFileName(LDir);
-    Writeln('SQL: ', LDir, ', then embedded resources');
-    Result := TCompositeSqlSource.Create([TDirectorySqlSource.Create(LDir), TResourceSqlSource.Create]);
+    Writeln('SQL: ', LDir, ', then embedded resources; the database''s folder then COMMON');
+    // The fallback outside the composite: a script the folder overrides for
+    // this database wins over the embedded common one.
+    Result := TFallbackSqlSource.Create(
+      TCompositeSqlSource.Create([TDirectorySqlSource.Create(LDir), TResourceSqlSource.Create]), 'COMMON');
   end;
 end;
 

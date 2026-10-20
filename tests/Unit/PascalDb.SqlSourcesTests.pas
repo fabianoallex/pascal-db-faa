@@ -4,8 +4,9 @@
   them: memory, composite, directory (files written next to the test
   executable, which also covers resolving a relative root), resources (from
   tests/Unit/sql/PascalDbTestSql.res, built by tools/build_sql_res.py and
-  linked by both test runners), UTF-8 decoding and the loader's cache and
-  error message.
+  linked by both test runners), the fallback to a common directory
+  (TFallbackSqlSource), UTF-8 decoding and the loader's cache and error
+  message.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
   PascalDb.DUnitXCompat). The mirror in tests/Unit/fpc is generated from the
@@ -41,6 +42,7 @@ type
     FTempRoot: string;
     FTempFolder: string;
     procedure WriteFile(const ARelativePath: string; const ABytes: TBytes);
+    function NewFallbackSource: ISqlSource;
   public
     [Setup]
     procedure Setup;
@@ -64,6 +66,13 @@ type
     [Test] procedure Resource_NameReplacesDotsAndUpperCases;
     [Test] procedure Utf8_AsciiOnly_DecodesInAnyCodePage;
     [Test] procedure Utf8_NonAscii_RequiresUtf8CodePageOnFpc;
+    [Test] procedure Fallback_OwnDirectory_OverridesTheCommonOne;
+    [Test] procedure Fallback_Missing_FallsBackToTheCommonOne;
+    [Test] procedure Fallback_AbsentEverywhere_IsFalse;
+    [Test] procedure Fallback_CommonDirectory_LooksOnce;
+    [Test] procedure Fallback_DirectoryNames_IgnoreCase;
+    [Test] procedure Fallback_LoaderNotFound_NamesBothPlaces;
+    [Test] procedure Fallback_Create_RefusesNilAndEmpty;
   end;
 
   [TestFixture]
@@ -380,6 +389,102 @@ begin
   // Delphi: string is UTF-16, there is no code page to guard.
   TAssert.AssertEquals('SELECT ''ã→''', PdbUtf8BytesToString(NonAsciiSqlBytes, 'test'));
   {$ENDIF}
+end;
+
+{ TFallbackSqlSource }
+
+function TSqlSourcesTests.NewFallbackSource: ISqlSource;
+begin
+  Result := TFallbackSqlSource.Create(TMemorySqlSource.Create
+    .Add('COMMON', 'X', 'SELECT 1')
+    .Add('COMMON', 'Y', 'SELECT 2')
+    .Add('PG', 'Y', 'SELECT 2 /* PG */'), 'COMMON');
+end;
+
+procedure TSqlSourcesTests.Fallback_OwnDirectory_OverridesTheCommonOne;
+var
+  LSql: string;
+begin
+  TAssert.AssertTrue(NewFallbackSource.TryGetSql('PG', 'Y', LSql));
+  TAssert.AssertEquals('SELECT 2 /* PG */', LSql);
+end;
+
+procedure TSqlSourcesTests.Fallback_Missing_FallsBackToTheCommonOne;
+var
+  LSql: string;
+begin
+  TAssert.AssertTrue(NewFallbackSource.TryGetSql('PG', 'X', LSql));
+  TAssert.AssertEquals('SELECT 1', LSql);
+  TAssert.AssertTrue('another database: the common Y', NewFallbackSource.TryGetSql('SQLITE', 'Y', LSql));
+  TAssert.AssertEquals('SELECT 2', LSql);
+end;
+
+procedure TSqlSourcesTests.Fallback_AbsentEverywhere_IsFalse;
+var
+  LSql: string;
+begin
+  TAssert.AssertFalse(NewFallbackSource.TryGetSql('PG', 'Z', LSql));
+end;
+
+procedure TSqlSourcesTests.Fallback_CommonDirectory_LooksOnce;
+var
+  LSql: string;
+begin
+  TAssert.AssertTrue(NewFallbackSource.TryGetSql('COMMON', 'X', LSql));
+  TAssert.AssertEquals('memory COMMON/Z', NewFallbackSource.Describe('COMMON', 'Z'));
+end;
+
+procedure TSqlSourcesTests.Fallback_DirectoryNames_IgnoreCase;
+begin
+  // The memory source writes its keys in upper case; one place named, so
+  // 'common' was taken for the common directory.
+  TAssert.AssertEquals('the common directory in another case is still it',
+    'memory COMMON/Z', NewFallbackSource.Describe('common', 'Z'));
+end;
+
+procedure TSqlSourcesTests.Fallback_LoaderNotFound_NamesBothPlaces;
+var
+  LLoader: TSQLLoader;
+  LMessage: string;
+begin
+  LMessage := '';
+  LLoader := TSQLLoader.Create('PG', NewFallbackSource);
+  try
+    try
+      LMessage := LLoader['Z'].SQL;
+    except
+      on E: ESQLLoaderException do
+        LMessage := E.Message;
+    end;
+  finally
+    LLoader.Free;
+  end;
+  TAssert.AssertEquals('SQL not found: PG/Z. Looked in: memory PG/Z, then memory COMMON/Z',
+    LMessage);
+end;
+
+procedure TSqlSourcesTests.Fallback_Create_RefusesNilAndEmpty;
+var
+  LSource, LInner: ISqlSource;
+  LRaised: Integer;
+begin
+  // The inner source in a variable: a new object passed straight to a const
+  // interface parameter of a constructor that raises is never released.
+  LInner := TMemorySqlSource.Create;
+  LRaised := 0;
+  try
+    LSource := TFallbackSqlSource.Create(nil, 'COMMON');
+  except
+    on E: EArgumentException do
+      Inc(LRaised);
+  end;
+  try
+    LSource := TFallbackSqlSource.Create(LInner, '');
+  except
+    on E: EArgumentException do
+      Inc(LRaised);
+  end;
+  TAssert.AssertEquals(2, LRaised);
 end;
 
 { TSqlLoaderSourceTests }

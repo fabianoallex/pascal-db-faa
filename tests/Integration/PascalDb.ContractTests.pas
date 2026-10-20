@@ -6,7 +6,9 @@
   IDBFactory, IQuery, IParams, IQueryResult and the scope transactions are
   used, so the same bodies validate every adapter (the factory comes from
   PascalDb.IntegrationEnv). Covered: connection ping, migrations (through the
-  library's own engine), a round trip of every parameter type, typed NULLs,
+  library's own engine), a round trip of every parameter type, Booleans
+  and Flags into SMALLINT, INTEGER and Boolean columns and as a filter
+  (one line per case printed, every failing case listed), typed NULLs,
   optional columns through SQL tags, an INSERT returning its row through
   Open (RETURNING, or OUTPUT on SQL Server; not on MySQL), UTF-8 text,
   text longer than its VARCHAR(n) read back whole (SQLite only, the one
@@ -51,6 +53,7 @@ uses
   PascalCommon.Optionals,
   PascalDb.Migrations,
   PascalCommon.Threading,
+  PascalCommon.SafeLog,
   PascalDb.Pool,
   PascalDb.Paging,
   PascalDb.SqlLoader,
@@ -67,6 +70,8 @@ type
     procedure InsertItem(AId: Integer; const AName: string);
     procedure CheckLockWaitGivesUp(AUseBatch: Boolean);
     function ViolationOf(const ASql: string; AViaOpen: Boolean = False): string;
+    function FlagCase(const AColumn, ATrueLiteral: string; AIsBoolean: Boolean; AKind, AId: Integer): string;
+    function FlagStoredText(const AColumn: string; AId: Integer): string;
   public
     [Setup]
     procedure Setup;
@@ -76,6 +81,7 @@ type
     [Test] procedure Ping_ReturnsTrue;
     [Test] procedure Migrations_ReportCurrentVersion;
     [Test] procedure Params_EveryType_RoundTrip;
+    [Test] procedure Params_Booleans_And_Flags;
     [Test] procedure Params_TypedNulls_AreStoredAsNull;
     [Test] procedure OptionalColumn_OmittedByTag_UsesDefault;
     [Test] procedure OptionalColumn_ProvidedByTag_IsStored;
@@ -390,6 +396,242 @@ begin
     LScope.Rollback;
     raise;
   end;
+end;
+
+const
+  // What Params_Booleans_And_Flags writes, by kind: Booleans first (into
+  // every column), then Flags (integer columns only).
+  FLAG_KINDS: array[0..12] of string = ('Booleans[True]', 'Booleans[False]',
+    'OptBooleans[From(True)]', 'NullBooleans[Null]', 'batch Booleans[True]',
+    'WHERE col = Booleans[True]', 'Integers[1]',
+    'Flags[True]', 'Flags[False]', 'OptFlags[From(True)]', 'NullFlags[Null]',
+    'batch Flags[True]', 'WHERE col = Flags[True]');
+  FLAG_LAST_BOOLEAN_KIND = 6;
+  FLAG_EXPECTED_INT: array[0..12] of string = ('1', '0', '1', 'NULL', '1', 'found 1', '1',
+    '1', '0', '1', 'NULL', '1', 'found 1');
+  FLAG_EXPECTED_BOOL: array[0..6] of string = ('True', 'False', 'True', 'NULL', 'True', 'found 1', 'True');
+
+var
+  GFlagsTableCreated: Boolean = False;
+  GFlagsBooleanType: string = '';
+
+// One case of Params_Booleans_And_Flags, in its own transaction
+// (PostgreSQL refuses every statement after a failed one until the
+// rollback): what was read back, or the error.
+function TContractTests.FlagCase(const AColumn, ATrueLiteral: string; AIsBoolean: Boolean;
+  AKind, AId: Integer): string;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LBatch: IBatch;
+  LResult: IQueryResult;
+  LSql: string;
+begin
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    if (AKind = 5) or (AKind = 12) then
+    begin
+      LQuery.Sql := Format('INSERT INTO FLAGS (ID, %s) VALUES (%d, %s)', [AColumn, AId, ATrueLiteral]);
+      LQuery.ExecSql;
+      LQuery.Sql := Format('SELECT COUNT(*) AS N FROM FLAGS WHERE ID = :ID AND %s = :V', [AColumn]);
+      LQuery.Params.Integers['ID'] := AId;
+      if AKind = 5 then
+        LQuery.Params.Booleans['V'] := True
+      else
+        LQuery.Params.Flags['V'] := True;
+      Result := 'found ' + IntToStr(LQuery.Open.Integers['N']);
+    end
+    else
+    begin
+      LSql := Format('INSERT INTO FLAGS (ID, %s) VALUES (:ID, :V)', [AColumn]);
+      if (AKind = 4) or (AKind = 11) then
+      begin
+        LBatch := TBatch.New(LQuery, LSql);
+        LBatch.Params.Integers['ID'] := AId;
+        if AKind = 4 then
+          LBatch.Params.Booleans['V'] := True
+        else
+          LBatch.Params.Flags['V'] := True;
+        LBatch.AddRow;
+        LBatch.Execute;
+        LBatch := nil;
+      end
+      else
+      begin
+        LQuery.Sql := LSql;
+        LQuery.Params.Integers['ID'] := AId;
+        case AKind of
+          0: LQuery.Params.Booleans['V'] := True;
+          1: LQuery.Params.Booleans['V'] := False;
+          2: LQuery.Params.OptBooleans['V'] := TOptNullBoolean.From(True) as IOptBoolean;
+          3: LQuery.Params.NullBooleans['V'] := TOptNullBoolean.Null;
+          6: LQuery.Params.Integers['V'] := 1;
+          7: LQuery.Params.Flags['V'] := True;
+          8: LQuery.Params.Flags['V'] := False;
+          9: LQuery.Params.OptFlags['V'] := TOptNullBoolean.From(True) as IOptBoolean;
+          10: LQuery.Params.NullFlags['V'] := TOptNullBoolean.Null;
+        end;
+        LQuery.ExecSql;
+      end;
+      LQuery.Sql := Format('SELECT %s AS V FROM FLAGS WHERE ID = :ID', [AColumn]);
+      LQuery.Params.Integers['ID'] := AId;
+      LResult := LQuery.Open;
+      if LResult.IsEmpty then
+        Result := 'no row'
+      else if AIsBoolean then
+      begin
+        if LResult.NullableBooleans['V'].IsNull then
+          Result := 'NULL'
+        else if LResult.Booleans['V'] then
+          Result := 'True'
+        else
+          Result := 'False';
+      end
+      else if LResult.NullableIntegers['V'].IsNull then
+        Result := 'NULL'
+      else
+        Result := IntToStr(LResult.Integers['V']);
+    end;
+    LResult := nil;
+    LScope.Commit;
+  except
+    on E: Exception do
+    begin
+      Result := StringReplace(StringReplace('ERROR ' + DescribeDriverError(E) + ': ' + E.Message,
+        #13, ' ', [rfReplaceAll]), #10, ' ', [rfReplaceAll]);
+      if Length(Result) > 220 then
+        Result := Copy(Result, 1, 220) + '...';
+      LBatch := nil;
+      LResult := nil;
+      try
+        LScope.Rollback;
+      except
+      end;
+    end;
+  end;
+end;
+
+// What the database holds in AColumn of row AId, as text (CAST, so the
+// driver's field type plays no part): for the report of a failing case.
+function TContractTests.FlagStoredText(const AColumn: string; AId: Integer): string;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LResult: IQueryResult;
+begin
+  try
+    LScope := FFactory.GetPool.AcquireQuery(LQuery);
+    LScope.StartTransaction;
+    try
+      LQuery.Sql := Format('SELECT CAST(%s AS %s) AS T FROM FLAGS WHERE ID = :ID', [AColumn, TextCastType]);
+      LQuery.Params.Integers['ID'] := AId;
+      LResult := LQuery.Open;
+      if LResult.IsEmpty then
+        Result := 'no row'
+      else if LResult.NullableStrings['T'].IsNull then
+        Result := 'NULL'
+      else
+        Result := '''' + LResult.Strings['T'] + '''';
+      LResult := nil;
+      LScope.Commit;
+    except
+      LResult := nil;
+      LScope.Rollback;
+      raise;
+    end;
+  except
+    on E: Exception do
+      Result := '(' + E.ClassName + ')';
+  end;
+end;
+
+// Boolean parameters and flags (gotcha 54). Measured for pascal-agenda-faa
+// (2026-10-20): on PostgreSQL, a Boolean parameter into an INTEGER column
+// answered "column ... is of type integer but expression is of type
+// boolean" (SQLite took the same statement), SQLdb on Firebird stored True
+// as -1, and Zeos sent the text 'Y'/'N' on SQLite (stored as is) and on
+// MySQL/MariaDB (refused even by a BOOLEAN column). The contract: Flags
+// (an Integer 1/0) work in SMALLINT and INTEGER columns everywhere, Booleans
+// in the database's Boolean type everywhere, and Booleans in an integer
+// column everywhere but on PostgreSQL, which refuses them (and refuses an
+// Integer in a BOOLEAN column, so no adapter can convert one into the
+// other). Every write path: plain, optional, typed NULL, batch, a filter.
+// Every case runs and prints one line; the failure lists every case that
+// didn't read back what was expected.
+procedure TContractTests.Params_Booleans_And_Flags;
+var
+  LColumns: array[0..2] of string;
+  LCount, C, K, LLastKind: Integer;
+  LGot, LExpected, LTrueLiteral, LFailed: string;
+  LIsBoolean, LOk: Boolean;
+begin
+  if not GFlagsTableCreated then
+  begin
+    GFlagsBooleanType := BooleanColumnType(FFactory);
+    if GFlagsBooleanType <> '' then
+      ExecCommitted('CREATE TABLE FLAGS (ID INTEGER NOT NULL PRIMARY KEY, F_SMALLINT SMALLINT, ' +
+        'F_INTEGER INTEGER, F_BOOLEAN ' + GFlagsBooleanType + ')')
+    else
+      ExecCommitted('CREATE TABLE FLAGS (ID INTEGER NOT NULL PRIMARY KEY, F_SMALLINT SMALLINT, ' +
+        'F_INTEGER INTEGER)');
+    GFlagsTableCreated := True;
+  end;
+  ExecCommitted('DELETE FROM FLAGS');
+  LColumns[0] := 'F_SMALLINT';
+  LColumns[1] := 'F_INTEGER';
+  LColumns[2] := 'F_BOOLEAN';
+  if GFlagsBooleanType <> '' then
+    LCount := 3
+  else
+    LCount := 2;
+  LFailed := '';
+  for C := 0 to LCount - 1 do
+  begin
+    LIsBoolean := C = 2;
+    if LIsBoolean and (GFlagsBooleanType <> 'BIT') then
+      LTrueLiteral := 'TRUE'
+    else
+      LTrueLiteral := '1';
+    if LIsBoolean then
+      LLastKind := FLAG_LAST_BOOLEAN_KIND
+    else
+      LLastKind := High(FLAG_KINDS);
+    for K := Low(FLAG_KINDS) to LLastKind do
+    begin
+      LGot := FlagCase(LColumns[C], LTrueLiteral, LIsBoolean, K, 100 * (C + 1) + K);
+      // PostgreSQL: no Boolean into an integer column, no Integer into a
+      // Boolean one.
+      if RefusesBooleanIntegerMix and ((not LIsBoolean and (K < FLAG_LAST_BOOLEAN_KIND)) or
+        (LIsBoolean and (K = FLAG_LAST_BOOLEAN_KIND))) then
+      begin
+        LExpected := 'an error';
+        LOk := Pos('ERROR', LGot) = 1;
+      end
+      else
+      begin
+        if LIsBoolean then
+          LExpected := FLAG_EXPECTED_BOOL[K]
+        else
+          LExpected := FLAG_EXPECTED_INT[K];
+        LOk := LGot = LExpected;
+      end;
+      if LOk then
+        SafeWriteln('BOOLEANS %s | %s | %s | ok (%s)', [IntegrationTarget, LColumns[C], FLAG_KINDS[K],
+          Copy(LGot, 1, 60)])
+      else
+      begin
+        if (Pos('ERROR', LGot) <> 1) and (K <> 5) and (K <> 12) then
+          LGot := LGot + ', stored as ' + FlagStoredText(LColumns[C], 100 * (C + 1) + K);
+        SafeWriteln('BOOLEANS %s | %s | %s | FAIL %s', [IntegrationTarget, LColumns[C], FLAG_KINDS[K], LGot]);
+        LFailed := LFailed + sLineBreak + '  ' + LColumns[C] + ' ' + FLAG_KINDS[K] + ': expected ' +
+          LExpected + ', got ' + LGot;
+      end;
+    end;
+  end;
+  if GFlagsBooleanType = '' then
+    SafeWriteln('BOOLEANS %s | F_BOOLEAN | (no Boolean column type on this server)', [IntegrationTarget]);
+  TAssert.AssertEquals('Boolean parameters and flags on ' + IntegrationTarget, '', LFailed);
 end;
 
 procedure TContractTests.Params_TypedNulls_AreStoredAsNull;

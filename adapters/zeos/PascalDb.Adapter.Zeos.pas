@@ -92,6 +92,15 @@
     connections get Zeos's busytimeout=5000 (milliseconds) unless the
     settings say otherwise, and foreign_keys=ON (SQLite checks foreign keys
     only when the connection asks) unless the settings set foreign_keys.
+  - Booleans: Zeos 8.0.0 binds a Boolean parameter as the text 'Y' or 'N'
+    on SQLite (stored as is in an INTEGER column, read back as 0) and on
+    MySQL/MariaDB (refused by every integer column, BOOLEAN included:
+    "Incorrect integer value: 'Y'"), unless the connection says otherwise.
+    SQLite connections get BindOrdinalBoolValues=true and MySQL/MariaDB ones
+    MySQL_FieldType_Bit_1_IsBoolean=true unless the settings set them, so a
+    Boolean goes out as 1 or 0 (measured on FPC, Windows and Linux; Zeos
+    turns the MySQL one on by itself only for clients it takes for new
+    enough, and Debian's libmariadb3 3.3 is not; gotcha 54).
   - SQLite: a statement that fails in Open (an INSERT ... RETURNING
     violating a key) keeps its error, and Zeos 8.0.0 raises it again when
     the statement is finalized: freeing the query raised EZSQLException from
@@ -490,6 +499,11 @@ begin
       Result.Properties.Values['foreign_keys'] := 'ON';
     if IsMySQLProtocol(Result) and (Result.Properties.Values['CLIENT_FOUND_ROWS'] = '') then
       Result.Properties.Values['CLIENT_FOUND_ROWS'] := 'true';
+    // Booleans bound as 1/0, not as the text 'Y'/'N' (see the unit header).
+    if SameText(Copy(Result.Protocol, 1, 6), 'sqlite') and (Result.Properties.Values['BindOrdinalBoolValues'] = '') then
+      Result.Properties.Values['BindOrdinalBoolValues'] := 'true';
+    if IsMySQLProtocol(Result) and (Result.Properties.Values['MySQL_FieldType_Bit_1_IsBoolean'] = '') then
+      Result.Properties.Values['MySQL_FieldType_Bit_1_IsBoolean'] := 'true';
     if IsODBCProtocol(Result) and (Pos('MARS_CONNECTION', UpperCase(Result.Database)) = 0) then
     begin
       if (Result.Database <> '') and (Result.Database[Length(Result.Database)] <> ';') then

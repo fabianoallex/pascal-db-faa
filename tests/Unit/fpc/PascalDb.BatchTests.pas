@@ -78,6 +78,7 @@ type
     procedure MaxRows_BelowOne_Raises;
     procedure Params_ReadTheCurrentRow;
     procedure Native_GetsTheRowsInOneCall;
+    procedure Native_Flags_AreIntegers;
     procedure Native_DeclinedByTheDriver_RunsRowByRow;
     procedure Failure_DropsTheRowsOfThatSend;
     procedure Mock_RecordsOneExecutionPerRow;
@@ -451,6 +452,33 @@ begin
   TAssert.AssertTrue('PRICE, first set in row 3, is NULL in row 1', LRows.IsNull(0, 2));
   TAssert.AssertEquals(Currency(1.5), LRows.AsCurrency(2, 2));
   TAssert.AssertEquals('The longest NAME', 6, LRows.MaxLength(1));
+end;
+
+// Flags reach the driver as integers (the type of every row, a NULL's too),
+// never as Booleans: PostgreSQL refuses a Boolean for an integer column.
+procedure TBatchTests.Native_Flags_AreIntegers;
+var
+  LRec: TRecordingQuery;
+  LQuery: IQuery;
+  LBatch: IBatch;
+  LRows: IBatchRows;
+begin
+  LRec := TRecordingQuery.Create;
+  LRec.Native := True;
+  LQuery := LRec;
+  LBatch := TBatch.New(LQuery, INSERT_SQL);
+  LBatch.Params.NullFlags['ACTIVE'] := TOptNullBoolean.Null;
+  LBatch.AddRow;
+  LBatch.Params.Flags['ACTIVE'] := True;
+  LBatch.AddRow;
+  LBatch.Params.OptFlags['ACTIVE'] := TOptNullBoolean.From(False) as IOptBoolean;
+  LBatch.AddRow;
+  LBatch.Execute;
+  LRows := LRec.Batches[0];
+  TAssert.AssertEquals(Ord(pptInteger), Ord(LRows.ParamType(0)));
+  TAssert.AssertTrue('row 1 is NULL', LRows.IsNull(0, 0));
+  TAssert.AssertEquals(1, LRows.AsInteger(1, 0));
+  TAssert.AssertEquals(0, LRows.AsInteger(2, 0));
 end;
 
 procedure TBatchTests.Native_DeclinedByTheDriver_RunsRowByRow;

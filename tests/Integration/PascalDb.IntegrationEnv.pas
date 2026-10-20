@@ -103,6 +103,22 @@ function ExpectsNativeBatch: Boolean;
 /// or '' when the database has no such thing (SQLite: no server).
 function SessionIdSql: string;
 
+/// This runner's adapter and database, for reports ('sqldb/postgresql').
+function IntegrationTarget: string;
+
+/// The column type that holds a Boolean on this database ('BOOLEAN'; 'BIT'
+/// on SQL Server), or '' where there is none (Firebird before 3.0, asked
+/// through AFactory).
+function BooleanColumnType(const AFactory: IDBFactory): string;
+
+/// Whether the database refuses a Boolean parameter for an integer column
+/// and an Integer one for a Boolean column (PostgreSQL; gotcha 54).
+function RefusesBooleanIntegerMix: Boolean;
+
+/// The type a CAST to text names on this database (CHAR(20) on MySQL and
+/// MariaDB, which have no CAST to VARCHAR).
+function TextCastType: string;
+
 /// PoolMaxConnections of IntegrationFactory's configuration.
 function IntegrationPoolMax: Integer;
 
@@ -242,6 +258,64 @@ end;
 function SupportsDeferredConstraints: Boolean;
 begin
   Result := Engine in [engPostgres, engSQLite];
+end;
+
+function IntegrationTarget: string;
+const
+  ENGINES: array[TEngine] of string = ('firebird', 'postgresql', 'sqlite', 'mysql', 'mariadb', 'sqlserver');
+begin
+  {$IF DEFINED(PASCALDB_IT_ZEOS)}
+  Result := 'zeos/';
+  {$ELSEIF DEFINED(FPC)}
+  Result := 'sqldb/';
+  {$ELSE}
+  Result := 'firedac/';
+  {$IFEND}
+  Result := Result + ENGINES[Engine];
+end;
+
+function RefusesBooleanIntegerMix: Boolean;
+begin
+  Result := IsPostgres;
+end;
+
+function TextCastType: string;
+begin
+  if IsMySQL then
+    Result := 'CHAR(20)'
+  else
+    Result := 'VARCHAR(20)';
+end;
+
+function BooleanColumnType(const AFactory: IDBFactory): string;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+  LVersion: string;
+begin
+  case Engine of
+    engSqlServer: Result := 'BIT';
+    engFirebird:
+      begin
+        // BOOLEAN came with Firebird 3.0; the Windows runs use 2.5.
+        LScope := AFactory.GetPool.AcquireQuery(LQuery);
+        LScope.StartTransaction;
+        try
+          LQuery.Sql := 'SELECT rdb$get_context(''SYSTEM'', ''ENGINE_VERSION'') AS V FROM RDB$DATABASE';
+          LVersion := Trim(LQuery.Open.Strings['V']);
+          LScope.Commit;
+        except
+          LScope.Rollback;
+          raise;
+        end;
+        if (LVersion <> '') and (LVersion[1] >= '3') and (LVersion[1] <= '9') then
+          Result := 'BOOLEAN'
+        else
+          Result := '';
+      end;
+  else
+    Result := 'BOOLEAN';
+  end;
 end;
 
 function ExpectsNativeBatch: Boolean;

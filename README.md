@@ -73,7 +73,7 @@ samples only; don't build an application against that copy if it uses another `*
 too. An older pascal-common-faa stops the build with "pascal-db-faa needs pascal-common-faa
 1.8.0 or later".
 
-Current version: **0.16.0**. While it is 0.x the API may still change between minor
+Current version: **0.17.0**. While it is 0.x the API may still change between minor
 versions; every change is listed in the [changelog](CHANGELOG.md).
 
 ## Status

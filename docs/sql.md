@@ -15,8 +15,9 @@ LQuery.Sql := FFactory.SqlLoader['CITY.INSERT'].SQL;
 The loader looks for `<SQLDirectory>/<KEY>` in the configuration's `SqlSource`.
 `SQLDirectory` is set per database (`'PG'`, `'FB'`, `'SQLITE'` in the samples), so **one key
 can hold a different statement for each database** while the code stays the same. Usually
-most scripts are identical and only a few differ (a `CREATE TABLE`, a `RETURNING`). A
-pagination clause doesn't need a copy per database: the dialect writes it ([Paging](#paging)).
+most scripts are identical and only a few differ (a `CREATE TABLE`, a `RETURNING`): a common
+folder holds those once ([A common folder](#a-common-folder)). A pagination clause doesn't need
+a copy per database: the dialect writes it ([Paging](#paging)).
 
 A missing key raises `ESQLLoaderException` ("SQL not found: PG/CITY.INSERT. Looked in: ...").
 Each loader caches the texts it has read, and is safe to use from several threads.
@@ -54,6 +55,7 @@ the candidate to look at, not a general builder. Decided 2026-10-01.
 | `TDirectorySqlSource.Create(Root)` | `<Root>/<DIR>/<KEY>.sql` at runtime | development, or SQL deployed next to the program |
 | `TMemorySqlSource` | `.Add(Dir, Key, Sql)` calls | tests, and small programs such as the samples |
 | `TCompositeSqlSource.Create([A, B])` | asks each source in order; the first hit wins | a folder that overrides the embedded copies while developing |
+| `TFallbackSqlSource.Create(A, 'COMMON')` | asks `A` for `<DIR>/<KEY>`, then for `COMMON/<KEY>` | SQL written once for every database, each database's folder only for what differs |
 
 ### Embedded `.sql` files
 
@@ -82,6 +84,33 @@ and link it into the program on both compilers:
 Rebuild the `.res` after editing a `.sql` file. Give it a name different from the program's
 and keep it out of the program's folder: FPC with `-FU` links a same-named `.res` from the
 program folder instead of the one in the `$R` path (gotcha 19 in [`gotchas.md`](gotchas.md)).
+
+### A common folder
+
+One folder per database means a copy of every statement per database, even the ones that are
+the same everywhere. `TFallbackSqlSource` wraps any source and adds one rule: ask for
+`<SQLDirectory>/<KEY>`, and when it isn't there, for `<common folder>/<KEY>`.
+
+```
+sql/
+  COMMON/  CITY.INSERT.sql  CITY.BY_STATE.sql  MIG.0002.sql  ...
+  FB/      MIG.0002.sql          (only what differs on Firebird)
+  MSSQL/   MIG.0002.sql  CITY.INSERT.sql
+```
+
+```pascal
+LConfig.SQLDirectory := 'PG';
+LConfig.SqlSource := TFallbackSqlSource.Create(TResourceSqlSource.Create, 'COMMON');
+```
+
+A key in a database's folder overrides the common one for that database only; a database with
+nothing of its own needs no folder at all. Asked for the common folder itself, the source
+looks once. Folder names compare without case. A missing key names both places: "SQL not
+found: PG/X. Looked in: resource SQL_PG_X, then resource SQL_COMMON_X". `build_sql_res.py`
+needs nothing new (`COMMON` is one more folder). Combined with a development folder, put the
+fallback outside the composite, so a database's own script in either source wins over a common
+one: `TFallbackSqlSource.Create(TCompositeSqlSource.Create([LDir, LRes]), 'COMMON')`.
+Sample [`03-migrations`](../samples/03-migrations/Migrations.dpr): 14 files instead of 30.
 
 ### Overriding with a folder while developing
 

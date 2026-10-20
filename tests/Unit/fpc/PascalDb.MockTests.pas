@@ -8,7 +8,8 @@
 
 { Tests for the database mock (PascalDb.Mock): TMockQueryResult (rows,
   columns, nulls, unknown column), TMockParams (every type, including
-  IOptXxx/INullXxx/IOptNullXxx), TMockSQLLoader and TMockDBFactory (responses
+  IOptXxx/INullXxx/IOptNullXxx, and flags stored as the Integer 1/0),
+  TMockSQLLoader and TMockDBFactory (responses
   registered by key, recorded executions, descriptive error for a key with no
   response).
 
@@ -59,6 +60,10 @@ type
     procedure SetOptNullString_Null_StoresNull;
     procedure SetOptNullString_WithValue_Stores;
     procedure KeyNormalization_CaseInsensitive;
+    procedure Flags_AreStoredAsIntegers;
+    procedure OptFlags_Undefined_DoesNotStore;
+    procedure NullFlags_Null_StoresNull;
+    procedure OptNullFlags_UndefinedNullAndValue;
   end;
 
   TMockSQLLoaderTests = class(TTestCase)
@@ -237,6 +242,55 @@ begin
   P := TMockParams.Create;
   P.SetBoolean('ACTIVE', True);
   TAssert.AssertTrue(P.GetBoolean('ACTIVE'));
+end;
+
+procedure TMockParamsTests.Flags_AreStoredAsIntegers;
+var
+  P: IParams;
+begin
+  P := TMockParams.Create;
+  P.Flags['ACTIVE'] := True;
+  P.Flags['HIDDEN'] := False;
+  TAssert.AssertEquals('True goes out as 1', 1, P.Integers['ACTIVE']);
+  TAssert.AssertEquals('False goes out as 0', 0, P.Integers['HIDDEN']);
+  TAssert.AssertTrue(P.Flags['ACTIVE']);
+  TAssert.AssertFalse(P.Flags['HIDDEN']);
+end;
+
+procedure TMockParamsTests.OptFlags_Undefined_DoesNotStore;
+var
+  P: IParams;
+begin
+  P := TMockParams.Create;
+  P.OptFlags['ACTIVE'] := TOptNullBoolean.Undefined;
+  TAssert.AssertFalse('Undefined must not be stored', P.OptFlags['ACTIVE'].HasValue);
+  P.OptFlags['ACTIVE'] := TOptNullBoolean.From(True) as IOptBoolean;
+  TAssert.AssertEquals(1, P.Integers['ACTIVE']);
+  TAssert.AssertTrue(P.OptFlags['ACTIVE'].Value);
+end;
+
+procedure TMockParamsTests.NullFlags_Null_StoresNull;
+var
+  P: IParams;
+begin
+  P := TMockParams.Create;
+  P.NullFlags['ACTIVE'] := TOptNullBoolean.Null;
+  TAssert.AssertTrue(P.NullFlags['ACTIVE'].IsNull);
+  P.NullFlags['ACTIVE'] := TOptNullBoolean.From(False) as INullBoolean;
+  TAssert.AssertEquals(0, P.Integers['ACTIVE']);
+end;
+
+procedure TMockParamsTests.OptNullFlags_UndefinedNullAndValue;
+var
+  P: IParams;
+begin
+  P := TMockParams.Create;
+  P.OptNullFlags['ACTIVE'] := TOptNullBoolean.Undefined;
+  TAssert.AssertFalse(P.OptNullFlags['ACTIVE'].HasValue);
+  P.OptNullFlags['ACTIVE'] := TOptNullBoolean.Null;
+  TAssert.AssertTrue(P.OptNullFlags['ACTIVE'].IsNull);
+  P.OptNullFlags['ACTIVE'] := TOptNullBoolean.From(True);
+  TAssert.AssertEquals(1, P.Integers['ACTIVE']);
 end;
 
 procedure TMockParamsTests.SetGetCurrency;

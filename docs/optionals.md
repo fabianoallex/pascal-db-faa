@@ -63,6 +63,33 @@ LQuery.Params.OptNullStrings['PHONE'] := LPhone;    // Undefined: not bound; Nul
 So a parameter that may not be bound must not be in the SQL when it isn't: the template
 tags take it out.
 
+### Flags: a Boolean in an integer column
+
+A flag that the code sees as a Boolean is often stored as `SMALLINT` or `INTEGER` 1/0: the
+same type on every database (Firebird 2.5 has no `BOOLEAN`). Bind it with `Flags`, not
+`Booleans`:
+
+```pascal
+LQuery.Params.Flags['ACTIVE'] := True;                 // sent as the Integer 1
+LQuery.Params.OptFlags['ACTIVE'] := LDto.Active;       // IOptBoolean: Undefined skips, a value is 1/0
+LQuery.Params.NullFlags['ACTIVE'] := TOptNullBoolean.Null; // a NULL typed as an integer
+```
+
+`Flags`, `OptFlags`, `NullFlags` and `OptNullFlags` follow the same rules as their `Booleans`
+counterparts and send an Integer. Reading needs nothing new: `IQueryResult.Booleans` reads an
+integer 1 as `True` on every database.
+
+| Column | Bind with |
+|---|---|
+| `SMALLINT` / `INTEGER` flag | `Flags`, `OptFlags`, `NullFlags`, `OptNullFlags` |
+| the database's Boolean type (`BOOLEAN`, `BIT` on SQL Server) | `Booleans`, `OptBooleans`, ... |
+
+The rule matters on **PostgreSQL**, which refuses a Boolean parameter for an integer column
+(and an Integer one for a `BOOLEAN` column), in an `INSERT`, an `UPDATE` and a `WHERE`; SQLite
+takes both, so a suite that only runs SQLite won't tell you. The other databases take a Boolean
+in an integer column as 1/0. Measured on every adapter: gotcha 54 in
+[`gotchas.md`](gotchas.md).
+
 ## Optional filters
 
 The SQL has one block per optional condition ([guide 2](sql.md#templates)):
