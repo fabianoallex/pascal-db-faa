@@ -144,6 +144,38 @@ as integer literals. Firebird uses `ROWS m TO n` because `OFFSET/FETCH` needs 3.
 
 ---
 
+## Outbox (`PascalDb.Outbox`)
+
+Promoted from pascal-agenda-faa on 2026-10-30 (its `Agenda.Outbox`, decision 10 of its M7 review;
+its design is in that repository's `docs/design.md`, "M4: the outbox core"). The unit is the
+agenda's with the library's prefix and rules: `PdbOutboxNewOwner` (was `OutboxNewOwner`) and a
+`TOutboxErrorProc` that follows `PASCALDB_FUNCREFS`; the agenda adopts the release by dropping its
+copy. Usage guide: `docs/outbox.md`.
+
+- **The tables and the SQL are the application's**, by name (`OUTBOX_SQL_*`), as
+  `TDbIdempotencyStore` in pascal-api-infra-faa. The library ships no DDL: the reference SQL is
+  `docs/outbox/sql/<DIR>/<NAME>.sql` (`COMMON`, `PG`, `FB`, `MYSQL`, `MSSQL`; the samples' folder
+  names, read through `TFallbackSqlSource`). **That folder is the single copy**: the integration
+  tests read it with a `TDirectorySqlSource` found by walking up from the runner (the Linux
+  script copies `docs/outbox` next to it), and sample 07 embeds it (`samples/07-outbox/sql/
+  OutboxSql.res`, checked by `test_samples_docker.sh`). No `;`, `'` or `:` in a `.sql` file's
+  comments: the schema is split at `;` (a `;` in a comment broke Firebird's first statement), and
+  the statement files have no comments at all.
+- **Tests**: `tests/Integration/PascalDb.OutboxTests.pas` (13; every database and adapter, its
+  own factory through `SqlSourceFactory` with `LockTimeoutMs` 5000, the tables created once per
+  run from `OUTBOX.SCHEMA`) and `tests/Unit/PascalDb.OutboxUnitTests.pas` (6, no database).
+- **Claims per database**, each measured (gotchas 56 to 59): PostgreSQL a CTE with `FOR UPDATE
+  SKIP LOCKED` (the agenda's `IN (SELECT ... LIMIT n ...)` claimed more than `n`), MySQL/MariaDB a
+  derived table `STRAIGHT_JOIN`ed first (joined the other way it waited for locked rows), SQL
+  Server `READPAST` on the claim and on the reads of claimed and pending rows, Firebird `UPDATE
+  ... ORDER BY ... ROWS` (no skipping: the pass gives up with `ELockConflictException` after
+  `LockTimeoutMs`), SQLite the agenda's (one writer). MySQL's purge of deliveries is its own
+  (error 1093). Bounded payloads: SQL Server's is `NVARCHAR(4000)` (SQLdb read an `NVARCHAR(MAX)`
+  back empty, gotcha 58) and Firebird's `VARCHAR(8000)` (FireDAC failed to write some values into a
+  text BLOB, gotcha 59).
+
+---
+
 ## pascal-common-faa (base library)
 
 The optional types (`PascalCommon.Optionals`), the atomics and ticks (`PascalCommon.Threading`),
@@ -163,13 +195,15 @@ them. Moved in the pilot migration (pascal-common-faa's plan, phase F6, 2026-10-
   format; consumers test it with that unit in their `uses`). A release bumps it together with the
   `.lpk` files, the README and the CHANGELOG.
 - **Minimum version** checked in `PascalDb.Interfaces` (every user compiles it):
-  `PASCALCOMMON_VERSION < 10800` stops the build with "pascal-db-faa needs pascal-common-faa 1.8.0
+  `PASCALCOMMON_VERSION < 11700` stops the build with "pascal-db-faa needs pascal-common-faa 1.17.0
   or later" (measured by raising the bound: lazbuild "Fatal: (2022) User defined: ...", Delphi 12
   "F1054 ..."). 1.3.0 brought `PascalCommon.SafeLog`, 1.4.0 `PascalCommon.Utf8` (behind
   `PdbUtf8BytesToString` since 0.12.1), 1.6.0 `PascalCommon.Metrics` (the pool metrics since
   0.14.0: "Metrics" in docs/pool.md), 1.7.0 `PascalCommon.Tracing` and 1.8.0 its detached spans (the
-  spans: "Spans (tracing)" in docs/pool.md); only additions within 1.x; `pascal_db_faa.lpk` has
-  `MinVersion Major="1" Minor="8"`. Raise both when the library starts using something newer.
+  spans: "Spans (tracing)" in docs/pool.md), 1.15.0 `PascalCommon.Random` and 1.17.0
+  `PascalCommon.Crypto` (`PdbOutboxNewOwner` and the event ids, since 0.18.0); only additions
+  within 1.x; `pascal_db_faa.lpk` has `MinVersion Major="1" Minor="17"`. Raise both when the
+  library starts using something newer.
 - **Checkout without `--recursive`**: pascal-common-faa's own `external/pascal-jsonmapper-faa` is
   for its own tests. CI uses `submodules: true` (not recursive).
 - Something the library needs changed there goes to pascal-common-faa first (strict semver,
@@ -503,7 +537,11 @@ Package Manager under "zeos").
 
 ## Known open items
 
-None.
+- FireDAC on Firebird fails to write some text values (1, 2, 13, 16 characters measured) into a
+  `BLOB SUB_TYPE TEXT` column through a string parameter: "invalid BLOB ID" (gotcha 59, found by
+  the outbox's tests on 2026-10-30). Cause not isolated; the outbox's reference schema uses a
+  `VARCHAR` payload on Firebird. A fix needs probes built in the Delphi IDE.
+- SQLdb on SQL Server reads an `NVARCHAR(MAX)` column back empty (gotcha 58). Cause not isolated.
 
 Closed on 2026-09-30: the rare failures with concurrent connections on Zeos + Firebird (Linux),
 sample 05 (CI run 36235419745) and `ConcurrentWriters_AllCommit` (CI run 36644884746, attempt
@@ -515,7 +553,7 @@ serializing Firebird connects in the Zeos adapter.
 
 ## Gotchas
 
-The numbered gotchas (symptom → cause → fix, 1–54) live in [`docs/gotchas.md`](docs/gotchas.md).
+The numbered gotchas (symptom → cause → fix, 1–59) live in [`docs/gotchas.md`](docs/gotchas.md).
 Read it before touching the pool, an adapter, resources or anything that differs between
 Delphi and FPC, and add new ones there, keeping the numbering. References in this file
 ("gotcha 17") point to it.

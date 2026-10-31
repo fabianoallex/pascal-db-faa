@@ -20,6 +20,9 @@ A database access layer for **Delphi and Lazarus/FPC from the same source code**
   [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa)) integrated with the
   parameters.
 - `TMockDBFactory`: a complete mock for testing repositories without a database.
+- A transactional outbox (`PascalDb.Outbox`): events written in the change's transaction, a
+  relay that claims them with a lease and hands them to a sink, a local sink with one retried
+  delivery per handler, and reference SQL for every supported database.
 
 Drivers live in thin adapters on top of a shared, driver-agnostic base (configuration,
 transactions and savepoints, scripts, parameter semantics, TDataSet-based queries). Available:
@@ -53,14 +56,14 @@ end;  // the connection goes back to the pool when LQuery and LScope are release
 
 - [**Guides**](docs/README.md): getting started, SQL by key and templates, optional and
   nullable values, migrations, testing with the mock, errors, the pool, adapters and databases,
-  writing an adapter for another component, using another database.
-- [**Samples**](samples/README.md): six console programs, each one source for both compilers.
+  writing an adapter for another component, using another database, the transactional outbox.
+- [**Samples**](samples/README.md): seven console programs, each one source for both compilers.
 
 ## Dependency: pascal-common-faa
 
 The optional types, the atomics and monotonic ticks, the clock/sleep context the pool uses and
 `SafeWriteln`, and the tracer and metrics registry the spans and pool metrics go through, come from
-[pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa) (1.8.0 or later), shared with the
+[pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa) (1.17.0 or later), shared with the
 other `*-faa` libraries. The application provides one copy of it:
 
 - **Lazarus:** open and compile `pascal_common_faa.lpk` once (Lazarus then finds it by name);
@@ -71,9 +74,9 @@ other `*-faa` libraries. The application provides one copy of it:
 This repository has it as a git submodule in `external/pascal-common-faa` for its own tests and
 samples only; don't build an application against that copy if it uses another `*-faa` library
 too. An older pascal-common-faa stops the build with "pascal-db-faa needs pascal-common-faa
-1.8.0 or later".
+1.17.0 or later".
 
-Current version: **0.17.0**. While it is 0.x the API may still change between minor
+Current version: **0.18.0**. While it is 0.x the API may still change between minor
 versions; every change is listed in the [changelog](CHANGELOG.md).
 
 ## Status
@@ -110,7 +113,7 @@ adapters/sqldb/         SQLdb adapter (package pascal_db_faa_sqldb.lpk)
 adapters/firedac/       FireDAC adapter (Delphi)
 adapters/zeos/          Zeos adapter (both; package pascal_db_faa_zeos.lpk)
 external/               git submodules: pascal-common-faa, pascal-jsonmapper-faa (tests and samples)
-docs/                   usage guides (start at docs/README.md)
+docs/                   usage guides (start at docs/README.md); docs/outbox/sql: the outbox's reference SQL
 samples/                console samples, one source for both compilers (see samples/README.md)
 tools/                  gen_fpc_mirror.py, build_sql_res.py, test_*.sh, ci-test.sh
 PascalDb.groupproj      Delphi project group

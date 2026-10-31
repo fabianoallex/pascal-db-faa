@@ -6,6 +6,58 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-30
+
+### Added
+
+- `PascalDb.Outbox`: a transactional outbox, promoted from pascal-agenda-faa (its
+  `Agenda.Outbox`, decision 10 of its M7 review) with its tests. `TOutbox.Enqueue` writes an
+  event in the caller's transaction, with the current span's traceparent; `TOutboxRelay.RunOnce`
+  claims a batch with a lease and hands each event to an `IOutboxSink`, marked delivered in one
+  transaction with what the sink wrote, a failure retried after `TOutboxRetry`'s doubling delay
+  while the batch goes on; `TOutboxLocalSink` runs the program's `IOutboxHandler`s, one delivery
+  per event and handler, each retried apart and dead after `MaxAttempts`; `TOutbox.Purge`,
+  `TOutbox.MeasurePending`, and metrics on `PcMetrics` (`outbox.events.delivered`/`failed`,
+  `outbox.handler.runs`, `outbox.events.pending`/`oldest_age`). The tables and the SQL stay the
+  application's, read by name; `docs/outbox.md` documents each statement and
+  `docs/outbox/sql` has the reference SQL for Firebird, PostgreSQL, SQLite, MySQL/MariaDB and SQL
+  Server. Differences from the agenda's unit: `OutboxNewOwner` is `PdbOutboxNewOwner`, and
+  `TOutboxErrorProc` follows `PASCALDB_FUNCREFS` (`reference to` on Delphi).
+- The reference claims differ from the agenda's on two databases, both measured: on PostgreSQL
+  `UPDATE ... WHERE (key) IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` claimed more than `n`
+  rows (the plan re-ran the subquery for each row; 3 rows with a batch of 2), so the claim is a
+  CTE; on MySQL the claim joined to a derived table waited for a row another transaction held
+  instead of skipping it (the plan read the table first), so the derived table comes first with
+  `STRAIGHT_JOIN`. SQL Server's claims and reads use `READPAST`.
+- Integration tests `TOutboxTests` (`tests/Integration/PascalDb.OutboxTests.pas`): the agenda's
+  eleven tests that need a database, run on every database and adapter with the reference SQL,
+  plus a claim skipping a row another transaction holds (PostgreSQL, MySQL, MariaDB, SQL Server)
+  and an event written in a transaction still open not stalling the relay (all but SQLite).
+  Unit tests `TOutboxUnitTests` for the parts that need none (the retry delay, the options, the
+  owner, a handler name taken twice, `Enqueue` on the mock).
+- Sample 07-outbox: an order and its event in one transaction, a relay pass, two handlers (one
+  failing twice, retried on its own), the purge; it embeds `docs/outbox/sql` unchanged.
+
+### Changed
+
+- Needs pascal-common-faa 1.17.0 or later (was 1.8.0): the outbox uses `PascalCommon.Random` and
+  `PascalCommon.Crypto`. `pascal_db_faa.lpk` requires `MinVersion` 1.17, and the submodule is on
+  1.26.0.
+
+### Documentation
+
+- Gotcha 58 and `docs/adapters.md`, SQL Server notes: SQLdb reads an `NVARCHAR(MAX)` column
+  back empty (no error); Zeos reads it right. Gotcha 59: FireDAC on Firebird fails with "invalid
+  BLOB ID" writing some text values (1, 2, 13, 16 characters measured) into a `BLOB SUB_TYPE TEXT`
+  column; SQLdb and Zeos store them. Both found by the outbox's tests and not fixed (causes not
+  isolated); the reference schema bounds the payload instead (`NVARCHAR(4000)`, `VARCHAR(8000)`).
+  Gotchas 56 and 57: the PostgreSQL and MySQL claims above.
+- Gotcha 55 and `docs/pool.md`, "Threads": on Delphi, the RTL's memory manager stops the pool
+  from scaling past one thread, with FireDAC and Zeos alike (SQLite, 32 threads: about 2,100
+  operations per second against about 8,300 for SQLdb on FPC). With a memory manager that scales
+  with threads, it reached 6,200 to 6,900. No library change: the program picks its memory
+  manager. Found by pascal-agenda-faa (its API was slower on Delphi under load).
+
 ## [0.17.0] - 2026-10-20
 
 ### Added

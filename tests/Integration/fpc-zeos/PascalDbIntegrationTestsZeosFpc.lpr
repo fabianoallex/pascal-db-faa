@@ -26,7 +26,8 @@ uses
   Interfaces, Forms, GuiTestRunner,
   {$ENDIF}
   Classes, consoletestrunner, testregistry,
-  PascalDb.ContractTests;
+  PascalDb.ContractTests,
+  PascalDb.OutboxTests;
 
 var
   ConsoleApp: TTestRunner;

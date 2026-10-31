@@ -13,11 +13,12 @@ concepts each one shows.
 | [04-optionals](04-optionals/Optionals.dpr) | `INullXxx` / `IOptXxx` / `IOptNullXxx` as parameters and column reads; SQL templates shaped by them: optional filters (`ApplyFilter`, `${NAME_OP}`), partial updates where Undefined leaves a column alone and Null clears it (`ProcessTag`), printing the SQL each case produces | Yes |
 | [05-pool](05-pool/PoolUnderLoad.dpr) | The connection pool under concurrent load (worker threads): growth up to the limit, callers waiting their turn, `EPoolTimeoutException` when the wait runs out, the idle sweep; observed through its events (thread-safe handler) and `GetSnapshot` | Yes |
 | [06-json](06-json/JsonApi.dpr) | Optional values between JSON and the database with [pascal-jsonmapper-faa](https://github.com/fabianoallex/pascal-jsonmapper-faa) (submodule in `external/`, bridge `PascalCommon.JsonMapper.Optionals` from pascal-common-faa): a small API without a server, POST (a missing member becomes NULL), GET (NULL columns written as `null`), PATCH (absent / `null` / value map to leave / clear / set the column), and the 400 answers for `null` in an `IOptString` and a wrong value type | Yes |
+| [07-outbox](07-outbox/Outbox.dpr) | A transactional outbox (`PascalDb.Outbox`): an order and its event in one transaction (a rolled back order leaves no event), a relay pass handing the events to the local sink, two handlers with their own deliveries (one fails twice and is retried after its delay without repeating the other), the purge; the reference SQL of `docs/outbox/sql` embedded unchanged | Yes |
 
 01 and 02 share `common/Samples.CityRepository.pas`: the same class runs against the mock in 01
 and against PostgreSQL, Firebird, SQLite, MySQL, MariaDB or SQL Server in 02.
 
-## Running samples 02 to 06
+## Running samples 02 to 07
 
 Every sample builds the pascal-common-faa submodule, and sample 06 the pascal-jsonmapper-faa one
 too (`git submodule update --init`). The Lazarus projects require `pascal_common_faa` from
@@ -89,6 +90,19 @@ python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sq
 Or, while developing, set `PASCALDB_SAMPLE_SQL_DIR` to the `sql` folder: the files there
 are read first and the embedded copies are only the fallback. `--reset` drops the
 sample's tables (`SAMPLE_PRODUCTS`, `SCHEMA_MIGRATIONS`) so every migration applies again.
+
+## Sample 07: the outbox's SQL
+
+Sample 07 embeds the reference SQL of [`docs/outbox/sql`](../docs/outbox/sql) as it is, through
+`sql/OutboxSql.res` (the folder of the database, then `COMMON`). After editing a file there,
+rebuild it (the test script checks it's up to date):
+
+```
+python tools/build_sql_res.py docs/outbox/sql samples/07-outbox/sql/OutboxSql.res
+```
+
+It drops and creates its tables (`SAMPLE_ORDERS`, `OUTBOX`, `OUTBOX_DELIVERIES`) on every run,
+and passes the times itself, so its output is the same each time.
 
 ## Adapter
 

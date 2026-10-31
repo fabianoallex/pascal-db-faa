@@ -2,10 +2,10 @@
 # Builds the samples on Linux FPC and runs them, SQLdb or Zeos adapter: a
 # database server container plus an FPC container on a private Docker network
 # (same layout as test_integration_docker.sh). Sample 01 needs no database;
-# samples 02 to 06 run against the server (03 twice: every migration applies
+# samples 02 to 07 run against the server (03 twice: every migration applies
 # on the first run, none on the second; the outcomes of 04's partial updates,
-# of 05's three pool phases and 06's JSON responses are checked in their
-# output). Every sample builds the pascal-common-faa submodule, and 06 the
+# of 05's three pool phases, 06's JSON responses and 07's outbox passes are
+# checked in their output). Every sample builds the pascal-common-faa submodule, and 06 the
 # pascal-jsonmapper-faa one too. Everything is removed at the end, even on
 # failure. Acceptance: every sample exits with 0
 # and reports 0 unfreed blocks. SQLite needs no server: its database is a file
@@ -99,6 +99,7 @@ for M in external/pascal-common-faa/src/PascalCommon.Optionals.pas external/pasc
   [ -f "$M" ] || { echo "$M is missing: git submodule update --init"; exit 1; }
 done
 python tools/build_sql_res.py samples/03-migrations/sql samples/03-migrations/sql/MigrationsSql.res --check
+python tools/build_sql_res.py docs/outbox/sql samples/07-outbox/sql/OutboxSql.res --check
 
 docker network create "$NET" >/dev/null
 [ -z "$SERVER_IMAGE" ] || docker run -d --name "$DB" --network "$NET" -e "$SERVER_ENV" -e "$SERVER_ENV2" "$SERVER_IMAGE" >/dev/null
@@ -126,7 +127,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   ACCEPT_EULA=Y apt-get install -y -qq $CLIENT_PKG >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
   export PASCALDB_SAMPLE_CLIENT="$(ls $CLIENT_GLOB 2>/dev/null | head -1)"
   [ -n "$PASCALDB_SAMPLE_CLIENT" ] || { echo "client library not installed: $CLIENT_GLOB"; tail -20 /t-apt.log; exit 1; }
-  mkdir -p /t/u1 /t/u2 /t/u3 /t/u4 /t/u5 /t/u6 /t/external && cp -r /src/src /src/adapters /src/samples /t/
+  mkdir -p /t/u1 /t/u2 /t/u3 /t/u4 /t/u5 /t/u6 /t/u7 /t/external && cp -r /src/src /src/adapters /src/samples /t/
   cp -r /src/external/pascal-jsonmapper-faa /src/external/pascal-common-faa /t/external/
   C=/t/external/pascal-common-faa/src
   build() { # dir program units-folder [extra options]
@@ -152,6 +153,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   build 05-pool PoolUnderLoad u5 "$ADAPTER_OPTS"
   M=/t/external/pascal-jsonmapper-faa/src
   build 06-json JsonApi u6 "$ADAPTER_OPTS -Fu/t/external/pascal-common-faa/bridges/jsonmapper -Fu$M -Fi$M"
+  build 07-outbox Outbox u7 "$ADAPTER_OPTS"
   run MockRepository
   if [ -n "$DB_PORT" ]; then
     for i in $(seq 1 180); do (echo > /dev/tcp/$PASCALDB_SAMPLE_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
@@ -202,4 +204,15 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   grep -qF "  200 {\"items\":[{\"id\":1,\"name\":\"Maria\",\"email\":null,\"credit\":150.5},{\"id\":2,\"name\":\"João\",\"email\":null,\"credit\":null},{\"id\":3,\"name\":\"Ana Souza\",\"email\":null,\"credit\":200}]}" /t/run-JsonApi.log \
     && grep -qF "400 Bad Request: \$.name:" /t/run-JsonApi.log \
     && grep -qF "400 Bad Request: \$.credit:" /t/run-JsonApi.log \
-    || { echo "unexpected JSON responses"; exit 1; }'
+    || { echo "unexpected JSON responses"; exit 1; }
+  run Outbox
+  # Two orders committed (the rolled back one has no event), two handlers
+  # each: stock done at once, email failing twice and done on its retry.
+  grep -q "order 2 rolled back" /t/run-Outbox.log \
+    && grep -q "t=1000 relay: 2 delivered, 4 handler deliveries written" /t/run-Outbox.log \
+    && grep -q "t=1000 local sink: 2 done" /t/run-Outbox.log \
+    && grep -q "t=1002 local sink: 0 done" /t/run-Outbox.log \
+    && grep -q "t=1005 local sink: 2 done" /t/run-Outbox.log \
+    && grep -q "pending events: 0, deliveries done: 4" /t/run-Outbox.log \
+    && grep -q "purged: 2 events" /t/run-Outbox.log \
+    || { echo "unexpected outbox passes"; exit 1; }'

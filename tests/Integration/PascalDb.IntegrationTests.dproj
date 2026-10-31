@@ -117,6 +117,7 @@
         <DCCReference Include="..\Unit\PascalDb.DUnitXCompat.pas"/>
         <DCCReference Include="PascalDb.IntegrationEnv.pas"/>
         <DCCReference Include="PascalDb.ContractTests.pas"/>
+        <DCCReference Include="PascalDb.OutboxTests.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

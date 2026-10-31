@@ -506,3 +506,85 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     `OptNullFlags` take a Boolean and send the Integer 1/0 (a NULL typed as an integer): use them
     for a flag stored in an integer column, and `Booleans` only for the database's Boolean type
     ([`optionals.md`](optionals.md), "Flags").
+55. **Delphi: the pool doesn't scale past one thread, whatever the adapter.** The RTL's memory
+    manager stops the threads from working in parallel. Measured on 2026-10-28 for
+    pascal-agenda-faa, whose API was slower on Delphi (FireDAC + Indy) than on FPC (SQLdb +
+    fphttpserver) on the same machine. The probe ran N threads of "`AcquireQuery`, a `SELECT`
+    by key or a 20-row join, read the rows, release", with no HTTP (`.ci/probe-load`, ignored by
+    git). It ran on Windows (12 cores), Delphi 12 CE Release and FPC 3.2.2 `-O2`, with SQLite
+    (sqlite.org's 3.53.4 DLL; FireDAC links its own) and PostgreSQL 17 in Docker. Results in
+    operations per second:
+
+    | SQLite | 1 thread | 8 threads | 32 threads |
+    |---|---|---|---|
+    | SQLdb (FPC Win64) | 2120 | 9177 | 8307 |
+    | Zeos (FPC Win64) | 424 | 2528 | 4057 |
+    | FireDAC (Delphi Win64) | 1670-2129 | 1704-2146 | 1987-2224 |
+    | FireDAC (Delphi Win32) | 1543 | 1746 | 2058 |
+    | Zeos (Delphi Win64) | 505 | 578 | 560 |
+    | FireDAC, Windows heap (Win64 / Win32) | 1559 / 1528 | 4769 / 4164 | 6214 / 6870 |
+    | Zeos (Delphi), Windows heap | 633 | 2133 | 2546 |
+
+    - With one thread, FireDAC is as fast as SQLdb. On Delphi, adding threads adds no
+      throughput, with both FireDAC and Zeos, and the p95 grows with the thread count. That is
+      the shape of a lock every thread waits on. The same Zeos source was 7-8 times slower at 32
+      threads on Delphi than on FPC, so the cause is not FireDAC.
+    - The probe replaced the memory manager with one that sends new blocks to the Windows
+      process heap (`HeapAlloc`, which has no global lock). Throughput then grew with the
+      threads, with no other change.
+    - `NeverSleepOnMMThreadContention := True` (the RTL spins instead of calling
+      `Sleep(0)`/`Sleep(1)` on a busy lock) wasn't the cure. It gave FireDAC 2885 instead of
+      2224 at 32 threads, and gave Zeos 218 instead of 560.
+    - The RTL's manager (`getmem.inc`, a FastMM4 derivative) has one lock per small-block size
+      but a single lock for every medium block (about 2.5 KB to 260 KB). That fits the
+      measurements, but which lock the threads were waiting on wasn't isolated.
+    - PostgreSQL in Docker, 32 threads (noisy, three runs): SQLdb 916-1020, FireDAC 475-689
+      with the RTL's manager and 779-857 with the Windows heap, Zeos (Delphi) 257 and then 798.
+      The server's round trips (about 1 ms each through Docker on Windows) are most of the
+      cost, so the gap is smaller.
+
+    Fix: none in the library. The memory manager belongs to the program. A multi-threaded
+    Delphi server (an HTTP API, workers) should install one that scales with threads, as the
+    first unit of the `.dpr` (FastMM5, or a manager over the Windows heap). Not yet measured: an
+    application's own end-to-end numbers with such a manager.
+56. **PostgreSQL: `UPDATE ... WHERE (key) IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)`
+    updates more than `n` rows.** Found by the outbox's `Relay_BatchSize` test (3 events, a batch
+    of 2: 3 claimed), on SQLdb and Zeos alike; reproduced in `psql` on PostgreSQL 17. The plan was
+    a *Nested Loop Semi Join* with the subquery on the inner side, so the `LIMIT` subquery ran
+    again for each outer row, and each run could return other rows. With fewer rows than the
+    limit it never shows, which is how pascal-agenda-faa's claim (the source of the outbox) kept
+    it. Fix: put the locking `SELECT` in a CTE and `UPDATE ... FROM` it. A CTE with `FOR UPDATE`
+    is never inlined, so it runs once (`UPDATE 2` for the same rows). Statements starting with
+    `WITH` ran through `IQuery.ExecSql` on SQLdb and Zeos with the right row count.
+57. **MySQL: a claim joined to a `FOR UPDATE SKIP LOCKED` derived table still waits for locked
+    rows.** `UPDATE OUTBOX O JOIN (SELECT ... FOR UPDATE SKIP LOCKED) C ON ... SET ...` waited
+    for a row another transaction held, then failed with error 1205 (MySQL 8.4 and MariaDB 11.4,
+    SQLdb; reproduced with the `mysql` client). `EXPLAIN` showed the plan reading `OUTBOX` first
+    (an index range over every pending row, each one locked by the `UPDATE`), and the derived
+    table only after. Fix: `UPDATE (SELECT ...) C STRAIGHT_JOIN OUTBOX O ON ...`, so the derived
+    table, which skips the locked rows, is read first and the table is reached by its key. Then
+    the claim skipped both a row held by an `UPDATE` and a row inserted by a transaction still
+    open. MySQL also refuses a `DELETE` whose subquery reads the
+    same table (error 1093: "You can't specify target table ... for update in FROM clause"); a
+    derived table with `DISTINCT` is read before the delete and is allowed.
+58. **SQLdb on SQL Server reads an `NVARCHAR(MAX)` column back empty.** Found by the outbox's
+    tests (2026-10-30): `IQueryResult.Strings` of a `PAYLOAD NVARCHAR(MAX)` column was `''`
+    (SQLdb's `ODBC` connector, Microsoft's ODBC Driver 18.7, Linux), while every other column of
+    the row read right. Zeos (`odbc_w`) read the same column correctly; FireDAC has no SQL Server
+    driver in the Community Edition (gotcha 42). The contract suite never had a `MAX` column on
+    SQL Server, which is why it didn't show before. Not investigated further (the cause in
+    SQLdb's connector isn't isolated). Workaround: a bounded `NVARCHAR(n)`, up to 4000, reads
+    right; the outbox's reference schema declares its payload `NVARCHAR(4000)`.
+59. **FireDAC on Firebird: a text parameter into a `BLOB SUB_TYPE TEXT` column fails with
+    "invalid BLOB ID" for some lengths.** Found by the outbox's tests (2026-10-30, Delphi 12 CE,
+    Win32 and Win64, Firebird 2.5): `INSERT ... VALUES (..., :PAYLOAD, ...)` with `PAYLOAD BLOB
+    SUB_TYPE TEXT CHARACTER SET UTF8`, the value set through `IParams.Strings` (the adapter's
+    `AsWideString`), raised `[FireDAC][Phys][FB] ... SQL error code = -303, invalid BLOB ID`. One
+    insert per value, each in its own transaction on the same pool: values of 0 and 3 to 9
+    characters were stored, values of 1, 2, 13 and 16 characters failed (`'{}'`, `'ab'`, `' '`,
+    `'{"orderId":1}'`), whatever the characters. SQLdb and Zeos stored every one of them on the
+    same database, and FireDAC stored all of them in a `VARCHAR(8000) CHARACTER SET UTF8` column.
+    The contract suite has no BLOB column on Firebird, which is why it never showed. Cause not
+    isolated: the FireDAC source isn't in the Community Edition, and the adapter doesn't know a
+    parameter's target column type. Workaround: a `VARCHAR` column where FireDAC writes text on
+    Firebird; the outbox's reference schema declares its payload `VARCHAR(8000)`. Open item.

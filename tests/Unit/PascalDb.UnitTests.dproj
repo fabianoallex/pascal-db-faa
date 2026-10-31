@@ -126,6 +126,7 @@
         <DCCReference Include="..\..\src\PascalDb.Adapter.Base.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Adapter.DataSet.pas"/>
         <DCCReference Include="..\..\src\PascalDb.Batch.pas"/>
+        <DCCReference Include="..\..\src\PascalDb.Outbox.pas"/>
         <DCCReference Include="PascalDb.DUnitXCompat.pas"/>
         <DCCReference Include="PascalDb.SqlLoaderTests.pas"/>
         <DCCReference Include="PascalDb.MockTests.pas"/>
@@ -135,6 +136,7 @@
         <DCCReference Include="PascalDb.AdapterBaseTests.pas"/>
         <DCCReference Include="PascalDb.PagingTests.pas"/>
         <DCCReference Include="PascalDb.BatchTests.pas"/>
+        <DCCReference Include="PascalDb.OutboxUnitTests.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

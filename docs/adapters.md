@@ -192,6 +192,8 @@ program.
   without `NULL` accepts NULLs, ...), as in any ODBC or OLE DB program; `ARITHABORT` is off.
 - SQLdb reads a `NUMERIC`/`DECIMAL` column as a floating-point field, so `Currencies[...]` goes
   through a `Double` (exact for amounts that fit 15 digits); Zeos reads it as a decimal.
+- **SQLdb reads an `NVARCHAR(MAX)` column back empty** (`''`, no error); Zeos reads it right.
+  Declare a bounded `NVARCHAR(n)` (up to 4000) where SQLdb reads the column (gotcha 58).
 
 ## Adapter-specific behavior you may notice
 
@@ -205,6 +207,9 @@ program.
   released.
   `LockTimeoutMs` makes every adapter wait up to the same limit
   ([guide 6](errors.md#locks-and-conflicts-elockconflictexception); gotcha 32).
+- FireDAC on Firebird failed to write some text values (1, 2, 13, 16 characters measured) into a
+  `BLOB SUB_TYPE TEXT` column through a string parameter ("invalid BLOB ID"); SQLdb and Zeos
+  store them, and a `VARCHAR` column works on all three (gotcha 59).
 - On Delphi, the adapters bind strings as Unicode; a plain `AsString` on a FireDAC or Data.DB
   parameter would turn characters outside the ANSI code page into `?` (gotcha 13).
 - A batch (`IBatch`) goes to the database as FireDAC's Array DML, one operation per send; SQLdb

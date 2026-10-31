@@ -237,6 +237,12 @@ On FPC, `Output` is per thread (a `threadvar`): with the output redirected on Li
 different threads came out cut in the middle even under a lock. Call `Flush(Output)` inside the
 lock, after `Writeln` (gotcha 20 in [`gotchas.md`](gotchas.md)).
 
+On Delphi, the RTL's default memory manager stops a pooled program from scaling past one thread.
+Measured with FireDAC and Zeos: at 32 threads, throughput was about the same as with one, while
+SQLdb on FPC scaled about four times. With a memory manager that scales with threads, the same
+program ran about three times faster. A multi-threaded Delphi server should install one as the
+first unit of its `.dpr` (gotcha 55).
+
 ## Database work off the UI thread
 
 Every call in the library blocks until the database answers, and there is no `OpenAsync`. In a

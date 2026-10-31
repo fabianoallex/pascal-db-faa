@@ -20,7 +20,8 @@ uses
   PascalDb.Adapter.FireDAC in '..\..\adapters\firedac\PascalDb.Adapter.FireDAC.pas',
   PascalDb.DUnitXCompat in '..\Unit\PascalDb.DUnitXCompat.pas',
   PascalDb.IntegrationEnv in 'PascalDb.IntegrationEnv.pas',
-  PascalDb.ContractTests in 'PascalDb.ContractTests.pas';
+  PascalDb.ContractTests in 'PascalDb.ContractTests.pas',
+  PascalDb.OutboxTests in 'PascalDb.OutboxTests.pas';
 
 var
   runner: ITestRunner;

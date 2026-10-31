@@ -64,6 +64,7 @@ uses
   Classes,
   SysUtils,
   PascalDb.Interfaces,
+  PascalDb.SqlSources,
   PascalDb.Pool;
 
 /// The factory the contract tests use; created (with a fresh, migrated
@@ -138,10 +139,29 @@ function LockTimeoutFactory(AMs: Integer): IDBFactory;
 /// each call; nothing is created or dropped.
 function StatementEventFactory(AOnStatement: TStatementEventProc): IDBFactory;
 
+/// A factory for IntegrationFactory's database (call IntegrationFactory
+/// first) whose SQL loader reads ASource under ADirectory, with LockTimeoutMs
+/// set to ALockTimeoutMs (0: the driver's). A new one on each call; nothing is
+/// created or dropped.
+function SqlSourceFactory(const ASource: ISqlSource; const ADirectory: string;
+  ALockTimeoutMs: Integer = 0): IDBFactory;
+
+/// The SQL directory of this database in the samples' and the reference
+/// SQL's layout: PG, FB, SQLITE, MYSQL (MySQL and MariaDB) or MSSQL.
+function EngineSqlDirectory: string;
+
+/// Whether a locking read can skip rows another transaction has locked
+/// instead of waiting for them (SKIP LOCKED: PostgreSQL, MySQL, MariaDB;
+/// READPAST: SQL Server).
+function SkipsLockedRows: Boolean;
+
+/// Whether a writer may run while another transaction has an uncommitted
+/// write (every database but SQLite, which has one writer at a time).
+function AllowsConcurrentWriters: Boolean;
+
 implementation
 
 uses
-  PascalDb.SqlSources,
   PascalDb.Migrations,
   PascalDb.Adapter.Base
   {$IF DEFINED(PASCALDB_IT_ZEOS)}
@@ -1138,6 +1158,40 @@ end;
 function StatementEventFactory(AOnStatement: TStatementEventProc): IDBFactory;
 begin
   Result := NewFactory(BuildConfig, AOnStatement);
+end;
+
+function SqlSourceFactory(const ASource: ISqlSource; const ADirectory: string;
+  ALockTimeoutMs: Integer): IDBFactory;
+var
+  LConfig: IDatabaseConfig;
+begin
+  LConfig := BuildConfig;
+  LConfig.SqlSource := ASource;
+  LConfig.SQLDirectory := ADirectory;
+  LConfig.LockTimeoutMs := ALockTimeoutMs;
+  Result := NewFactory(LConfig);
+end;
+
+function EngineSqlDirectory: string;
+begin
+  case Engine of
+    engPostgres: Result := 'PG';
+    engSQLite: Result := 'SQLITE';
+    engMySQL, engMariaDB: Result := 'MYSQL';
+    engSqlServer: Result := 'MSSQL';
+  else
+    Result := 'FB';
+  end;
+end;
+
+function SkipsLockedRows: Boolean;
+begin
+  Result := Engine in [engPostgres, engMySQL, engMariaDB, engSqlServer];
+end;
+
+function AllowsConcurrentWriters: Boolean;
+begin
+  Result := not IsSQLite;
 end;
 
 var
