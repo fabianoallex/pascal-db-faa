@@ -39,6 +39,8 @@ The other direction too: fixed here after the extraction, probably still present
 (not checked on that side):
 - `TDataSetQueryBase.SetSql` losing the parameters when the same SQL text is assigned again
   on Zeos (gotcha 17).
+- FireDAC committed the transaction of a scope released without `Commit`/`Rollback` (gotcha 61):
+  `TFDTransactionAdapter.Destroy` now rolls back an active transaction.
 - The pool's snapshot counters (`TotalTimeouts`, `TotalCreated`, `TotalDiscarded`,
   `TotalIdleSwept`) were incremented with a plain `Inc`, some outside the pool's lock, so
   concurrent events lost counts: sample 05 had 3 timeouts at the same moment and the snapshot
@@ -195,14 +197,15 @@ them. Moved in the pilot migration (pascal-common-faa's plan, phase F6, 2026-10-
   format; consumers test it with that unit in their `uses`). A release bumps it together with the
   `.lpk` files, the README and the CHANGELOG.
 - **Minimum version** checked in `PascalDb.Interfaces` (every user compiles it):
-  `PASCALCOMMON_VERSION < 11700` stops the build with "pascal-db-faa needs pascal-common-faa 1.17.0
+  `PASCALCOMMON_VERSION < 12900` stops the build with "pascal-db-faa needs pascal-common-faa 1.29.0
   or later" (measured by raising the bound: lazbuild "Fatal: (2022) User defined: ...", Delphi 12
   "F1054 ..."). 1.3.0 brought `PascalCommon.SafeLog`, 1.4.0 `PascalCommon.Utf8` (behind
   `PdbUtf8BytesToString` since 0.12.1), 1.6.0 `PascalCommon.Metrics` (the pool metrics since
   0.14.0: "Metrics" in docs/pool.md), 1.7.0 `PascalCommon.Tracing` and 1.8.0 its detached spans (the
   spans: "Spans (tracing)" in docs/pool.md), 1.15.0 `PascalCommon.Random` and 1.17.0
-  `PascalCommon.Crypto` (`PdbOutboxNewOwner` and the event ids, since 0.18.0); only additions
-  within 1.x; `pascal_db_faa.lpk` has `MinVersion Major="1" Minor="17"`. Raise both when the
+  `PascalCommon.Crypto` (`PdbOutboxNewOwner` and the event ids, since 0.18.0), 1.29.0
+  `PascalCommon.Cache` (`PdbInvalidateAfterCommit` in `PascalDb.Cache`, since 0.19.0); only additions
+  within 1.x; `pascal_db_faa.lpk` has `MinVersion Major="1" Minor="29"`. Raise both when the
   library starts using something newer.
 - **Checkout without `--recursive`**: pascal-common-faa's own `external/pascal-jsonmapper-faa` is
   for its own tests. CI uses `submodules: true` (not recursive).
@@ -358,6 +361,12 @@ them the driver's quirks):
 - `IQuery.ExecSql` / `ITransaction.ExecSql` return the rows affected: `TDataSetQueryBase.RowsAffected`
   and `TTransactionBase.DoExecSqlRows` overrides (-1 by default). An `UPDATE` counts matched rows
   on every database, MySQL/MariaDB included (gotcha 46).
+- After-commit actions (`PascalDb.AfterCommit`, `PdbAfterCommit`; design in
+  `docs/after-commit-design.md`) live on `TTransactionBase` (`IAfterCommitActions`), so adapters
+  need nothing: its `Commit` runs them after `DoCommit`, `Rollback` and a failed commit drop them,
+  and a nested `TScopeTransaction` truncates the list on its rollback. The pool's `AcquireQuery`
+  gives each transaction it creates the reporter for `pekAfterCommitFailed`. Written as the base for
+  a query cache (pascal-common-faa's `PascalCommon.Cache`, its C7: invalidate after the commit).
 - Statement events (`AOnStatement`, `TStatementInfo` in `PascalDb.Pool`) are raised by the
   pool's `TQueryWrapper`, the one place every pooled `Open`/`ExecSql` goes through, so adapters
   need nothing for them. Timed with `PcTickUs`: `PcTickMs` (`GetTickCount64`) moves in 15-16 ms
@@ -553,7 +562,7 @@ serializing Firebird connects in the Zeos adapter.
 
 ## Gotchas
 
-The numbered gotchas (symptom → cause → fix, 1–59) live in [`docs/gotchas.md`](docs/gotchas.md).
+The numbered gotchas (symptom → cause → fix, 1–61) live in [`docs/gotchas.md`](docs/gotchas.md).
 Read it before touching the pool, an adapter, resources or anything that differs between
 Delphi and FPC, and add new ones there, keeping the numbering. References in this file
 ("gotcha 17") point to it.

@@ -30,6 +30,8 @@ uses
   PascalDb.Adapter.DataSet in '..\..\src\PascalDb.Adapter.DataSet.pas',
   PascalDb.Batch in '..\..\src\PascalDb.Batch.pas',
   PascalDb.Outbox in '..\..\src\PascalDb.Outbox.pas',
+  PascalDb.AfterCommit in '..\..\src\PascalDb.AfterCommit.pas',
+  PascalDb.Cache in '..\..\src\PascalDb.Cache.pas',
   PascalDb.DUnitXCompat in 'PascalDb.DUnitXCompat.pas',
   PascalDb.SqlLoaderTests in 'PascalDb.SqlLoaderTests.pas',
   PascalDb.MockTests in 'PascalDb.MockTests.pas',
@@ -39,7 +41,8 @@ uses
   PascalDb.AdapterBaseTests in 'PascalDb.AdapterBaseTests.pas',
   PascalDb.PagingTests in 'PascalDb.PagingTests.pas',
   PascalDb.BatchTests in 'PascalDb.BatchTests.pas',
-  PascalDb.OutboxUnitTests in 'PascalDb.OutboxUnitTests.pas';
+  PascalDb.OutboxUnitTests in 'PascalDb.OutboxUnitTests.pas',
+  PascalDb.AfterCommitTests in 'PascalDb.AfterCommitTests.pas';
 
 // SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).
 {$R 'sql\PascalDbTestSql.res'}

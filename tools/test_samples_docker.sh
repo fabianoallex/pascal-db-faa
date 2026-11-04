@@ -127,7 +127,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   ACCEPT_EULA=Y apt-get install -y -qq $CLIENT_PKG >> /t-apt.log 2>&1 || { tail -20 /t-apt.log; exit 1; }
   export PASCALDB_SAMPLE_CLIENT="$(ls $CLIENT_GLOB 2>/dev/null | head -1)"
   [ -n "$PASCALDB_SAMPLE_CLIENT" ] || { echo "client library not installed: $CLIENT_GLOB"; tail -20 /t-apt.log; exit 1; }
-  mkdir -p /t/u1 /t/u2 /t/u3 /t/u4 /t/u5 /t/u6 /t/u7 /t/external && cp -r /src/src /src/adapters /src/samples /t/
+  mkdir -p /t/u1 /t/u2 /t/u3 /t/u4 /t/u5 /t/u6 /t/u7 /t/u8 /t/external && cp -r /src/src /src/adapters /src/samples /t/
   cp -r /src/external/pascal-jsonmapper-faa /src/external/pascal-common-faa /t/external/
   C=/t/external/pascal-common-faa/src
   build() { # dir program units-folder [extra options]
@@ -154,6 +154,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   M=/t/external/pascal-jsonmapper-faa/src
   build 06-json JsonApi u6 "$ADAPTER_OPTS -Fu/t/external/pascal-common-faa/bridges/jsonmapper -Fu$M -Fi$M"
   build 07-outbox Outbox u7 "$ADAPTER_OPTS"
+  build 08-cache QueryCache u8 "$ADAPTER_OPTS"
   run MockRepository
   if [ -n "$DB_PORT" ]; then
     for i in $(seq 1 180); do (echo > /dev/tcp/$PASCALDB_SAMPLE_HOST/$DB_PORT) 2>/dev/null && break; sleep 1; done
@@ -215,4 +216,13 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
     && grep -q "t=1005 local sink: 2 done" /t/run-Outbox.log \
     && grep -q "pending events: 0, deliveries done: 4" /t/run-Outbox.log \
     && grep -q "purged: 2 events" /t/run-Outbox.log \
-    || { echo "unexpected outbox passes"; exit 1; }'
+    || { echo "unexpected outbox passes"; exit 1; }
+  run QueryCache
+  # A hit after the first read; a rename in a nested scope invalidates only
+  # after the caller commits; a rolled back rename invalidates nothing.
+  grep -q "first read: Campinas, Santos (query ran)" /t/run-QueryCache.log \
+    && grep -q "second read: Campinas, Santos (cache hit)" /t/run-QueryCache.log \
+    && grep -q "renamed, not committed yet: Campinas, Santos (cache hit)" /t/run-QueryCache.log \
+    && grep -q "after the commit: Campinas (renamed), Santos (query ran)" /t/run-QueryCache.log \
+    && grep -q "after a rolled back rename: Campinas (renamed), Santos (cache hit)" /t/run-QueryCache.log \
+    || { echo "unexpected cache reads"; exit 1; }'

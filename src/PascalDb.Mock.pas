@@ -67,7 +67,8 @@ uses
   Generics.Collections,
   PascalCommon.Optionals,
   PascalDb.Interfaces,
-  PascalDb.SqlLoader;
+  PascalDb.SqlLoader,
+  PascalDb.AfterCommit;
 
 type
   TMockDBFactory = class; // forward
@@ -246,12 +247,23 @@ type
     function GetTransaction: ITransaction;
   end;
 
-  // No-op IScopeTransaction — StartTransaction/Commit/Rollback do nothing
-  TMockScopeTransaction = class(TInterfacedObject, IScopeTransaction)
+  // IScopeTransaction with no database behind it. StartTransaction, Commit
+  // and Rollback only drive the after-commit actions (PascalDb.AfterCommit),
+  // which the scope keeps itself: adding one before StartTransaction raises,
+  // Commit runs them, Rollback and releasing the scope drop them. Each
+  // AcquireQuery is its own main scope (no nesting, no savepoints).
+  TMockScopeTransaction = class(TInterfacedObject, IScopeTransaction, IAfterCommitActions)
   private
     FTransaction: ITransaction;
+    FStarted: Boolean;
+    FAfterCommit: TAfterCommitList;
   public
     constructor Create;
+    destructor Destroy; override;
+    procedure Add(const AAction: IAfterCommitAction);
+    function Count: Integer;
+    procedure Truncate(ACount: Integer);
+    procedure SetOnFailure(const AOnFailure: TAfterCommitFailureProc);
     procedure StartTransaction;
     procedure Commit;
     procedure Rollback;
@@ -1172,12 +1184,57 @@ end;
 
 constructor TMockScopeTransaction.Create;
 begin
+  inherited Create;
   FTransaction := TMockTransaction.Create;
+  FAfterCommit := TAfterCommitList.Create;
 end;
 
-procedure TMockScopeTransaction.StartTransaction; begin end;
-procedure TMockScopeTransaction.Commit;           begin end;
-procedure TMockScopeTransaction.Rollback;         begin end;
+destructor TMockScopeTransaction.Destroy;
+begin
+  FAfterCommit.Free;
+  inherited Destroy;
+end;
+
+procedure TMockScopeTransaction.Add(const AAction: IAfterCommitAction);
+begin
+  if not FStarted then
+    raise EAfterCommitException.Create(PDB_AFTER_COMMIT_NO_TRANSACTION);
+  FAfterCommit.Add(AAction);
+end;
+
+function TMockScopeTransaction.Count: Integer;
+begin
+  Result := FAfterCommit.Count;
+end;
+
+procedure TMockScopeTransaction.Truncate(ACount: Integer);
+begin
+  FAfterCommit.Truncate(ACount);
+end;
+
+procedure TMockScopeTransaction.SetOnFailure(const AOnFailure: TAfterCommitFailureProc);
+begin
+  FAfterCommit.OnFailure := AOnFailure;
+end;
+
+procedure TMockScopeTransaction.StartTransaction;
+begin
+  FStarted := True;
+end;
+
+procedure TMockScopeTransaction.Commit;
+begin
+  if not FStarted then
+    Exit;
+  FStarted := False;
+  FAfterCommit.RunAll;
+end;
+
+procedure TMockScopeTransaction.Rollback;
+begin
+  FStarted := False;
+  FAfterCommit.Clear;
+end;
 
 function TMockScopeTransaction.InTransaction: Boolean; begin Result := False; end;
 function TMockScopeTransaction.IsMain: Boolean;        begin Result := True;  end;

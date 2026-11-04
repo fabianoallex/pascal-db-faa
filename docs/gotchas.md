@@ -588,3 +588,23 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     isolated: the FireDAC source isn't in the Community Edition, and the adapter doesn't know a
     parameter's target column type. Workaround: a `VARCHAR` column where FireDAC writes text on
     Firebird; the outbox's reference schema declares its payload `VARCHAR(8000)`. Open item.
+60. **Delphi refuses to assign one anonymous `array of T` to another; FPC accepts it.** Found
+    with `PascalDb.AfterCommit` (2026-11-04): a field `FItems: array of IAfterCommitAction` and a
+    local `LItems: array of IAfterCommitAction`, then `LItems := FItems`, compiled on FPC 3.2.2 and
+    failed on Delphi 12 with `E2008 Incompatible types`: each anonymous `array of` declaration is
+    a type of its own there. Fix: one named type (`TAfterCommitActionArray = array of
+    IAfterCommitAction`) for both, or `TArray<T>`. Filling an anonymous array element by element
+    and passing it to an open-array parameter (`array of string` in `TInvalidateAction`) works on
+    both.
+61. **FireDAC committed a transaction whose scope was released without `Commit` or `Rollback`.**
+    Found by the contract test `AfterCommit_RollbackAndAbandonedScope_DropActions` (2026-11-04,
+    Delphi 12 CE, Win32 and Win64, SQLite): a row inserted in a scope that was then released
+    (`LQuery := nil; LScope := nil`) was in the table afterwards. SQLdb and Zeos rolled it back
+    on all six databases (Linux). Cause: the pool's rollback on release goes through
+    `IDBConnection.Rollback`, which is empty in the FireDAC adapter (the transaction is a
+    `TFDTransaction` of its own), and the `TFDTransaction` was then freed while active; FireDAC
+    ends a transaction freed or disconnected while active by its `DisconnectAction`, and the row
+    stayed, so that action was a commit. Fix: `TFDTransactionAdapter.Destroy` rolls back an active
+    transaction before freeing it (the connection is still held then, so it isn't back in the
+    pool yet). Measured only on SQLite; the same code path serves Firebird, PostgreSQL and
+    MySQL/MariaDB on FireDAC.

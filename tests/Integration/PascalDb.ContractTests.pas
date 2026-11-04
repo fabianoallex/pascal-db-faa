@@ -14,7 +14,11 @@
   text longer than its VARCHAR(n) read back whole (SQLite only, the one
   database that stores it), trailing spaces kept through ExecSql and a
   batch,
-  commit/rollback, nested scopes with savepoints, constraint violations
+  commit/rollback, nested scopes with savepoints, after-commit actions
+  (PascalDb.AfterCommit: run after the main commit, when another connection
+  already sees the row, never on a nested scope's commit, dropped by a
+  rollback, a nested rollback and a scope released without commit),
+  constraint violations
   raised as EConstraintViolationException of the right kind (unique key
   through ExecSql, Open, a batch and ITransaction.ExecSql; foreign key on
   insert and delete, and at commit where it can be deferred; NOT NULL;
@@ -58,6 +62,7 @@ uses
   PascalDb.Paging,
   PascalDb.SqlLoader,
   PascalDb.Batch,
+  PascalDb.AfterCommit,
   PascalDb.IntegrationEnv;
 
 type
@@ -65,7 +70,9 @@ type
   TContractTests = class
   private
     FFactory: IDBFactory;
+    FAfterCommitLog: string;
     procedure ExecCommitted(const ASql: string);
+    procedure RecordAfterCommit(const AArg: string);
     function CountRows(const AWhere: string): Integer;
     procedure InsertItem(AId: Integer; const AName: string);
     procedure CheckLockWaitGivesUp(AUseBatch: Boolean);
@@ -92,6 +99,9 @@ type
     [Test] procedure Commit_Persists;
     [Test] procedure Rollback_Discards;
     [Test] procedure NestedScope_RollbackToSavepoint_KeepsOuterWork;
+    [Test] procedure AfterCommit_RunsAfterTheMainCommit_RowVisibleElsewhere;
+    [Test] procedure AfterCommit_NestedRollback_DropsItsActions;
+    [Test] procedure AfterCommit_RollbackAndAbandonedScope_DropActions;
     [Test] procedure ConstraintViolation_RaisesDataError_KeepsConnection;
     [Test] procedure Constraint_DuplicatePrimaryKey_IsUnique;
     [Test] procedure Constraint_DuplicateThroughOpen_IsUnique;
@@ -301,6 +311,13 @@ begin
     LScope.Rollback;
     raise;
   end;
+end;
+
+procedure TContractTests.RecordAfterCommit(const AArg: string);
+begin
+  // AArg is the id the action waited for: counted through another pooled
+  // connection, so 1 means the row was committed when the action ran.
+  FAfterCommitLog := FAfterCommitLog + AArg + '=' + IntToStr(CountRows('ID = ' + AArg)) + ';';
 end;
 
 function TContractTests.CountRows(const AWhere: string): Integer;
@@ -916,6 +933,93 @@ begin
   end;
   TAssert.AssertEquals('The outer insert must be committed', 1, CountRows('ID = 9'));
   TAssert.AssertEquals('The inner insert must be rolled back to the savepoint', 0, CountRows('ID = 10'));
+end;
+
+procedure TContractTests.AfterCommit_RunsAfterTheMainCommit_RowVisibleElsewhere;
+var
+  LOuterQuery, LInnerQuery: IQuery;
+  LOuter, LInner: IScopeTransaction;
+begin
+  // The repository's case: its scope is nested in the caller's, so its
+  // Commit only releases a savepoint. No read of the row from another
+  // connection before the commit: on SQL Server it would wait for the lock.
+  FAfterCommitLog := '';
+  LOuter := FFactory.GetPool.AcquireQuery(LOuterQuery);
+  LOuter.StartTransaction;
+  try
+    LOuterQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (41, ''outer'')';
+    LOuterQuery.ExecSql;
+
+    LInner := FFactory.GetPool.AcquireQuery(LInnerQuery, LOuter.OriginalTransaction);
+    LInner.StartTransaction;
+    LInnerQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (42, ''inner'')';
+    LInnerQuery.ExecSql;
+    PdbAfterCommit(LInner, RecordAfterCommit, '42');
+    LInner.Commit;
+    TAssert.AssertEquals('Nothing runs on the nested commit', '', FAfterCommitLog);
+
+    LOuter.Commit;
+  except
+    LOuter.Rollback;
+    raise;
+  end;
+  TAssert.AssertEquals('The action runs after the main commit, with the row visible', '42=1;',
+    FAfterCommitLog);
+end;
+
+procedure TContractTests.AfterCommit_NestedRollback_DropsItsActions;
+var
+  LOuterQuery, LInnerQuery: IQuery;
+  LOuter, LInner: IScopeTransaction;
+begin
+  FAfterCommitLog := '';
+  LOuter := FFactory.GetPool.AcquireQuery(LOuterQuery);
+  LOuter.StartTransaction;
+  try
+    LOuterQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (43, ''outer'')';
+    LOuterQuery.ExecSql;
+    PdbAfterCommit(LOuter, RecordAfterCommit, '43');
+
+    LInner := FFactory.GetPool.AcquireQuery(LInnerQuery, LOuter.OriginalTransaction);
+    LInner.StartTransaction;
+    LInnerQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (44, ''inner'')';
+    LInnerQuery.ExecSql;
+    PdbAfterCommit(LInner, RecordAfterCommit, '44');
+    LInner.Rollback;
+
+    LOuter.Commit;
+  except
+    LOuter.Rollback;
+    raise;
+  end;
+  TAssert.AssertEquals('Only the outer scope''s action runs', '43=1;', FAfterCommitLog);
+  TAssert.AssertEquals('The inner insert was rolled back', 0, CountRows('ID = 44'));
+end;
+
+procedure TContractTests.AfterCommit_RollbackAndAbandonedScope_DropActions;
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+begin
+  FAfterCommitLog := '';
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (45, ''rolled back'')';
+  LQuery.ExecSql;
+  PdbAfterCommit(LScope, RecordAfterCommit, '45');
+  LScope.Rollback;
+
+  // Released without Commit or Rollback: the pool rolls it back.
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  LQuery.Sql := 'INSERT INTO ITEMS (ID, NAME) VALUES (46, ''abandoned'')';
+  LQuery.ExecSql;
+  PdbAfterCommit(LScope, RecordAfterCommit, '46');
+  LQuery := nil;
+  LScope := nil;
+
+  TAssert.AssertEquals('No action runs', '', FAfterCommitLog);
+  TAssert.AssertEquals('Neither row was committed', 0, CountRows('ID IN (45, 46)'));
 end;
 
 procedure TContractTests.ConstraintViolation_RaisesDataError_KeepsConnection;

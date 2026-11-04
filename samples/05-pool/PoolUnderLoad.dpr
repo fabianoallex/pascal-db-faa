@@ -137,6 +137,8 @@ begin
       Say(Format('  [event] connection discarded (%s) %s', [REASONS[AEvent.DiscardReason], AEvent.ErrorMessage]));
     pekIdleSweepClosed:
       Say(Format('  [event] idle sweep closed %d connection(s)', [AEvent.ClosedCount]));
+    pekAfterCommitFailed:
+      Say(Format('  [event] after-commit action failed: %s: %s', [AEvent.ErrorClass, AEvent.ErrorMessage]));
   end;
 end;
 

@@ -146,6 +146,52 @@ Only the outermost scope (`IsMain = True`) commits or rolls back the real transa
 scope uses the dialect's savepoint statements. This is covered by the contract suite on every
 adapter and database (`NestedScope_RollbackToSavepoint_KeepsOuterWork`).
 
+## After the commit
+
+A nested scope's `Commit` commits nothing, so code written after it (invalidating a cache,
+waking a worker, sending an e-mail) would run before other connections see the data. Hand that
+code to `PdbAfterCommit` (`PascalDb.AfterCommit`) instead: it runs after the **real** commit,
+whichever scope is the main one, and never if the work is rolled back.
+
+```pascal
+uses PascalDb.AfterCommit;
+
+procedure TCityRepository.Rename(AId: Integer; const AName: string; ATransaction: ITransaction);
+var
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+begin
+  LScope := FFactory.GetPool.AcquireQuery(LQuery, ATransaction);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := FFactory.SqlLoader['CITY.RENAME'].SQL;
+    LQuery.Params.Integers['ID'] := AId;
+    LQuery.Params.Strings['NAME'] := AName;
+    LQuery.ExecSql;
+    PdbAfterCommit(LScope, CityChanged, IntToStr(AId));   // a method: procedure(const AArg: string)
+    LScope.Commit;    // a savepoint release when ATransaction was running; CityChanged waits
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+```
+
+- The actions run in the order they were added, on the thread that commits.
+- A rollback drops them; so does a nested scope's rollback (only those added since it started),
+  a failed commit, and a scope released without `Commit`.
+- An action that raises doesn't fail the commit (the data is already committed): the next ones
+  still run and the pool raises a `pekAfterCommitFailed` event ([guide 7](pool.md#events)) with
+  the error. An `EExternal` (access violation) propagates.
+- Adding one when the scope hasn't started raises `EAfterCommitException`.
+- For an action with more state than one string, implement `IAfterCommitAction` (`Run`) and add
+  it with `PdbAfterCommitAction`.
+- The mock's scopes do the same (`Commit` runs them, `Rollback` drops them), so a service's
+  tests can check that its actions ran.
+
+The reasons for each rule are in [after-commit-design.md](after-commit-design.md); the contract
+suite checks them on every adapter and database (`AfterCommit_*`).
+
 ## Next
 
 The SQL above came from `SqlLoader['CITY.INSERT']`: [guide 2](sql.md) explains where that

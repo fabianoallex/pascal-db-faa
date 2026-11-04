@@ -14,7 +14,10 @@
   - TTransactionBase — ITransaction skeleton: keeps the in-transaction flag
     and routes every native failure (start, commit, rollback, ExecSql)
     through BuildDatabaseException, so a dropped connection is classified the
-    same way on every driver. Subclasses only make the native calls.
+    same way on every driver. It also keeps the after-commit actions
+    (IAfterCommitActions, PascalDb.AfterCommit): Commit runs them once the
+    native commit succeeded, Rollback and a failed commit drop them.
+    Subclasses only make the native calls.
   - TScopeTransaction — IScopeTransaction: the outermost scope owns the real
     transaction; nested scopes use savepoints from the SQL dialect. While
     TPcTracing.Enabled (PascalCommon.Tracing), the outermost scope's
@@ -23,7 +26,9 @@
     the thread's current span, so the transaction may end on any thread; the
     scope hangs it on the ITransaction (ITransactionSpan, which
     TTransactionBase implements) and the pooled statements inside name it
-    as their parent (see the tracing note in PascalDb.Pool).
+    as their parent (see the tracing note in PascalDb.Pool). A nested scope
+    notes how many after-commit actions its transaction had when it
+    started, and its rollback drops those added since.
   - TSqlScript — ISqlScript: splits a script on a terminator and runs each
     statement through ITransaction.ExecSql.
   - TParamsBase — IParams: the whole IOptXxx/INullXxx/IOptNullXxx semantics
@@ -55,7 +60,8 @@ uses
   PascalCommon.Tracing,
   PascalDb.SqlSources,
   PascalDb.SqlLoader,
-  PascalDb.Pool;
+  PascalDb.Pool,
+  PascalDb.AfterCommit;
 
 type
   { TDatabaseConfig
@@ -119,11 +125,13 @@ type
 
   { TTransactionBase }
 
-  TTransactionBase = class(TInterfacedObject, ITransaction, ITransactionSpan)
+  TTransactionBase = class(TInterfacedObject, ITransaction, ITransactionSpan, IAfterCommitActions)
   private
     FConn: IDBConnection;
     FInTransaction: Boolean;
     FSpan: IPcSpan;
+    FAfterCommit: TAfterCommitList;  // created on first use
+    FOnAfterCommitFailure: TAfterCommitFailureProc;
   protected
     procedure DoStartTransaction; virtual; abstract;
     procedure DoCommit; virtual; abstract;
@@ -145,8 +153,12 @@ type
     function IsConstraintViolationError(E: Exception; out AKind: TConstraintViolationKind): Boolean; virtual;
   public
     constructor Create(const AConn: IDBConnection);
+    destructor Destroy; override;
     procedure StartTransaction;
+    /// Runs the after-commit actions (PascalDb.AfterCommit) once the native
+    /// commit succeeded; drops them when it fails.
     procedure Commit;
+    /// Drops the after-commit actions.
     procedure Rollback;
     function InTransaction: Boolean;
     function GetConnection: IDBConnection;
@@ -155,6 +167,12 @@ type
     // ITransactionSpan (PascalDb.Pool): set and cleared by TScopeTransaction.
     function GetSpan: IPcSpan;
     procedure SetSpan(const ASpan: IPcSpan);
+    // IAfterCommitActions (PascalDb.AfterCommit). Truncate is called by a
+    // nested TScopeTransaction that rolls back; SetOnFailure by the pool.
+    procedure Add(const AAction: IAfterCommitAction);
+    function Count: Integer;
+    procedure Truncate(ACount: Integer);
+    procedure SetOnFailure(const AOnFailure: TAfterCommitFailureProc);
   end;
 
   { ITracedScopeTransaction
@@ -176,6 +194,7 @@ type
   private
     FOriginalTransaction: ITransaction;
     FSavepointName: string;
+    FActionsMark: Integer;  // nested scope: the transaction's after-commit actions when it started
     FIsMain: Boolean;
     FStarted: Boolean;
     FContextTransaction: IContextTransaction;
@@ -728,6 +747,46 @@ begin
   FConn := AConn;
 end;
 
+destructor TTransactionBase.Destroy;
+begin
+  // Never committed: the actions are dropped with the transaction.
+  FAfterCommit.Free;
+  inherited Destroy;
+end;
+
+procedure TTransactionBase.Add(const AAction: IAfterCommitAction);
+begin
+  if not FInTransaction then
+    raise EAfterCommitException.Create(PDB_AFTER_COMMIT_NO_TRANSACTION);
+  if FAfterCommit = nil then
+  begin
+    FAfterCommit := TAfterCommitList.Create;
+    FAfterCommit.OnFailure := FOnAfterCommitFailure;
+  end;
+  FAfterCommit.Add(AAction);
+end;
+
+function TTransactionBase.Count: Integer;
+begin
+  if FAfterCommit = nil then
+    Result := 0
+  else
+    Result := FAfterCommit.Count;
+end;
+
+procedure TTransactionBase.Truncate(ACount: Integer);
+begin
+  if FAfterCommit <> nil then
+    FAfterCommit.Truncate(ACount);
+end;
+
+procedure TTransactionBase.SetOnFailure(const AOnFailure: TAfterCommitFailureProc);
+begin
+  FOnAfterCommitFailure := AOnFailure;
+  if FAfterCommit <> nil then
+    FAfterCommit.OnFailure := AOnFailure;
+end;
+
 // Every native call below is wrapped the same way: BuildDatabaseException
 // (PascalDb.Interfaces) marks a broken connection for discard and returns a
 // NEW EDatabaseUnavailableException to raise, or nil for a normal data error.
@@ -764,6 +823,10 @@ begin
   except
     on E: Exception do
     begin
+      // Whether the commit reached the server is unknown: the actions are
+      // dropped (docs/after-commit-design.md, A6).
+      if FAfterCommit <> nil then
+        FAfterCommit.Clear;
       // A deferred constraint is checked here.
       if IsConstraintViolationError(E, LKind) then
         raise EConstraintViolationException.Create(LKind, E);
@@ -774,12 +837,16 @@ begin
     end;
   end;
   FInTransaction := False;
+  if FAfterCommit <> nil then
+    FAfterCommit.RunAll;
 end;
 
 procedure TTransactionBase.Rollback;
 var
   LNewE: Exception;
 begin
+  if FAfterCommit <> nil then
+    FAfterCommit.Clear;
   try
     DoRollback;
   except
@@ -856,6 +923,24 @@ end;
 
 { TScopeTransaction }
 
+function ActionsCount(const ATransaction: ITransaction): Integer;
+var
+  LActions: IAfterCommitActions;
+begin
+  if Supports(ATransaction, IAfterCommitActions, LActions) then
+    Result := LActions.Count
+  else
+    Result := 0;
+end;
+
+procedure TruncateActions(const ATransaction: ITransaction; ACount: Integer);
+var
+  LActions: IAfterCommitActions;
+begin
+  if Supports(ATransaction, IAfterCommitActions, LActions) then
+    LActions.Truncate(ACount);
+end;
+
 constructor TScopeTransaction.Create(const AOriginalTransaction: ITransaction;
   const AContextTransaction: IContextTransaction);
 begin
@@ -921,6 +1006,7 @@ begin
 
   if not FIsMain then
   begin
+    FActionsMark := ActionsCount(FOriginalTransaction);
     FSavepointName := 'sp_' + IntToHex(NativeInt(Self), 8);
     FOriginalTransaction.ExecSql(
       FOriginalTransaction.GetConnection.GetSQLDialect.GetSavepointSQL(FSavepointName));
@@ -975,6 +1061,9 @@ begin
   end
   else
   begin
+    // The actions added inside this scope (and the scopes inside it) belong
+    // to work that is undone.
+    TruncateActions(FOriginalTransaction, FActionsMark);
     FOriginalTransaction.ExecSql(
       FOriginalTransaction.GetConnection.GetSQLDialect.GetRollbackToSavepointSQL(FSavepointName));
     FStarted := False;

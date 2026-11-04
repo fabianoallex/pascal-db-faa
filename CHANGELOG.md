@@ -6,6 +6,39 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-04
+
+### Added
+
+- `PascalDb.AfterCommit`: actions that run after a transaction commits. `PdbAfterCommit(Scope,
+  Method, Arg)` and `PdbAfterCommitAction(Scope, IAfterCommitAction)` add one to the transaction
+  the scope belongs to; the real commit runs them in order, never a nested scope's savepoint
+  release. A rollback drops them, a nested scope's rollback drops those added since it started,
+  and a failed commit or a scope released without commit drops them too. An action that raises
+  doesn't fail the commit: the next ones run and the pool raises the new `pekAfterCommitFailed`
+  event (`TPoolEvent.ErrorClass`, new, and `ErrorMessage`); an `EExternal` propagates. Adding one
+  outside a transaction raises `EAfterCommitException`. `TTransactionBase` implements it
+  (`IAfterCommitActions`), so every adapter built on it has it; `TMockScopeTransaction` too.
+  Design: `docs/after-commit-design.md`; guide: "After the commit" in `docs/getting-started.md`.
+- `PascalDb.Cache`: `PdbInvalidateAfterCommit(Scope, Cache, Tags)` invalidates tags of a
+  pascal-common-faa `IPcCache` after the real commit (a `nil` cache does nothing). Guide
+  `docs/cache.md` (12: the cache in the service, in front of the repository), sample `08-cache`.
+
+### Changed
+
+- **pascal-common-faa 1.29.0 or later is required** (was 1.17.0), for `PascalCommon.Cache`:
+  `PascalDb.Interfaces` stops an older build, and `pascal_db_faa.lpk` requires
+  `MinVersion 1.29`. The submodule moved from 1.26.0 to 1.29.0.
+- `TPoolEventKind` has a new value, `pekAfterCommitFailed`: a `case` over it that must cover
+  every kind needs a branch.
+
+### Fixed
+
+- FireDAC: a scope released without `Commit` or `Rollback` **committed** its transaction instead
+  of rolling it back (the `TFDTransaction` was freed while active, and FireDAC ended it by its
+  `DisconnectAction`). `TFDTransactionAdapter.Destroy` now rolls back an active transaction.
+  SQLdb and Zeos already rolled back. Gotcha 61.
+
 ## [0.18.0] - 2026-10-30
 
 ### Added

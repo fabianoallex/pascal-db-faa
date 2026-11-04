@@ -10,8 +10,9 @@ interface
 uses
   PascalDb.SqlSources, PascalDb.SqlLoader, PascalDb.Interfaces, 
   PascalDb.SqlDialect, PascalDb.Paging, PascalDb.Registry, PascalDb.Version, 
-  PascalDb.Mock, PascalDb.Pool, PascalDb.Migrations, 
-  PascalDb.Adapter.Base, PascalDb.Batch, PascalDb.Outbox, PascalDb.Adapter.DataSet;
+  PascalDb.Mock, PascalDb.Pool, PascalDb.Migrations, PascalDb.Adapter.Base, 
+  PascalDb.Batch, PascalDb.Outbox, PascalDb.AfterCommit, PascalDb.Cache, 
+  PascalDb.Adapter.DataSet;
 
 implementation
 

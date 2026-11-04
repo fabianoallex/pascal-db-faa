@@ -500,6 +500,17 @@ end;
 
 destructor TFDTransactionAdapter.Destroy;
 begin
+  // A transaction still active here belongs to a scope released without
+  // Commit or Rollback: roll it back. Freed active, FireDAC ends it with its
+  // DisconnectAction, which committed it (gotcha 61). The connection is still
+  // held (FConn is released after this body), so it isn't back in the pool.
+  if FTransaction.Active then
+    try
+      FTransaction.Rollback;
+    except
+      // A destructor must not raise; a connection that fails here is broken
+      // and the pool's own rollback on release decides what to do with it.
+    end;
   FTransaction.Free;
   inherited Destroy;
 end;

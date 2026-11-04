@@ -33,6 +33,9 @@
         <Projects Include="samples\07-outbox\Outbox.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="samples\08-cache\QueryCache.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -131,14 +134,23 @@
     <Target Name="Outbox:Make">
         <MSBuild Projects="samples\07-outbox\Outbox.dproj" Targets="Make"/>
     </Target>
+    <Target Name="QueryCache">
+        <MSBuild Projects="samples\08-cache\QueryCache.dproj"/>
+    </Target>
+    <Target Name="QueryCache:Clean">
+        <MSBuild Projects="samples\08-cache\QueryCache.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="QueryCache:Make">
+        <MSBuild Projects="samples\08-cache\QueryCache.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests;PascalDb_IntegrationTestsZeos;MockRepository;Quickstart;Migrations;Optionals;PoolUnderLoad;JsonApi;Outbox"/>
+        <CallTarget Targets="PascalDb_UnitTests;PascalDb_IntegrationTests;PascalDb_IntegrationTestsZeos;MockRepository;Quickstart;Migrations;Optionals;PoolUnderLoad;JsonApi;Outbox;QueryCache"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean;PascalDb_IntegrationTestsZeos:Clean;MockRepository:Clean;Quickstart:Clean;Migrations:Clean;Optionals:Clean;PoolUnderLoad:Clean;JsonApi:Clean;Outbox:Clean"/>
+        <CallTarget Targets="PascalDb_UnitTests:Clean;PascalDb_IntegrationTests:Clean;PascalDb_IntegrationTestsZeos:Clean;MockRepository:Clean;Quickstart:Clean;Migrations:Clean;Optionals:Clean;PoolUnderLoad:Clean;JsonApi:Clean;Outbox:Clean;QueryCache:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make;PascalDb_IntegrationTestsZeos:Make;MockRepository:Make;Quickstart:Make;Migrations:Make;Optionals:Make;PoolUnderLoad:Make;JsonApi:Make;Outbox:Make"/>
+        <CallTarget Targets="PascalDb_UnitTests:Make;PascalDb_IntegrationTests:Make;PascalDb_IntegrationTestsZeos:Make;MockRepository:Make;Quickstart:Make;Migrations:Make;Optionals:Make;PoolUnderLoad:Make;JsonApi:Make;Outbox:Make;QueryCache:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

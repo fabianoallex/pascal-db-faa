@@ -33,6 +33,7 @@ uses
   PascalDb.PagingTests,
   PascalDb.BatchTests,
   PascalDb.OutboxUnitTests,
+  PascalDb.AfterCommitTests,
   PascalDb.PoolMetricsTests;
 
 // SQL resources used by PascalDb.SqlSourcesTests (tools/build_sql_res.py).

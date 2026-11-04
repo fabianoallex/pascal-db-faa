@@ -71,6 +71,7 @@ LFactory := TSQLdbFactory.Create(LConfig, nil, LMonitor.OnPoolEvent);
 | `pekAcquireThrottled` | a caller had to wait (`WaitAttempts`) and **then got** a connection |
 | `pekAcquireTimeout` | a caller gave up; `EPoolTimeoutException` is raised right after |
 | `pekIdleSweepClosed` | the sweep closed `ClosedCount` connections |
+| `pekAfterCommitFailed` | an action added with `PdbAfterCommit` raised after its transaction committed (the commit stands); `ErrorClass` and `ErrorMessage` say what. Only for transactions the pool started (`AcquireQuery` without a transaction) |
 
 Every event also carries the pool's state (`ActiveConnections`, `PoolSize` = idle connections,
 `MaxConnections`, `IniConnections`).

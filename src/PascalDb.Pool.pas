@@ -84,7 +84,8 @@ uses
   PascalCommon.SystemContext,
   PascalCommon.Optionals,
   PascalCommon.Tracing,
-  PascalCommon.Metrics;
+  PascalCommon.Metrics,
+  PascalDb.AfterCommit;
 
 type
 
@@ -197,7 +198,9 @@ type
                              // or it came back marked as broken during use — see TPoolDiscardReason)
     pekAcquireThrottled,     // AcquireConnection had to wait (pool at its limit) before getting a connection
     pekAcquireTimeout,       // ran out of wait attempts; EPoolTimeoutException is raised next
-    pekIdleSweepClosed       // the idle sweep closed one or more connections
+    pekIdleSweepClosed,      // the idle sweep closed one or more connections
+    pekAfterCommitFailed     // an after-commit action (PascalDb.AfterCommit) raised; the commit
+                             // itself succeeded
   );
   // A connection that fails the keepalive ping is reported as
   // pekConnectionDiscarded with pdrStaleCheckFailed, like one that fails the
@@ -229,7 +232,9 @@ type
     WaitAttempts: Integer;             // pekAcquireThrottled / pekAcquireTimeout
     ClosedCount: Integer;              // pekIdleSweepClosed
     DiscardReason: TPoolDiscardReason; // pekConnectionDiscarded
-    ErrorMessage: string;              // pekConnectionDiscarded (Connect's exception message, if any)
+    ErrorMessage: string;              // pekConnectionDiscarded (Connect's exception message, if any),
+                                       // pekAfterCommitFailed (the action's exception message)
+    ErrorClass: string;                // pekAfterCommitFailed (the action's exception class)
   end;
 
   // See PASCALDB_FUNCREFS in pascaldb.inc: "reference to" in Delphi (accepts
@@ -334,6 +339,7 @@ type
     procedure StopIdleSweep;
     function BaseEvent(AKind: TPoolEventKind): TPoolEvent;
     procedure Notify(const AEvent: TPoolEvent);
+    procedure AfterCommitFailed(const AErrorClass, AErrorMessage: string);
     procedure CreateMetrics;
     procedure MetricIdleAdd(ADelta: Integer);
     procedure MetricClosed(AReason: TPoolCloseReason; ACount: Integer = 1);
@@ -1530,6 +1536,16 @@ begin
     FOnEvent(AEvent);
 end;
 
+procedure TConnectionPool.AfterCommitFailed(const AErrorClass, AErrorMessage: string);
+var
+  LEvent: TPoolEvent;
+begin
+  LEvent := BaseEvent(pekAfterCommitFailed);
+  LEvent.ErrorClass := AErrorClass;
+  LEvent.ErrorMessage := AErrorMessage;
+  Notify(LEvent);
+end;
+
 function TConnectionPool.GetSnapshot: TPoolSnapshot;
 begin
   Result.ActiveConnections := FActiveConnections;
@@ -2035,6 +2051,7 @@ end;
 
 function TConnectionPool.AcquireQuery(out AQuery: IQuery; ATransaction: ITransaction): IScopeTransaction;
 var
+  LActions: IAfterCommitActions;
   LConn: IDBConnection;
   RealQuery: IQuery;
   LTransaction: ITransaction;
@@ -2048,6 +2065,9 @@ begin
   begin
     LConn := AcquireConnection;
     LTransaction := FFactory.CreateTransaction(LConn);
+    // An after-commit action that raises is reported as a pool event.
+    if Supports(LTransaction, IAfterCommitActions, LActions) then
+      LActions.SetOnFailure(AfterCommitFailed);
   end;
 
   RealQuery := FFactory.CreateQuery(LConn, LTransaction);
