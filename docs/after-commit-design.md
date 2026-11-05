@@ -1,9 +1,11 @@
 # Actions after the commit — design
 
-Status: **H1 done, 2026-11-04** (`PascalDb.AfterCommit`, unreleased): unit suite on FPC Windows
+Status: **H1 and H2 done, released in 0.19.0 (2026-11-04)** (`PascalDb.AfterCommit`): unit suite on FPC Windows
 x64 green, 0 leaks; contract suite on the twelve Linux combinations (see "Phases"). **H2 code
-done** the same day (`PascalDb.Cache`, guide 12, sample 08); its full Linux run is pending.
-Delphi 12 CE, Win32 and Win64: unit suite 254/254, FireDAC contract suite on SQLite 57/57 (and PostgreSQL 17, Win64), sample
+done** the same day (`PascalDb.Cache`, guide 12, sample 08); GitHub CI run 41930306694 (commit
+`53e83df`) green: the twelve Linux combinations 57/57 and every sample, sample 08 included, 0 leaks.
+Delphi 12 CE, Win32 and Win64: unit suite 254/254, FireDAC contract suite on SQLite 57/57 (and PostgreSQL 17, Win64), Zeos contract suite on SQLite
+57/57 (2026-11-05, sqlite.org's 3.53.4 DLL), sample
 08 on SQLite, 0 leaks. The contract test for an abandoned scope found that FireDAC committed it
 (gotcha 61, fixed in the adapter). The user's choices (2026-11-04): A2 a unit of its own, A7 as recommended, A9 (a);
 every other decision as recommended. What the implementation settled is in "Decided in H1".
@@ -271,4 +273,4 @@ messages; not part of this design.
 | Phase | What | Done when |
 |---|---|---|
 | H1 | `IAfterCommitActions` on `TTransactionBase`, `PdbAfterCommit`, truncation in `TScopeTransaction`, `pekAfterCommitFailed`, the mock; unit and contract tests | unit suite on FPC and Delphi, contract suite on the twelve Linux combinations and the Windows runners, 0 leaks; minor release (0.19.0) — **FPC done 2026-11-04**: `tests/Unit/PascalDb.AfterCommitTests.pas` (16), unit suite 251/251 on Windows x64, 0 leaks; 3 contract tests (`AfterCommit_*`), 57/57 on the twelve Linux combinations (SQLdb and Zeos × six databases), 0 leaks; the samples on 10 of the 12 (the run was stopped for low memory before Zeos on MySQL, MariaDB and SQL Server). Delphi and the Windows integration runners: not run yet |
-| H2 | `PascalDb.Cache` (A9), `docs/cache.md`, sample `08-cache`, submodule to ≥ 1.29.0 | the same suites plus the sample on every database — **code done 2026-11-04**: submodule on v1.29.0, minimum raised to 1.29.0 (`PascalDb.Interfaces`, `.lpk`); 3 more unit tests (`Cache_*`, with a `TPcMemoryCacheStore`), unit suite 254/254 on FPC Windows x64, 0 leaks; sample 08 on FPC Windows x64 with SQLite, its expected lines and 0 leaks, and added to `test_samples_docker.sh`. Not run yet: the Linux samples run, the full CI after the submodule move, Delphi |
+| H2 | `PascalDb.Cache` (A9), `docs/cache.md`, sample `08-cache`, submodule to ≥ 1.29.0 | the same suites plus the sample on every database — **code done 2026-11-04**: submodule on v1.29.0, minimum raised to 1.29.0 (`PascalDb.Interfaces`, `.lpk`); 3 more unit tests (`Cache_*`, with a `TPcMemoryCacheStore`), unit suite 254/254 on FPC Windows x64, 0 leaks; sample 08 on FPC Windows x64 with SQLite, its expected lines and 0 leaks, and added to `test_samples_docker.sh`. Then CI run 41930306694 on Linux and the Delphi runs in the status above |
