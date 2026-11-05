@@ -17,7 +17,7 @@ Free Pascal (see [`samples/README.md`](../samples/README.md)).
 | [9. Writing an adapter](writing-an-adapter.md) | Supporting another connection component: the classes to write, a skeleton, what the library relies on, checking it with the contract suite | — |
 | [10. Using another database](other-databases.md) | A database other than the built-in ones: the SQL dialect, the driver in each adapter, what tends to differ, running the contract suite against it | — |
 | [11. Transactional outbox](outbox.md) | Events written in the change's transaction (`PascalDb.Outbox`): the relay and its leases, sinks, the local sink's handlers, retries, purge, metrics and traces; the tables and reference SQL for each database | 07 |
-| [12. Caching query results](cache.md) | A cache (pascal-common-faa's `PascalCommon.Cache`) in the service in front of the repository: keys and tags, `GetOrLoad`, reads in a scope of their own, `PdbInvalidateAfterCommit` | 08 |
+| [12. Caching query results](cache.md) | A cache (pascal-common-faa's `PascalCommon.Cache`) in the service or in the repository: keys and tags, `GetOrLoad`, reads in a scope of their own, `PdbInvalidateAfterCommit` | 08 |
 
 ## Status
 

@@ -1,9 +1,10 @@
 # 12. Caching query results
 
 pascal-db-faa doesn't cache by itself: the cache is pascal-common-faa's `PascalCommon.Cache`
-(1.29.0 or later), and it sits in the application's **service**, in front of the repository. A hit
-takes nothing from the pool and runs nothing on the database; a miss runs the repository as
-usual. What this library adds is the one thing a cache needs from the database layer:
+(1.29.0 or later), placed wherever the application's architecture puts it. The examples below put
+it in the **service**, in front of the repository; [Caching in the repository](#caching-in-the-repository)
+covers keeping it behind the repository's interface instead. Either way, a hit takes nothing from
+the pool and runs nothing on the database; a miss runs the query as usual. What this library adds is the one thing a cache needs from the database layer:
 **invalidating after the commit**, with `PdbInvalidateAfterCommit` (`PascalDb.Cache`).
 
 The cache's own design (tags by generations, single-flight, a store that is down being a miss,
@@ -62,6 +63,40 @@ end;
 LJson := FCache.GetOrLoad(LKey, 300, LoadByState, AState);
 ```
 
+## Caching in the repository
+
+The library doesn't care which layer holds the cache. An application that wants the service free of
+storage details can keep the cache inside the repository, or in a decorator around it. The rules
+are the same as in the service, but two of them are easier to break there:
+
+- **Check the cache before `AcquireQuery`**, or a hit still takes a connection from the pool.
+- **Skip the cache when the caller passes a transaction.** In the service, a cached read runs in a
+  scope of its own by construction; a repository method usually receives the caller's
+  `ATransaction`. When it isn't `nil`, neither read from the cache nor put into it: a `Put` could
+  cache rows that transaction hasn't committed (and may roll back), and a hit would return the
+  committed state without the changes that same transaction just made.
+
+```pascal
+function TCityRepository.ByState(const AState: string;
+  ATransaction: ITransaction): TCityList;
+var
+  LKey: string;
+begin
+  if (FCache = nil) or (ATransaction <> nil) then
+    Exit(QueryByState(AState, ATransaction));    // no cache: the usual query
+
+  LKey := FCache.Key('city.by_state:' + AState, ['cities', 'cities.state:' + AState]);
+  Result := CitiesFromJson(FCache.GetOrLoad(LKey, 300, LoadByStateJson, AState));
+end;
+```
+
+The repository then also maps its results to and from the cached string (JSON). To keep the SQL
+repository free of that, a **decorator** does the same job: a `TCachedCityRepository` implementing
+the same `ICityRepository` and wrapping the concrete one. Its reads go through the cache (passing
+straight through when `ATransaction <> nil`), its writes are passed on, and the invalidation stays
+in the concrete repository's scope, as in the next section. Turning the cache on or off is then a
+choice of the composition root: inject the decorator or the concrete repository.
+
 ## Invalidating after the commit
 
 A change invalidates the tags of what it changed, **after the commit** (the cache's C7, rule 1).
@@ -103,6 +138,27 @@ end;
   stale for a TTL shouldn't be cached.
 - Between the commit and the invalidation, readers may still get the old value for an instant;
   also bounded by the TTL.
+
+## Before caching a query
+
+A cache trades freshness for speed, and most of its failures are silent: nothing raises, the
+application just serves an old value. The ones above, in one place, plus those the code can't see:
+
+| Side effect | Why | Work-around |
+|---|---|---|
+| An old value for an instant after a change | the invalidation runs after the commit, not with it | bounded by the TTL; don't cache what can't be stale for that long |
+| An old value for a whole TTL | the store was down when the invalidation ran (`Invalidate` doesn't raise) | watch `OnError` and the cache metrics; keep the TTL as short as the data allows |
+| Rows that never existed | a read cached inside a transaction that later rolled back | read for the cache in a scope of its own; in a repository, skip the cache when `ATransaction <> nil` |
+| An old value put back right after a change | invalidating before the commit: a concurrent reader reloads the old row | `PdbInvalidateAfterCommit`, never `Invalidate` inside the transaction |
+| Changes made outside the application never show up | SQL run by hand, another system, a trigger or a database job: nothing invalidates | only the TTL helps; don't cache tables others write to, or give them a short TTL |
+| Each instance sees its own data | `TPcMemoryCacheStore` is per process: a write invalidates only the instance that made it | one shared store (Redis) when more than one instance runs |
+| A change doesn't drop an entry, with no error | the write forgot a tag that the read used | build the tags in one place (a function per entity), used by both the read and the write |
+| A user gets another user's data | the result depends on the user or their permissions, and that isn't in the key | put what the query depends on in the key (user, tenant, role), hashed if sensitive; or don't cache it |
+| A new version reads a value it can't parse | the DTO changed, and a shared store still holds JSON written by the previous version | a format version in the key (`'v2:city.by_state:'`), changed with the DTO; the old entries expire by TTL |
+| The pool still sees every request | the cache is checked after `AcquireQuery` | check it first: a hit must take no connection |
+
+When in doubt, measure first: cache the queries that are both frequent and slow, read far more than
+they're written and written only by this application.
 
 ## Testing
 

@@ -6,8 +6,9 @@ unit PascalDb.Cache;
   pascal-common-faa's PascalCommon.Cache) after the transaction a scope
   belongs to commits.
 
-  The cache itself sits in the application's service, in front of the
-  repository (docs/cache.md): a hit takes nothing from the pool. What a cache
+  The cache itself belongs to the application, in the service or behind the
+  repository's interface (docs/cache.md): a hit takes nothing from the pool.
+  What a cache
   needs from this library is to invalidate after the commit, never before
   (the cache's decision C7), or a concurrent reader can load the old row and
   put it back; and a repository whose scope is nested in the caller's can't
