@@ -608,16 +608,26 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     transaction before freeing it (the connection is still held then, so it isn't back in the
     pool yet). Measured only on SQLite; the same code path serves Firebird, PostgreSQL and
     MySQL/MariaDB on FireDAC.
-62. **SQL Server: a string parameter longer than 2000 characters fails on SQLdb, longer than 4000
-    on Zeos.** Found by the full-text tests (2026-11-09, Linux, Microsoft's ODBC Driver 18.7):
-    a `LIKE` pattern of about 3000 characters raised `EODBCException` `HY104`. Measured with
-    `SELECT LEN(:P)` (`.ci/probe-mssql-len`, git-ignored): SQLdb's ODBC connector binds 2000
-    characters and fails from 2001 with `Could not bind parameter 0 ... [Microsoft][ODBC Driver
-    18 for SQL Server]Invalid precision value`, ASCII or not, so it seems to give the driver the
-    size in bytes of UTF-16 (2000 x 2 = 4000, the largest bounded `NVARCHAR`); Zeos (`odbc_w`)
-    binds 4000 and refuses 4001 itself with `value of param 0 exceeded`. Both fail before the
-    statement reaches the server, so the column type doesn't matter. Not fixed: open item. The
-    full-text tests skip their 3000-character word on SQL Server.
+62. **SQL Server: SQLdb refused any string parameter longer than 2000 characters.** Found by the
+    full-text tests (2026-11-09, Linux, Microsoft's ODBC Driver 18.7): a `LIKE` pattern of about
+    3000 characters raised `EODBCException` `HY104`. Measured with `.ci/probe-mssql-len`
+    (git-ignored): from 2001 characters, ASCII or not, every statement failed with `Could not bind
+    parameter 0 ... [Microsoft][ODBC Driver 18 for SQL Server]Invalid precision value`, an
+    `INSERT` into an `NVARCHAR(MAX)` column included. Cause: FPC 3.2.2's `odbcconn.pas` binds a
+    string as `SQL_WVARCHAR` with `ColumnSize := Length(WideString) * 2`, bytes where ODBC wants
+    characters, and 4000 is the largest bounded `NVARCHAR`. Binding it as a memo
+    (`SQL_WLONGVARCHAR`) wrote the long values but sent them as `ntext`, which an `NVARCHAR`
+    column can't be compared with (`The data types nvarchar and ntext are incompatible in the
+    equal to operator`). Fix: the SQLdb adapter wraps odbcsqldyn's `SQLBindParameter` when it
+    loads the driver manager (now on Windows too, where it used to leave that to the connector):
+    a wide string whose column size equals its buffer size in bytes gets the size in characters,
+    and 0 (`NVARCHAR(MAX)`) above 4000. Contract test `LongText_ThroughParameters` (8000
+    characters written, compared and counted). Zeos (`odbc_w`) is different and not a bug: it
+    asks the server to describe each parameter and refuses a longer value itself (`value of param
+    0 exceeded`), so the limit is the one SQL Server infers from the statement: `NVARCHAR(4000)`
+    for a column of that size, a `LIKE` pattern (4000 characters at most on the server anyway)
+    or a bare expression such as `LEN(?)`; an `NVARCHAR(MAX)` column or `CAST(:P AS
+    NVARCHAR(MAX))` takes any length (10000 measured).
 63. **A full-text syntax reads what the user typed as operators.** Measured with the FTS probe
     (`.ci/probe-fts`, 2026-11-09), passing typed text as the search parameter: SQLite FTS5
     failed on 13 of 28 inputs (`"cafe` unterminated string, `-cafe` no such column, `50%`,

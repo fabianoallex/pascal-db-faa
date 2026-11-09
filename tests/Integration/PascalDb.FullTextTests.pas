@@ -381,10 +381,6 @@ var
 begin
   for LInput in INPUTS do
     Check(LInput);
-  // SQL Server: SQLdb can't send a string parameter longer than 2000
-  // characters, Zeos one longer than 4000 (gotcha 62)
-  if EngineSqlDirectory = 'MSSQL' then
-    Exit;
   LLong := '';
   for K := 1 to 3000 do
     LLong := LLong + 'a';

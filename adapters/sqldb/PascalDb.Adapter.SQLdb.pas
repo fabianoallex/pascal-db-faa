@@ -163,7 +163,19 @@
     (measured: @@LOCK_TIMEOUT back at -1 after the SET through SQLdb, 1000
     through SQLExecDirect, still 1000 after a commit). The same applies to
     any SET a program runs through a query. Lock errors: 1222 (lock request
-    time out) and 1205 (deadlock victim). }
+    time out) and 1205 (deadlock victim). String parameters: FPC 3.2.2's
+    connector binds them as SQL_WVARCHAR with the column size in bytes
+    (Length * 2) where ODBC wants characters, so the driver refused any value
+    longer than 2000 characters, 4000 bytes being the largest bounded
+    NVARCHAR ("HY104 Invalid precision value", whatever the column, NVARCHAR
+    (MAX) included; gotcha 62). Binding it as a memo instead sends ntext,
+    which no NVARCHAR column can be compared with. So when the driver manager
+    loads, this unit puts a wrapper in odbcsqldyn's SQLBindParameter: a wide
+    string bound with its size in bytes (the size equal to the buffer's, as
+    the connector passes it) gets the size in characters, and above 4000
+    characters 0, which Microsoft's driver reads as NVARCHAR(MAX). The
+    wrapper is process-wide (every SQLdb ODBC connection), and a connector
+    that passes characters is left alone. }
 
 interface
 
@@ -316,6 +328,7 @@ var
   GLibraryLoaders: TList = nil;
   GODBCConnectLock: TCriticalSection = nil;
   GODBCLoaded: Boolean = False;
+  GConnectorBindParameter: TSQLBindParameter = nil;
 
 const
   SQLITE_SCHEMA = 17; // sqlite3.h: "The database schema changed"
@@ -601,19 +614,46 @@ begin
     and (ADataBase is TSQLConnector) and SameText(TSQLConnector(ADataBase).ConnectorType, 'SQLite3');
 end;
 
+const
+  // The largest bounded NVARCHAR; Microsoft's driver takes a column size of 0
+  // (SQL_SS_LENGTH_UNLIMITED) as NVARCHAR(MAX).
+  MSSQL_MAX_NVARCHAR = 4000;
+
+// See the unit header: the connector gives a wide string's size in bytes.
+function PdbBindParameter(hstmt: SQLHSTMT; ipar: SQLUSMALLINT; fParamType: SQLSMALLINT;
+  fCType: SQLSMALLINT; fSqlType: SQLSMALLINT; cbColDef: SQLULEN; ibScale: SQLSMALLINT;
+  rgbValue: SQLPOINTER; cbValueMax: SQLLEN; pcbValue: PSQLLEN): SQLRETURN;
+  {$IFDEF UNIX}cdecl{$ELSE}stdcall{$ENDIF};
+begin
+  if (fCType = SQL_C_WCHAR) and ((fSqlType = SQL_WVARCHAR) or (fSqlType = SQL_WCHAR)) and
+     (cbValueMax > 0) and (SQLLEN(cbColDef) = cbValueMax) then
+  begin
+    cbColDef := cbColDef div SizeOf(WideChar);
+    if cbColDef > MSSQL_MAX_NVARCHAR then
+      cbColDef := 0;
+  end;
+  Result := GConnectorBindParameter(hstmt, ipar, fParamType, fCType, fSqlType, cbColDef, ibScale,
+    rgbValue, cbValueMax, pcbValue);
+end;
+
 // See the unit header: the ODBC driver manager, loaded once for the process
 // (InitialiseODBC counts references, so the connector's own later calls,
-// without a name, reuse it).
+// without a name, reuse it), and the wrapper around SQLBindParameter.
+// ALibrary '' loads the connector's default (odbc32.dll on Windows), so the
+// wrapper is in place there too.
 procedure UseODBCLibrary(const ALibrary: string);
 begin
-  if GODBCLoaded or (ALibrary = '') then
+  if GODBCLoaded then
     Exit;
   GODBCConnectLock.Enter;
   try
     if not GODBCLoaded then
     begin
-      PdbPreloadClientLibrary(ALibrary);
+      if ALibrary <> '' then
+        PdbPreloadClientLibrary(ALibrary);
       InitialiseODBC(ALibrary);
+      GConnectorBindParameter := SQLBindParameter;
+      SQLBindParameter := @PdbBindParameter;
       GODBCLoaded := True;
     end;
   finally

@@ -194,10 +194,12 @@ program.
   through a `Double` (exact for amounts that fit 15 digits); Zeos reads it as a decimal.
 - **SQLdb reads an `NVARCHAR(MAX)` column back empty** (`''`, no error); Zeos reads it right.
   Declare a bounded `NVARCHAR(n)` (up to 4000) where SQLdb reads the column (gotcha 58).
-- **A long string parameter fails**: SQLdb refuses one longer than 2000 characters
-  (`Could not bind parameter 0 ... HY104 Invalid precision value`), Zeos one longer than 4000
-  (`value of param 0 exceeded`), before the statement runs, whatever the column type (gotcha 62).
-  Keep longer texts out of SQL Server parameters until it is fixed. Open item.
+- **Long string parameters**: Zeos sizes each parameter by what the server infers from the
+  statement and refuses a longer value itself (`value of param 0 exceeded`): up to 4000
+  characters for an `NVARCHAR(4000)` column, a `LIKE` pattern or a bare expression such as
+  `LEN(?)`, any length for an `NVARCHAR(MAX)` column or `CAST(:P AS NVARCHAR(MAX))`. SQLdb's
+  connector refused anything over 2000 characters; the adapter corrects how it binds them
+  (gotcha 62).
 
 ## Adapter-specific behavior you may notice
 

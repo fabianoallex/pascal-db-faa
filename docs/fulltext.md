@@ -130,9 +130,8 @@ a migration with that terminator (SQLite's triggers have `;` inside).
   `PdbLikeContains`. That matches the typed text as one piece (`café preto` finds "Café preto",
   not "preto, sem café"), ignores case (Firebird through `LOWER`, SQL Server through its default
   collation) and keeps accents. A long text needs room in the pattern: Firebird casts it to
-  `VARCHAR(8000)`, and on SQL Server SQLdb sends no string parameter longer than 2000
-  characters, Zeos none longer than 4000 ([gotcha 62](gotchas.md)); limit what the search box
-  accepts.
+  `VARCHAR(8000)`, and SQL Server takes a `LIKE` pattern of at most 4000 characters (Zeos
+  refuses a longer one itself, [gotcha 62](gotchas.md)); limit what the search box accepts.
 
 ## Differences that remain
 

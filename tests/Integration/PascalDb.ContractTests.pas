@@ -12,8 +12,9 @@
   optional columns through SQL tags, an INSERT returning its row through
   Open (RETURNING, or OUTPUT on SQL Server; not on MySQL), UTF-8 text,
   text longer than its VARCHAR(n) read back whole (SQLite only, the one
-  database that stores it), trailing spaces kept through ExecSql and a
-  batch,
+  database that stores it), a text of 8000 characters through a parameter
+  (written, compared and read back), trailing spaces kept through ExecSql
+  and a batch,
   commit/rollback, nested scopes with savepoints, after-commit actions
   (PascalDb.AfterCommit: run after the main commit, when another connection
   already sees the row, never on a nested scope's commit, dropped by a
@@ -96,6 +97,7 @@ type
     [Test] procedure Utf8Text_RoundTrip;
     [Test] procedure TextLongerThanDeclared_ReadsBackWhole;
     [Test] procedure TrailingSpaces_AreKept;
+    [Test] procedure LongText_ThroughParameters;
     [Test] procedure Commit_Persists;
     [Test] procedure Rollback_Discards;
     [Test] procedure NestedScope_RollbackToSavepoint_KeepsOuterWork;
@@ -831,6 +833,42 @@ begin
       LQuery.Params.Integers['ID'] := 3003;
       LQuery.Params.Strings['NAME'] := LLong + '!';
       TAssert.AssertEquals('RETURNING: the whole value', LLong + '!', LQuery.Open.Strings['NAME']);
+    end;
+    LScope.Commit;
+  except
+    LScope.Rollback;
+    raise;
+  end;
+end;
+
+procedure TContractTests.LongText_ThroughParameters;
+var
+  LLong: string;
+  LQuery: IQuery;
+  LScope: IScopeTransaction;
+begin
+  // More than SQL Server's largest bounded NVARCHAR: SQLdb's ODBC connector
+  // refused any string parameter over 2000 characters (gotcha 62).
+  LLong := DupeString('São Paulo→', 800); // 8000 characters
+  LScope := FFactory.GetPool.AcquireQuery(LQuery);
+  LScope.StartTransaction;
+  try
+    LQuery.Sql := 'DELETE FROM LONG_TEXTS';
+    LQuery.ExecSql;
+    LQuery.Sql := 'INSERT INTO LONG_TEXTS (ID, TXT) VALUES (:ID, :TXT)';
+    LQuery.Params.Integers['ID'] := 1;
+    LQuery.Params.Strings['TXT'] := LLong;
+    LQuery.ExecSql;
+    LQuery.Sql := 'SELECT ' + CharLengthSql('TXT') + ' AS N FROM LONG_TEXTS WHERE ID = 1';
+    TAssert.AssertEquals('stored length', 8000, LQuery.Open.Integers['N']);
+    LQuery.Sql := 'SELECT COUNT(*) AS N FROM LONG_TEXTS WHERE TXT = :TXT';
+    LQuery.Params.Strings['TXT'] := LLong;
+    TAssert.AssertEquals('compared with a parameter', 1, LQuery.Open.Integers['N']);
+    // SQLdb reads an NVARCHAR(MAX) column back empty (gotcha 58)
+    if IntegrationTarget <> 'sqldb/sqlserver' then
+    begin
+      LQuery.Sql := 'SELECT TXT FROM LONG_TEXTS WHERE ID = 1';
+      TAssert.AssertEquals('read back', LLong, LQuery.Open.Strings['TXT']);
     end;
     LScope.Commit;
   except

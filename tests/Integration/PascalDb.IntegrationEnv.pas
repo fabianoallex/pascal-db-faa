@@ -480,12 +480,12 @@ end;
 
 function IntegrationSchemaVersion: Integer;
 begin
-  Result := 3;
+  Result := 4;
 end;
 
 function BuildSqlSource: ISqlSource;
 var
-  LUtf8, LText, LTimestamp, LDeferred: string;
+  LUtf8, LText, LTimestamp, LDeferred, LLongText: string;
 begin
   // Firebird: the text columns are declared UTF8 (the database default
   // character set is NONE). PostgreSQL: the database encoding (UTF8 in the
@@ -507,6 +507,14 @@ begin
   begin
     LText := 'VARCHAR';
     LTimestamp := 'TIMESTAMP';
+  end;
+  // A column for 8000 characters: Firebird's VARCHAR goes up to 32765 bytes
+  // (8000 UTF8 characters fit), SQL Server's bounded NVARCHAR to 4000.
+  case Engine of
+    engFirebird: LLongText := 'VARCHAR(8000) CHARACTER SET UTF8';
+    engSqlServer: LLongText := 'NVARCHAR(MAX)';
+  else
+    LLongText := 'TEXT';
   end;
   if SupportsDeferredConstraints then
     LDeferred := ' DEFERRABLE INITIALLY DEFERRED'
@@ -547,6 +555,8 @@ begin
       '  ITEM_ID INTEGER,' +
       '  CONSTRAINT PK_ITEM_LINKS PRIMARY KEY (ID),' +
       '  CONSTRAINT FK_ITEM_LINKS_ITEM FOREIGN KEY (ITEM_ID) REFERENCES ITEMS (ID)' + LDeferred + ')^')
+    .Add(SQL_DIRECTORY, 'MIG.0004',
+      'CREATE TABLE LONG_TEXTS (ID INTEGER NOT NULL PRIMARY KEY, TXT ' + LLongText + ')^')
     .Add(SQL_DIRECTORY, 'ITEMS.INSERT',
       'INSERT INTO ITEMS (ID, NAME, QTY, BIG, PRICE, RATIO, CREATED_AT, ACTIVE' +
       '  [NOTE {], NOTE [} NOTE])' +
@@ -1199,10 +1209,11 @@ var
 
 function IntegrationFactory: IDBFactory;
 const
-  MIGRATIONS: array[0..2] of TMigrationItem = (
+  MIGRATIONS: array[0..3] of TMigrationItem = (
     (Version: 1; ScriptName: 'MIG.0001'; ParamReplaceProc: nil; Terminator: ';'; IsDDL: True),
     (Version: 2; ScriptName: 'MIG.0002'; ParamReplaceProc: nil; Terminator: '^'; IsDDL: True),
-    (Version: 3; ScriptName: 'MIG.0003'; ParamReplaceProc: nil; Terminator: '^'; IsDDL: True));
+    (Version: 3; ScriptName: 'MIG.0003'; ParamReplaceProc: nil; Terminator: '^'; IsDDL: True),
+    (Version: 4; ScriptName: 'MIG.0004'; ParamReplaceProc: nil; Terminator: '^'; IsDDL: True));
 var
   LEngine: TDBMigrationEngine;
 begin

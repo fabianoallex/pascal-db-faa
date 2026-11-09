@@ -538,7 +538,10 @@ turns `HostName`/`Port`/`DatabaseName` into the connection string's `Server=host
 connection string). FreeTDS/db-lib is rejected (gotchas 37, 38) and FireDAC can't be tested (gotcha
 42). Linux client: `msodbcsql18` + `unixodbc` from Microsoft's repository; `ClientLibrary` /
 `LibraryLocation` = `libodbc.so.2` (the driver manager). What the adapters add:
-- SQLdb: loads the driver manager itself (`InitialiseODBC`, `libodbc.so.2` by default on Unix),
+- SQLdb: loads the driver manager itself (`InitialiseODBC`, `libodbc.so.2` by default on Unix,
+  `odbc32.dll` on Windows), wraps its `SQLBindParameter` so a string's size goes in characters
+  and above 4000 as `NVARCHAR(MAX)` (the connector passed bytes: nothing over 2000 characters
+  bound, gotcha 62),
   opens ODBC connections one at a time (gotcha 39) and applies `LockTimeoutMs` as `SET
   LOCK_TIMEOUT` through `SQLExecDirect` on the connection's own handle (gotcha 40);
 - Zeos: `MARS_Connection=yes` appended to the connection string unless it has one (gotcha 41),
@@ -574,9 +577,6 @@ Package Manager under "zeos").
   the outbox's tests on 2026-10-30). Cause not isolated; the outbox's reference schema uses a
   `VARCHAR` payload on Firebird. A fix needs probes built in the Delphi IDE.
 - SQLdb on SQL Server reads an `NVARCHAR(MAX)` column back empty (gotcha 58). Cause not isolated.
-- SQL Server: a string parameter longer than 2000 characters fails on SQLdb (`HY104 Invalid
-  precision value`) and longer than 4000 on Zeos (`value of param 0 exceeded`), before reaching
-  the server (gotcha 62, found by the full-text tests on 2026-11-09; probe `.ci/probe-mssql-len`).
 
 Closed on 2026-09-30: the rare failures with concurrent connections on Zeos + Firebird (Linux),
 sample 05 (CI run 36235419745) and `ConcurrentWriters_AllCommit` (CI run 36644884746, attempt

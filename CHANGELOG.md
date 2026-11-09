@@ -6,6 +6,20 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-11-09
+
+### Fixed
+
+- SQLdb on SQL Server: a string parameter longer than 2000 characters failed with `HY104
+  Invalid precision value`, whatever the column (`NVARCHAR(MAX)` included): FPC 3.2.2's ODBC
+  connector gives the size in bytes where ODBC wants characters. The adapter wraps the
+  connector's `SQLBindParameter` (process-wide, once, when it loads the driver manager, which it
+  now also does on Windows): a wide string's size goes in characters, and above 4000 as
+  `NVARCHAR(MAX)`. New contract test `LongText_ThroughParameters` (8000 characters; a new
+  `LONG_TEXTS` table in the integration schema). Gotcha 62, which also explains Zeos's own limit
+  (what the server infers for the parameter: 4000 for an `NVARCHAR(4000)` column, a `LIKE`
+  pattern or `LEN(?)`, none for `NVARCHAR(MAX)`).
+
 ## [0.20.0] - 2026-11-09
 
 ### Added
