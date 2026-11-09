@@ -608,3 +608,41 @@ and 15 in the tests section (`TearDown`, `finalization`). The skill links to thi
     transaction before freeing it (the connection is still held then, so it isn't back in the
     pool yet). Measured only on SQLite; the same code path serves Firebird, PostgreSQL and
     MySQL/MariaDB on FireDAC.
+62. **SQL Server: a string parameter longer than 2000 characters fails on SQLdb, longer than 4000
+    on Zeos.** Found by the full-text tests (2026-11-09, Linux, Microsoft's ODBC Driver 18.7):
+    a `LIKE` pattern of about 3000 characters raised `EODBCException` `HY104`. Measured with
+    `SELECT LEN(:P)` (`.ci/probe-mssql-len`, git-ignored): SQLdb's ODBC connector binds 2000
+    characters and fails from 2001 with `Could not bind parameter 0 ... [Microsoft][ODBC Driver
+    18 for SQL Server]Invalid precision value`, ASCII or not, so it seems to give the driver the
+    size in bytes of UTF-16 (2000 x 2 = 4000, the largest bounded `NVARCHAR`); Zeos (`odbc_w`)
+    binds 4000 and refuses 4001 itself with `value of param 0 exceeded`. Both fail before the
+    statement reaches the server, so the column type doesn't matter. Not fixed: open item. The
+    full-text tests skip their 3000-character word on SQL Server.
+63. **A full-text syntax reads what the user typed as operators.** Measured with the FTS probe
+    (`.ci/probe-fts`, 2026-11-09), passing typed text as the search parameter: SQLite FTS5
+    failed on 13 of 28 inputs (`"cafe` unterminated string, `-cafe` no such column, `50%`,
+    `d'agua`, `Cafe-com-leite`, an empty or blank text); MySQL/MariaDB boolean mode on `cafe)`,
+    `*` and `+` (natural language mode on `*` too); PostgreSQL `to_tsquery` on anything with a
+    space. Where nothing failed the meaning changed (`-cafe` excludes, `OR` joins). SQLdb and
+    Zeos gave the same results. Fix: `PascalDb.FullText` cuts the text into words and quotes
+    each one in the dialect's syntax; 0 failures on the same inputs with every option.
+64. **MySQL/MariaDB full-text: a required word the index doesn't hold matches no row, and
+    uncommitted rows are invisible.** Measured with the FTS probe on MySQL 8.4 and MariaDB 11.4
+    (InnoDB): `+pao +de +queijo` and `+d +agua` found nothing, because `de` is a stopword and `d`
+    is shorter than `innodb_ft_min_token_size` (3); without the `+` they are just ignored. And a
+    row inserted in the transaction that searches isn't found until it commits (InnoDB fills the
+    full-text index at commit); PostgreSQL and SQLite find it. Fix: the MySQL dialect leaves those
+    words out in all-words mode (`TFullTextOptions.MySQLMinTokenSize`/`MySQLStopwords`); the
+    visibility is documented in `docs/fulltext.md`.
+65. **PostgreSQL refuses `unaccent()` in a generated column.** `to_tsvector('portuguese',
+    unaccent(T))` in `GENERATED ALWAYS AS (...) STORED` fails with `42P17 generation expression is
+    not immutable` (PostgreSQL 17). A text search configuration that maps words through the
+    `unaccent` dictionary (`CREATE TEXT SEARCH CONFIGURATION pt_unaccent (COPY = portuguese)` +
+    `ALTER MAPPING FOR hword, hword_part, word WITH unaccent, portuguese_stem`) is accepted in
+    the generated column, and also makes `cafes` find `cafe`. Used by `docs/fulltext/sql/PG`.
+66. **SQLdb prints PostgreSQL's notices to standard error.** A full-text search whose query has no
+    lexeme left (only stopwords) makes the server send `NOTICE: text-search query contains only
+    stop words or doesn't contain lexemes, ignored`; with SQLdb's `TPQConnection` libpq's default
+    notice processor writes it to stderr on every such query (measured on Linux: the lines
+    disappear with `2>/dev/null`). Zeos prints nothing. Not changed in the adapter; noted in
+    `docs/fulltext.md`.

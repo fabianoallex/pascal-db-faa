@@ -7,7 +7,10 @@
   on the migrations control table via IMigrationDialect, and the clause that
   limits a query to one page via IPagingDialect (LIMIT/OFFSET; ROWS m TO n on
   Firebird, which 2.5 has and OFFSET/FETCH needs 3.0 for; OFFSET/FETCH on SQL
-  Server, which refuses it without ORDER BY). The paging numbers go into the
+  Server, which refuses it without ORDER BY), and the full-text parameter
+  value via IFullTextDialect (PascalDb.FullText: PostgreSQL, MySQL/MariaDB
+  and SQLite; Firebird has no full-text search and SQL Server's isn't
+  covered). The paging numbers go into the
   text as integer literals: they are typed Integer/Int64, so nothing a user
   types can reach the SQL through them. Implementations for
   PostgreSQL, Firebird, SQLite, MySQL/MariaDB and SQL Server, registered in
@@ -29,7 +32,8 @@ uses
   Classes,
   SysUtils,
   Generics.Collections,
-  PascalDb.Interfaces;
+  PascalDb.Interfaces,
+  PascalDb.FullText;
 
 type
   TSQLDialectClass = class of TInterfacedObject;
@@ -52,7 +56,7 @@ type
 
   { TPostgreSQLDialect }
 
-  TPostgreSQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect)
+  TPostgreSQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect, IFullTextDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -63,6 +67,7 @@ type
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
     function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+    function GetFullTextQuery(const AWords: TArray<string>; const AOptions: TFullTextOptions): string;
   end;
 
   { TFirebirdDialect }
@@ -85,7 +90,7 @@ type
     names as written, so the control table is looked up case-insensitively
     in sqlite_master. }
 
-  TSQLiteDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect)
+  TSQLiteDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect, IFullTextDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -96,6 +101,7 @@ type
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
     function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+    function GetFullTextQuery(const AWords: TArray<string>; const AOptions: TFullTextOptions): string;
   end;
 
   { TMySQLDialect
@@ -107,7 +113,7 @@ type
     Double quotes delimit strings unless ANSI_QUOTES is on: the column alias
     goes in backticks. }
 
-  TMySQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect)
+  TMySQLDialect = class(TInterfacedObject, ISQLDialect, IMigrationDialect, IPagingDialect, IFullTextDialect)
   public
     function GetReleaseSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -118,6 +124,7 @@ type
     function GetMigrationLastVersionSQL: string;
     function GetMigrationInsertVersionSQL: string;
     function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+    function GetFullTextQuery(const AWords: TArray<string>; const AOptions: TFullTextOptions): string;
   end;
 
   { TSQLServerDialect
@@ -251,6 +258,11 @@ begin
   Result := Format('LIMIT %d OFFSET %d', [ALimit, AOffset]);
 end;
 
+function TPostgreSQLDialect.GetFullTextQuery(const AWords: TArray<string>; const AOptions: TFullTextOptions): string;
+begin
+  Result := PdbFullTextPostgreSQL(AWords, AOptions);
+end;
+
 { TFirebirdDialect }
 
 function TFirebirdDialect.GetReleaseSavepointSQL(const AName: string): string;
@@ -355,6 +367,11 @@ begin
   Result := Format('LIMIT %d OFFSET %d', [ALimit, AOffset]);
 end;
 
+function TSQLiteDialect.GetFullTextQuery(const AWords: TArray<string>; const AOptions: TFullTextOptions): string;
+begin
+  Result := PdbFullTextSQLite(AWords, AOptions);
+end;
+
 { TMySQLDialect }
 
 function TMySQLDialect.GetReleaseSavepointSQL(const AName: string): string;
@@ -405,6 +422,11 @@ end;
 function TMySQLDialect.GetPagingClause(ALimit: Integer; AOffset: Int64): string;
 begin
   Result := Format('LIMIT %d OFFSET %d', [ALimit, AOffset]);
+end;
+
+function TMySQLDialect.GetFullTextQuery(const AWords: TArray<string>; const AOptions: TFullTextOptions): string;
+begin
+  Result := PdbFullTextMySQL(AWords, AOptions);
 end;
 
 { TSQLServerDialect }

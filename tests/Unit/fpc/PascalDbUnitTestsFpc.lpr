@@ -31,6 +31,7 @@ uses
   PascalDb.SqlSourcesTests,
   PascalDb.AdapterBaseTests,
   PascalDb.PagingTests,
+  PascalDb.FullTextTests,
   PascalDb.BatchTests,
   PascalDb.OutboxUnitTests,
   PascalDb.AfterCommitTests,

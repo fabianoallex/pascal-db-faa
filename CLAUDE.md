@@ -178,6 +178,29 @@ copy. Usage guide: `docs/outbox.md`.
 
 ---
 
+## Full-text search (`PascalDb.FullText`)
+
+Added on 2026-11-09 after a feasibility probe (`.ci/probe-fts`, git-ignored: `FtsProbe.lpr`
+through IntegrationEnv, `findings.md`). Guide: `docs/fulltext.md`.
+
+- **The library writes the parameter value, never the SQL**: the query's shape differs (a
+  predicate on PostgreSQL/MySQL, a join with the FTS5 table on SQLite), so a clause API was
+  rejected, as `COUNT` was for paging. Raw user text broke the syntaxes (FTS5 13 of 28 inputs,
+  MySQL `word)`/`*`/`+`, `to_tsquery` any space); `PdbFullTextWords` keeps letters and digits and
+  the dialect quotes each word (`'w'`, `+w`, `"w"`). SQLdb and Zeos behaved identically.
+- `IFullTextDialect` is separate (like `IPagingDialect`); PostgreSQL, MySQL/MariaDB, SQLite and
+  the mock implement it. Firebird has none; SQL Server's FTS (separate component, async
+  population, no FTS in the `mssql/server` image) isn't covered: `PdbSupportsFullText` False,
+  `LIKE` with `PdbLikeContains` in the reference SQL.
+- MySQL/MariaDB all-words mode drops words under `innodb_ft_min_token_size` and InnoDB
+  stopwords (a required word the index doesn't hold matched no row); options carry both.
+- Reference SQL: `docs/fulltext/sql/{PG,MYSQL,SQLITE,FB,MSSQL}` (`FULLTEXT.SCHEMA` ended by `^`
+  lines, `FULLTEXT.SEARCH`), the single copy; `tests/Integration/PascalDb.FullTextTests.pas` reads
+  it (the Linux script copies `docs/fulltext` next to the runner). Unit tests:
+  `tests/Unit/PascalDb.FullTextTests.pas`.
+
+---
+
 ## pascal-common-faa (base library)
 
 The optional types (`PascalCommon.Optionals`), the atomics and ticks (`PascalCommon.Threading`),
@@ -551,6 +574,9 @@ Package Manager under "zeos").
   the outbox's tests on 2026-10-30). Cause not isolated; the outbox's reference schema uses a
   `VARCHAR` payload on Firebird. A fix needs probes built in the Delphi IDE.
 - SQLdb on SQL Server reads an `NVARCHAR(MAX)` column back empty (gotcha 58). Cause not isolated.
+- SQL Server: a string parameter longer than 2000 characters fails on SQLdb (`HY104 Invalid
+  precision value`) and longer than 4000 on Zeos (`value of param 0 exceeded`), before reaching
+  the server (gotcha 62, found by the full-text tests on 2026-11-09; probe `.ci/probe-mssql-len`).
 
 Closed on 2026-09-30: the rare failures with concurrent connections on Zeos + Firebird (Linux),
 sample 05 (CI run 36235419745) and `ConcurrentWriters_AllCommit` (CI run 36644884746, attempt
@@ -562,7 +588,7 @@ serializing Firebird connects in the Zeos adapter.
 
 ## Gotchas
 
-The numbered gotchas (symptom → cause → fix, 1–61) live in [`docs/gotchas.md`](docs/gotchas.md).
+The numbered gotchas (symptom → cause → fix, 1–66) live in [`docs/gotchas.md`](docs/gotchas.md).
 Read it before touching the pool, an adapter, resources or anything that differs between
 Delphi and FPC, and add new ones there, keeping the numbering. References in this file
 ("gotcha 17") point to it.

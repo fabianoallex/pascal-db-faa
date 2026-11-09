@@ -24,7 +24,8 @@ uses
   PascalDb.DUnitXCompat in '..\Unit\PascalDb.DUnitXCompat.pas',
   PascalDb.IntegrationEnv in 'PascalDb.IntegrationEnv.pas',
   PascalDb.ContractTests in 'PascalDb.ContractTests.pas',
-  PascalDb.OutboxTests in 'PascalDb.OutboxTests.pas';
+  PascalDb.OutboxTests in 'PascalDb.OutboxTests.pas',
+  PascalDb.FullTextTests in 'PascalDb.FullTextTests.pas';
 
 var
   runner: ITestRunner;

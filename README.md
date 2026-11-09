@@ -16,6 +16,9 @@ A database access layer for **Delphi and Lazarus/FPC from the same source code**
   composite. `tools/build_sql_res.py` builds the `.res` on any OS.
 - Offset paging: the clause written by each database's dialect into the SQL template, and
   page request/metadata types.
+- Full-text search values (`PascalDb.FullText`): what a user typed turned into a search value
+  that the native full-text search of PostgreSQL, MySQL/MariaDB and SQLite (FTS5) reads
+  literally, with all/any words and a prefix on the last word; reference SQL for each database.
 - Optional/nullable types (`IOptXxx`, `INullXxx`, `IOptNullXxx`, from
   [pascal-common-faa](https://github.com/fabianoallex/pascal-common-faa)) integrated with the
   parameters.
@@ -76,7 +79,7 @@ samples only; don't build an application against that copy if it uses another `*
 too. An older pascal-common-faa stops the build with "pascal-db-faa needs pascal-common-faa
 1.29.0 or later".
 
-Current version: **0.19.0**. While it is 0.x the API may still change between minor
+Current version: **0.20.0**. While it is 0.x the API may still change between minor
 versions; every change is listed in the [changelog](CHANGELOG.md).
 
 ## Status

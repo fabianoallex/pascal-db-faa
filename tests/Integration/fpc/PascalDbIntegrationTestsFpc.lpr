@@ -26,7 +26,8 @@ uses
   {$ENDIF}
   Classes, consoletestrunner, testregistry,
   PascalDb.ContractTests,
-  PascalDb.OutboxTests;
+  PascalDb.OutboxTests,
+  PascalDb.FullTextTests;
 
 var
   ConsoleApp: TTestRunner;

@@ -68,7 +68,8 @@ uses
   PascalCommon.Optionals,
   PascalDb.Interfaces,
   PascalDb.SqlLoader,
-  PascalDb.AfterCommit;
+  PascalDb.AfterCommit,
+  PascalDb.FullText;
 
 type
   TMockDBFactory = class; // forward
@@ -288,10 +289,12 @@ type
   end;
 
   // Dialect of the mock connection: no savepoint SQL (the mock scope runs
-  // none) and a LIMIT/OFFSET paging clause, so code calling PdbPagingClause
-  // runs against the mock. The mock's SQL loader returns the key itself, so
-  // the clause never reaches what LastExecution records.
-  TMockSQLDialect = class(TInterfacedObject, ISQLDialect, IPagingDialect)
+  // none), a LIMIT/OFFSET paging clause and PostgreSQL's full-text value
+  // ('w1' & 'w2'), so code calling PdbPagingClause or PdbFullTextQuery runs
+  // against the mock. The mock's SQL loader returns the key itself, so the
+  // clause never reaches what LastExecution records; the full-text value is
+  // a parameter, and does.
+  TMockSQLDialect = class(TInterfacedObject, ISQLDialect, IPagingDialect, IFullTextDialect)
   public
     function GetSavepointSQL(const AName: string): string;
     function GetRollbackToSavepointSQL(const AName: string): string;
@@ -299,6 +302,7 @@ type
     function SupportsRelease: Boolean;
     function GetPingSQL: string;
     function GetPagingClause(ALimit: Integer; AOffset: Int64): string;
+    function GetFullTextQuery(const AWords: TArray<string>; const AOptions: TFullTextOptions): string;
   end;
 
   // Minimal IDBConnection — every operation is a no-op
@@ -1280,6 +1284,11 @@ function TMockSQLDialect.GetPingSQL: string;                                    
 function TMockSQLDialect.GetPagingClause(ALimit: Integer; AOffset: Int64): string;
 begin
   Result := Format('LIMIT %d OFFSET %d', [ALimit, AOffset]);
+end;
+
+function TMockSQLDialect.GetFullTextQuery(const AWords: TArray<string>; const AOptions: TFullTextOptions): string;
+begin
+  Result := PdbFullTextPostgreSQL(AWords, AOptions);
 end;
 
 { TMockDBConnection }

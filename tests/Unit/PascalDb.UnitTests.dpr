@@ -21,6 +21,7 @@ uses
   PascalDb.Interfaces in '..\..\src\PascalDb.Interfaces.pas',
   PascalDb.SqlDialect in '..\..\src\PascalDb.SqlDialect.pas',
   PascalDb.Paging in '..\..\src\PascalDb.Paging.pas',
+  PascalDb.FullText in '..\..\src\PascalDb.FullText.pas',
   PascalDb.Registry in '..\..\src\PascalDb.Registry.pas',
   PascalDb.Version in '..\..\src\PascalDb.Version.pas',
   PascalDb.Mock in '..\..\src\PascalDb.Mock.pas',
@@ -40,6 +41,7 @@ uses
   PascalDb.SqlSourcesTests in 'PascalDb.SqlSourcesTests.pas',
   PascalDb.AdapterBaseTests in 'PascalDb.AdapterBaseTests.pas',
   PascalDb.PagingTests in 'PascalDb.PagingTests.pas',
+  PascalDb.FullTextTests in 'PascalDb.FullTextTests.pas',
   PascalDb.BatchTests in 'PascalDb.BatchTests.pas',
   PascalDb.OutboxUnitTests in 'PascalDb.OutboxUnitTests.pas',
   PascalDb.AfterCommitTests in 'PascalDb.AfterCommitTests.pas';

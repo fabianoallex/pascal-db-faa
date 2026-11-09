@@ -127,7 +127,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network "$NET" -v "$MOUNT:/src:ro" $ZEOS_MO
   [ -n "$PASCALDB_IT_CLIENT" ] || { echo "client library not installed: $CLIENT_GLOB"; tail -20 /t-apt.log; exit 1; }
   echo "client: $PASCALDB_IT_CLIENT"
   mkdir -p /t/u /t/external /t/docs && cp -r /src/src /src/adapters /src/tests /t/
-  cp -r /src/docs/outbox /t/docs/
+  cp -r /src/docs/outbox /src/docs/fulltext /t/docs/
   cp -r /src/external/pascal-common-faa /t/external/
   C=/t/external/pascal-common-faa/src
   cd /t/tests/Integration/$RUNNER_DIR

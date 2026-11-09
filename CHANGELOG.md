@@ -6,6 +6,26 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-09
+
+### Added
+
+- `PascalDb.FullText`: the value of a full-text search parameter from what a user typed.
+  `PdbFullTextQuery(Scope or Dialect, Text[, Options])` cuts the text into words
+  (`PdbFullTextWords`: letters and digits; ASCII and Unicode punctuation, symbols and emoji
+  separate them) and writes each one in a form the database's syntax reads literally:
+  PostgreSQL `to_tsquery` (`'w1' & 'w2'`), MySQL/MariaDB boolean mode (`+w1 +w2`), SQLite FTS5
+  (`"w1" "w2"`). As typed, those syntaxes failed or changed meaning on input such as `café)`,
+  `-café`, `50%` or a space. `TFullTextOptions`: all words (default) or any word
+  (`ftmAnyWord`), a prefix on the last word (`PrefixLastWord`), and the words MySQL/MariaDB
+  leave out in all-words mode (`MySQLMinTokenSize`, `MySQLStopwords`: InnoDB's defaults; a
+  required word the index doesn't hold matched no row). Returns `''` when there is no word to
+  search for. New `IFullTextDialect`, a separate interface like `IPagingDialect`, implemented by
+  the PostgreSQL, MySQL/MariaDB and SQLite dialects and the mock's (PostgreSQL's form);
+  `PdbSupportsFullText` is False on Firebird and SQL Server, where the search goes through `LIKE`
+  (`PdbLikeContains`). Reference SQL in `docs/fulltext/sql` (index, generated column or FTS5
+  table with triggers, search ordered by score), guide `docs/fulltext.md` (13).
+
 ## [0.19.0] - 2026-11-04
 
 ### Added
