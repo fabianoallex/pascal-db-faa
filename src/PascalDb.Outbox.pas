@@ -39,7 +39,9 @@ unit PascalDb.Outbox;
     transaction), and its RunOnce runs them, each retried on its own, dead
     after MaxAttempts, so a failing handler neither blocks nor repeats the
     others. A handler runs outside any transaction (it may send an email)
-    and inside a span that continues the event's trace.
+    and inside a span that continues the event's trace. A handler that
+    knows trying again is useless (the event or the handler is wrong, not
+    the moment) raises EOutboxGiveUp: its delivery is dead at once (0.21.0).
   - The passes don't sleep or loop: the caller's thread calls the relay's
     and the local sink's RunOnce on its schedule. Times are Unix seconds,
     passed in, so tests choose them.
@@ -116,6 +118,13 @@ type
     procedure Deliver(const AQuery: IQuery; const AEvent: TOutboxEvent; ANow: Int64);
   end;
 
+  /// Raised by a handler (or a subclass of it) when the same try would fail
+  /// the same way: the local sink marks the delivery dead at once instead of
+  /// trying again until MaxAttempts. Counted and reported (OnError) like any
+  /// failure. A sink's event is never dead: from a sink it is an ordinary
+  /// failure.
+  EOutboxGiveUp = class(Exception);
+
   /// One reaction to events, run by TOutboxLocalSink.
   IOutboxHandler = interface
     ['{4E2A9B61-0C7D-4F38-9A15-D6B83E07C2F4}']
@@ -123,7 +132,8 @@ type
     /// keep it once deliveries exist.
     function Name: string;
     function Accepts(const AKind: string): Boolean;
-    /// Raise to fail this try. Runs outside any transaction.
+    /// Raise to fail this try; EOutboxGiveUp to fail it for good. Runs
+    /// outside any transaction.
     procedure Handle(const AEvent: TOutboxEvent);
   end;
 
@@ -668,12 +678,14 @@ var
   LSpan: IPcSpan;
   LError, LStatus: string;
   LAttempts, I: Integer;
+  LGiveUp: Boolean;
 begin
   Result := 0;
   LEvents := Claim(ANow, LNames);
   for I := 0 to High(LEvents) do
   begin
     LError := '';
+    LGiveUp := False;
     LHandler := FindHandler(LNames[I]);
     LSpan := TPcTracing.StartSpanFromParent(LEvents[I].TraceParent, '',
       LNames[I] + ' ' + LEvents[I].Kind, skConsumer);
@@ -685,6 +697,11 @@ begin
         try
           LHandler.Handle(LEvents[I]);
         except
+          on E: EOutboxGiveUp do
+          begin
+            LError := E.ClassName + ': ' + E.Message;
+            LGiveUp := True;
+          end;
           on E: Exception do
             LError := E.ClassName + ': ' + E.Message;
         end;
@@ -697,7 +714,7 @@ begin
       begin
         LSpan.SetStatus(ssError, LError);
         LAttempts := LEvents[I].Attempts + 1;
-        if (LHandler = nil) or (LAttempts >= FOptions.MaxAttempts) then
+        if (LHandler = nil) or LGiveUp or (LAttempts >= FOptions.MaxAttempts) then
           LStatus := OUTBOX_DELIVERY_DEAD
         else
           LStatus := OUTBOX_DELIVERY_PENDING;

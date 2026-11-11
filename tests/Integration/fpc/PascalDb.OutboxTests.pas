@@ -68,6 +68,7 @@ type
     procedure Enqueue_KeepsTheTrace;
     procedure LocalSink_OneDeliveryPerHandler;
     procedure LocalSink_FailingHandler_RetriedApart_ThenDead;
+    procedure LocalSink_GiveUp_DeadAtOnce;
     procedure LocalSink_NoHandler_Delivered;
     procedure Purge_KeepsPendingDeliveries;
     procedure Metrics_Relay_Handlers_Pending;
@@ -126,12 +127,14 @@ type
     procedure Deliver(const AQuery: IQuery; const AEvent: TOutboxEvent; ANow: Int64);
   end;
 
-  /// Accepts one kind; fails FailsLeft times (-1: always).
+  /// Accepts one kind; fails FailsLeft times (-1: always), with
+  /// EOutboxGiveUp when GiveUp.
   TTestHandler = class(TInterfacedObject, IOutboxHandler)
   private
     FName, FKind: string;
   public
     FailsLeft: Integer;
+    GiveUp: Boolean;
     Tries: Integer;
     Handled: Integer;
     constructor Create(const AName, AKind: string; AFails: Integer = 0);
@@ -179,6 +182,8 @@ begin
   begin
     if FailsLeft > 0 then
       Dec(FailsLeft);
+    if GiveUp then
+      raise EOutboxGiveUp.Create(FName + ' gave up');
     raise Exception.Create(FName + ' failed');
   end;
   Inc(Handled);
@@ -570,6 +575,38 @@ begin
   TAssert.AssertEquals('never again', 0, LSink.RunOnce(10000));
   TAssert.AssertEquals(2, LBad.Tries);
   TAssert.AssertEquals('the good one ran once', 1, LGood.Tries);
+end;
+
+procedure TOutboxTests.LocalSink_GiveUp_DeadAtOnce;
+var
+  LSink: IOutboxLocalSink;
+  LBad: TTestHandler;
+  LIntf: IOutboxHandler;
+  LRelay: TOutboxRelay;
+  LDeadBefore: Double;
+begin
+  LSink := TOutboxLocalSink.Create(FFactory, 's1', SmallOptions);
+  LSink.SetOnError(CountError);
+  LBad := TTestHandler.Create('bad', 'a', -1);
+  LBad.GiveUp := True;
+  LIntf := LBad;
+  LSink.AddHandler(LIntf);
+  Enqueue('a', 100);
+  LRelay := TOutboxRelay.Create(FFactory, LSink, 'r1', SmallOptions);
+  try
+    LRelay.RunOnce(200);
+  finally
+    LRelay.Free;
+  end;
+  LDeadBefore := MetricValue('outbox.handler.runs', ['bad', 'a', 'dead']);
+  TAssert.AssertEquals(0, LSink.RunOnce(200));
+  TAssert.AssertEquals('reported', 1, FErrors);
+  TAssert.AssertEquals('dead at the first try, MaxAttempts not used', 1,
+    Count('OUTBOX_DELIVERIES WHERE HANDLER = ''bad'' AND STATUS = ''dead'' AND ATTEMPTS = 1 ' +
+    'AND LAST_ERROR LIKE ''%EOutboxGiveUp: bad gave up%'''));
+  TAssert.AssertEquals('counted as dead', LDeadBefore + 1, MetricValue('outbox.handler.runs', ['bad', 'a', 'dead']), 0.001);
+  TAssert.AssertEquals('never again', 0, LSink.RunOnce(10000));
+  TAssert.AssertEquals(1, LBad.Tries);
 end;
 
 procedure TOutboxTests.LocalSink_NoHandler_Delivered;

@@ -6,6 +6,19 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-11
+
+### Added
+
+- `EOutboxGiveUp` (`PascalDb.Outbox`): a handler raises it (or a subclass) when trying again is
+  useless, because the event or the handler is wrong rather than the moment. The local sink
+  marks that delivery `dead` at the first try instead of retrying it until `MaxAttempts`;
+  the try is counted (`outbox.handler.runs`, result `dead`) and reported to `OnError` like any
+  other failure. From a sink it is an ordinary failure (a sink's event is never dead). Asked by
+  pascal-search-faa's outbox bridge, which gives up on a bug in the caller (its
+  `ESearchArgumentError` and `ESearchRequestError`). New integration test
+  `LocalSink_GiveUp_DeadAtOnce`.
+
 ## [0.20.1] - 2026-11-09
 
 ### Fixed
